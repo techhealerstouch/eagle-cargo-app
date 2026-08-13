@@ -91,7 +91,7 @@ class SettingsService
         return [
             'appName' => $settings->get('app_name', 'Love Balikbayan Box'),
             'appSubtitle' => $settings->get('app_subtitle', 'SEA CARGO'),
-            'appLogo' => $this->assetUrl($settings->get('app_logo') ?: '/images/love-logo.png'),
+            'appLogo' => $this->assetUrl($settings->get('app_logo') ?: '/images/eagle_logo.png'),
             'supportEmail' => $settings->get('app_support_email', 'support@love-balikbayan.com.au'),
             'contactPhone' => $settings->get('app_contact_phone', '+61 406 828 471'),
             'currency' => $settings->get('app_default_currency', 'AUD'),

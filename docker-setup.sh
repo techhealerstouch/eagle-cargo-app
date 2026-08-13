@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Love Balikbayan App - Docker Setup Script
+# Eagle Cargo App - Docker Setup Script
 # Run this script once to build and set up the entire environment
 
 set -e
 
 echo "=========================================="
-echo "  Love Balikbayan App - Docker Setup"
+echo "  Eagle Cargo App - Docker Setup"
 echo "=========================================="
 
 echo ""
@@ -31,14 +31,14 @@ docker compose exec app php artisan storage:link
 docker compose exec app php artisan config:cache
 
 echo ""
-echo "[5/5] Building frontend assets..."
-docker compose run --rm vite npm install
+echo "[5/5] Installing frontend dependencies..."
+npm install
 
 echo ""
 echo "=========================================="
 echo "  Setup complete!"
 echo "  App:    http://localhost:8080"
-echo "  Vite:   http://localhost:5174"
+echo "  Vite:   Run 'npm run dev' locally"
 echo "  Reverb: ws://localhost:8081"
 echo "  DB:     localhost:3307 (root/root)"
 echo "=========================================="
