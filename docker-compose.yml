@@ -5,7 +5,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: php-builder
-    container_name: lbb-app
+    container_name: ec-app
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -17,7 +17,7 @@ services:
       - QUEUE_CONNECTION=database
       - BROADCAST_DRIVER=reverb
     networks:
-      - lbb-network
+      - ec-network
     depends_on:
       db:
         condition: service_healthy
@@ -31,7 +31,7 @@ services:
   # Nginx Web Server
   nginx:
     image: nginx:alpine
-    container_name: lbb-nginx
+    container_name: ec-nginx
     restart: unless-stopped
     ports:
       - "8080:80"
@@ -40,7 +40,7 @@ services:
       - ./docker/nginx/conf.d/:/etc/nginx/conf.d/:ro
       - nginx_cache:/var/cache/nginx
     networks:
-      - lbb-network
+      - ec-network
     depends_on:
       app:
         condition: service_healthy
@@ -54,19 +54,19 @@ services:
   # MySQL Database
   db:
     image: mysql:8.0
-    container_name: lbb-db
+    container_name: ec-db
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${DB_DATABASE:-lbb_db}
+      MYSQL_DATABASE: ${DB_DATABASE:-eagle_cargo_db}
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
       MYSQL_USER: ${DB_USERNAME:-laravel}
       MYSQL_PASSWORD: ${DB_PASSWORD:-laravel}
     volumes:
-      - lbb-db-data:/var/lib/mysql
+      - ec-db-data:/var/lib/mysql
     ports:
       - "${DB_PORT:-3307}:3306"
     networks:
-      - lbb-network
+      - ec-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -80,7 +80,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: php-builder
-    container_name: lbb-queue
+    container_name: ec-queue
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -92,7 +92,7 @@ services:
       - QUEUE_CONNECTION=database
     command: php artisan queue:work --sleep=3 --tries=1
     networks:
-      - lbb-network
+      - ec-network
     depends_on:
       db:
         condition: service_healthy
@@ -105,7 +105,7 @@ services:
       context: .
       dockerfile: Dockerfile
       target: php-builder
-    container_name: lbb-reverb
+    container_name: ec-reverb
     restart: unless-stopped
     working_dir: /var/www
     volumes:
@@ -119,40 +119,17 @@ services:
     ports:
       - "8081:8081"
     networks:
-      - lbb-network
+      - ec-network
     depends_on:
       app:
         condition: service_healthy
 
-  # Vite Dev Server — NOW RUNS LOCALLY on the host for instant HMR.
-  # Run `npm run dev` directly on your machine instead.
-  # vite:
-  #   image: node:20-alpine
-  #   container_name: lbb-vite
-  #   restart: unless-stopped
-  #   working_dir: /var/www
-  #   volumes:
-  #     - .:/var/www
-  #     - node_modules:/var/www/node_modules
-  #   environment:
-  #     - VITE_API_URL=http://localhost:8080
-  #   command: sh -c "apk add --no-cache php php-phar php-mbstring php-openssl php-curl php-pdo php-pdo_mysql php-xml php-fileinfo php-tokenizer php-dom php-xmlwriter php-session php-iconv php-simplexml && npm run dev -- --host"
-  #   ports:
-  #     - "5174:5173"
-  #   networks:
-  #     - lbb-network
-  #   depends_on:
-  #     - nginx
-
 networks:
-  lbb-network:
+  ec-network:
     driver: bridge
 
 volumes:
-  lbb-db-data:
+  ec-db-data:
     driver: local
   nginx_cache:
     driver: local
-  # node_modules volume removed — Vite runs locally now
-  # node_modules:
-  #   driver: local

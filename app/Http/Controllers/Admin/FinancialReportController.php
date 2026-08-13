@@ -379,7 +379,7 @@ class FinancialReportController extends Controller
 
     private function getPdfLogoDataUri(): ?string
     {
-        $logoPath = public_path('LOVE Logo.png');
+        $logoPath = public_path('eagle_logo.png');
 
         if (! is_file($logoPath) || ! function_exists('imagecreatefrompng') || ! function_exists('imagejpeg')) {
             return null;

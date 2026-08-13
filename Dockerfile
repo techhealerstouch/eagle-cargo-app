@@ -11,6 +11,7 @@ RUN apk add --no-cache \
     oniguruma-dev \
     libxml2-dev \
     libzip-dev \
+    linux-headers \
     && docker-php-ext-install \
         pdo_mysql \
         mbstring \
@@ -19,7 +20,7 @@ RUN apk add --no-cache \
         bcmath \
         gd \
         zip \
-    && apk del --no-cache libpng-dev oniguruma-dev libxml2-dev libzip-dev
+        sockets
 
 # Install Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
@@ -27,14 +28,14 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Copy dependency files
 COPY composer.json composer.lock ./
 
-# Install PHP dependencies (production only, no dev dependencies)
-RUN composer install --no-dev --no-interaction --optimize-autoloader --no-progress
+# Install PHP dependencies (no scripts or autoloader yet)
+RUN composer install --no-dev --no-interaction --no-scripts --no-autoloader --no-progress
 
 # Copy application code
 COPY . .
 
-# Generate optimized autoloader
-RUN composer dump-autoload --optimize
+# Generate optimized autoloader and run scripts
+RUN composer install --no-dev --no-interaction --optimize-autoloader --no-progress
 
 
 # Stage 2: Node Build (for assets)
