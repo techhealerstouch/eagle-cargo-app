@@ -1,0 +1,63 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Dependencies (rebuilt in image)
+node_modules
+vendor
+
+# Package managers
+.npm
+.yarn
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE and editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build/dist artifacts (rebuilt in image)
+dist
+build
+public/build
+
+# Docker
+docker-compose.override.yml
+Dockerfile.dev
+docker-compose.dev.yml
+
+# Tests
+tests
+phpunit.xml
+vitest.config.ts
+
+# Logs
+storage/logs
+*.log
+
+# Documentation
+docs
+README.md
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Temporary files
+.cache
+scratch
+migrate-uploads.php
+
+# Development
+deploy.sh
+docker-setup.sh
+.kombai
