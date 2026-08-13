@@ -124,11 +124,17 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('invoice_logo')) {
-            $path = $request->file('invoice_logo')->store('logos', 'public');
+            $uploadDir = public_path('uploads/logos');
+            if (! is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            $file = $request->file('invoice_logo');
+            $filename = 'invoice_logo_'.time().'.'.$file->getClientOriginalExtension();
+            $file->move($uploadDir, $filename);
             Setting::updateOrCreate(
                 ['key' => 'invoice_logo'],
                 [
-                    'value' => '/uploads/'.$path,
+                    'value' => '/uploads/logos/'.$filename,
                     'group' => 'invoice',
                     'display_name' => 'Invoice Logo',
                     'type' => 'string',
@@ -137,11 +143,17 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('app_logo')) {
-            $path = $request->file('app_logo')->store('logos', 'public');
+            $uploadDir = public_path('uploads/logos');
+            if (! is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+            $file = $request->file('app_logo');
+            $filename = 'app_logo_'.time().'.'.$file->getClientOriginalExtension();
+            $file->move($uploadDir, $filename);
             Setting::updateOrCreate(
                 ['key' => 'app_logo'],
                 [
-                    'value' => '/uploads/'.$path,
+                    'value' => '/uploads/logos/'.$filename,
                     'group' => 'general',
                     'display_name' => 'Business Logo',
                     'type' => 'string',
