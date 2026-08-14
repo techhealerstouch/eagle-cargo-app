@@ -124,11 +124,14 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('invoice_logo')) {
-            $path = $request->file('invoice_logo')->store('logos', 'public');
+            $file = $request->file('invoice_logo');
+            $filename = 'invoice_logo_'.time().'.'.$file->getClientOriginalExtension();
+            $file->storeAs('logos', $filename, 'public');
+            
             Setting::updateOrCreate(
                 ['key' => 'invoice_logo'],
                 [
-                    'value' => '/uploads/'.$path,
+                    'value' => '/uploads/logos/'.$filename,
                     'group' => 'invoice',
                     'display_name' => 'Invoice Logo',
                     'type' => 'string',
@@ -137,11 +140,14 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('app_logo')) {
-            $path = $request->file('app_logo')->store('logos', 'public');
+            $file = $request->file('app_logo');
+            $filename = 'app_logo_'.time().'.'.$file->getClientOriginalExtension();
+            $file->storeAs('logos', $filename, 'public');
+            
             Setting::updateOrCreate(
                 ['key' => 'app_logo'],
                 [
-                    'value' => '/uploads/'.$path,
+                    'value' => '/uploads/logos/'.$filename,
                     'group' => 'general',
                     'display_name' => 'Business Logo',
                     'type' => 'string',
