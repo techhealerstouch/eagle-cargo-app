@@ -1,6 +1,6 @@
-# Love Balikbayan App
+# Eagle Cargo App
 
-Love Balikbayan is a Laravel and Inertia logistics platform for Balikbayan box bookings, payments, pickup operations, warehouse processing, batch/container movement, delivery runsheets, and shipment tracking.
+Eagle Cargo is a Laravel and Inertia logistics platform for cargo bookings, payments, pickup operations, warehouse processing, batch/container movement, delivery runsheets, and shipment tracking for Eagle Cargo Company.
 
 This README describes the current implementation and intentionally avoids real credentials, customer data, deployment URLs, API keys, webhook secrets, and seeded login details.
 
