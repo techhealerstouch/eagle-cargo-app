@@ -66,6 +66,14 @@ export default function InvoiceSettings({
             onSuccess: () => {
                 toast.success('Billing & invoice settings saved successfully');
             },
+            onError: (errors) => {
+                const errorMessages = Object.values(errors);
+                if (errorMessages.length > 0) {
+                    errorMessages.forEach((msg) => toast.error(String(msg)));
+                } else {
+                    toast.error('Failed to save settings. Please try again.');
+                }
+            },
         });
     };
 
