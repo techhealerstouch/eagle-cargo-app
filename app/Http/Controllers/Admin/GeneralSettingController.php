@@ -97,8 +97,8 @@ class GeneralSettingController extends Controller
             'settings' => 'nullable|array',
             'settings.*.key' => 'required_with:settings|string',
             'settings.*.value' => 'nullable',
-            'invoice_logo' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,webp|max:5120',
-            'app_logo' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,webp|max:5120',
+            'invoice_logo' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,webp|max:10240',
+            'app_logo' => 'nullable|file|mimes:jpeg,png,jpg,gif,svg,webp|max:10240',
         ]);
 
         if (! empty($validated['settings'])) {
