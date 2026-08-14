@@ -124,13 +124,10 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('invoice_logo')) {
-            $uploadDir = public_path('uploads/logos');
-            if (! is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
             $file = $request->file('invoice_logo');
             $filename = 'invoice_logo_'.time().'.'.$file->getClientOriginalExtension();
-            $file->move($uploadDir, $filename);
+            $file->storeAs('logos', $filename, 'public');
+            
             Setting::updateOrCreate(
                 ['key' => 'invoice_logo'],
                 [
@@ -143,13 +140,10 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('app_logo')) {
-            $uploadDir = public_path('uploads/logos');
-            if (! is_dir($uploadDir)) {
-                mkdir($uploadDir, 0755, true);
-            }
             $file = $request->file('app_logo');
             $filename = 'app_logo_'.time().'.'.$file->getClientOriginalExtension();
-            $file->move($uploadDir, $filename);
+            $file->storeAs('logos', $filename, 'public');
+            
             Setting::updateOrCreate(
                 ['key' => 'app_logo'],
                 [

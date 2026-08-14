@@ -24,11 +24,13 @@ echo "[3/5] Starting all services..."
 docker compose up -d
 
 echo ""
-echo "[4/5] Running Laravel setup (key:generate, migrate, storage link)..."
+echo "[4/5] Running Laravel setup (key:generate, migrate, storage link, permissions)..."
 docker compose exec app php artisan key:generate --force
 docker compose exec app php artisan migrate --force
 docker compose exec app php artisan storage:link
 docker compose exec app php artisan config:cache
+docker compose exec app mkdir -p public/uploads/logos
+docker compose exec app chmod -R 777 public/uploads
 
 echo ""
 echo "[5/5] Installing frontend dependencies..."

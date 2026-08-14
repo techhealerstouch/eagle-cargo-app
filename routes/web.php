@@ -49,17 +49,19 @@ Route::get('/uploads/{path}', function (string $path) {
     }
 
     $disk = Storage::disk('public');
+    $fullPath = null;
 
-    if (! $disk->exists($relativePath)) {
-        \Illuminate\Support\Facades\Log::warning('Storage file not found', [
-            'path' => $relativePath,
-            'full_path' => $disk->path($relativePath),
-            'symlink_exists' => is_link(public_path('storage')),
-        ]);
-        abort(404);
+    if ($disk->exists($relativePath)) {
+        $fullPath = $disk->path($relativePath);
+    } elseif (file_exists(storage_path('app/public/' . $relativePath))) {
+        $fullPath = storage_path('app/public/' . $relativePath);
+    } elseif (file_exists(public_path('uploads/' . $relativePath))) {
+        $fullPath = public_path('uploads/' . $relativePath);
     }
 
-    $fullPath = $disk->path($relativePath);
+    if (! $fullPath || ! is_file($fullPath)) {
+        abort(404);
+    }
 
     // Ensure the file is actually readable by the web server
     if (! is_readable($fullPath)) {
@@ -67,7 +69,6 @@ Route::get('/uploads/{path}', function (string $path) {
             'path' => $relativePath,
             'full_path' => $fullPath,
             'permissions' => substr(sprintf('%o', fileperms($fullPath)), -4),
-            'owner' => function_exists('posix_getpwuid') ? posix_getpwuid(fileowner($fullPath))['name'] ?? fileowner($fullPath) : fileowner($fullPath),
         ]);
         abort(403, 'File is not readable. Check server file permissions.');
     }
@@ -85,14 +86,68 @@ Route::get('/uploads/{path}', function (string $path) {
 
     $extension = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
 
-    // Safely try to detect the MIME type via fileinfo
     try {
         $mimeType = \Illuminate\Support\Facades\File::mimeType($fullPath);
     } catch (\Exception $e) {
         $mimeType = null;
     }
 
-    // Fallback to extension mapping if fileinfo returned a generic type or failed
+    if (! $mimeType || $mimeType === 'application/octet-stream') {
+        $mimeType = $allowedMimes[$extension] ?? null;
+    }
+
+    if (! $mimeType || ! in_array($mimeType, $allowedMimes, true)) {
+        abort(403);
+    }
+
+    return response()->file($fullPath, [
+        'Cache-Control' => 'public, max-age=31536000, immutable',
+        'Content-Type' => $mimeType,
+    ]);
+})->where('path', '.*')->name('public.uploads');
+
+Route::get('/storage/{path}', function (string $path) {
+    $relativePath = ltrim($path, '/');
+
+    if (str_contains($relativePath, '..')) {
+        abort(404);
+    }
+
+    $disk = Storage::disk('public');
+    $fullPath = null;
+
+    if ($disk->exists($relativePath)) {
+        $fullPath = $disk->path($relativePath);
+    } elseif (file_exists(storage_path('app/public/' . $relativePath))) {
+        $fullPath = storage_path('app/public/' . $relativePath);
+    }
+
+    if (! $fullPath || ! is_file($fullPath)) {
+        abort(404);
+    }
+
+    if (! is_readable($fullPath)) {
+        abort(403, 'File is not readable.');
+    }
+
+    $allowedMimes = [
+        'jpeg' => 'image/jpeg',
+        'jpg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'svg' => 'image/svg+xml',
+        'pdf' => 'application/pdf',
+    ];
+
+    $extension = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
+
+    try {
+        $mimeType = \Illuminate\Support\Facades\File::mimeType($fullPath);
+    } catch (\Exception $e) {
+        $mimeType = null;
+    }
+
     if (! $mimeType || $mimeType === 'application/octet-stream') {
         $mimeType = $allowedMimes[$extension] ?? null;
     }
