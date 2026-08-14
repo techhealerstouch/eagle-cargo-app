@@ -79,8 +79,12 @@ php artisan event:cache
 php artisan route:cache
 php artisan view:cache
 
-# Ensure storage link exists
-php artisan storage:link --force
+# Ensure storage directories and link exist
+mkdir -p storage/app/public/logos
+mkdir -p public/uploads/logos
+chmod -R 775 storage/app/public 2>/dev/null || true
+chmod -R 775 public/uploads 2>/dev/null || true
+php artisan storage:link --force 2>/dev/null || true
 
 # Build front-end static assets
 npm ci

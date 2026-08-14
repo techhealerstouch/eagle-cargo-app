@@ -10,6 +10,8 @@ use App\Models\Setting;
 use App\Services\SettingsService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 
 class GeneralSettingController extends Controller
@@ -124,35 +126,45 @@ class GeneralSettingController extends Controller
         }
 
         if ($request->hasFile('invoice_logo')) {
-            $file = $request->file('invoice_logo');
-            $filename = 'invoice_logo_'.time().'.'.$file->getClientOriginalExtension();
-            $file->storeAs('logos', $filename, 'public');
-            
-            Setting::updateOrCreate(
-                ['key' => 'invoice_logo'],
-                [
-                    'value' => '/uploads/logos/'.$filename,
-                    'group' => 'invoice',
-                    'display_name' => 'Invoice Logo',
-                    'type' => 'string',
-                ]
-            );
+            $saved = $this->storeUploadedLogo($request->file('invoice_logo'), 'invoice_logo');
+
+            if ($saved) {
+                Setting::updateOrCreate(
+                    ['key' => 'invoice_logo'],
+                    [
+                        'value' => '/uploads/logos/'.$saved,
+                        'group' => 'invoice',
+                        'display_name' => 'Invoice Logo',
+                        'type' => 'string',
+                    ]
+                );
+            } else {
+                $settingsService->forgetGroup('invoice');
+                $settingsService->forgetGroup('general');
+
+                return back()->withErrors(['invoice_logo' => 'Failed to upload the invoice logo. Please try again.']);
+            }
         }
 
         if ($request->hasFile('app_logo')) {
-            $file = $request->file('app_logo');
-            $filename = 'app_logo_'.time().'.'.$file->getClientOriginalExtension();
-            $file->storeAs('logos', $filename, 'public');
-            
-            Setting::updateOrCreate(
-                ['key' => 'app_logo'],
-                [
-                    'value' => '/uploads/logos/'.$filename,
-                    'group' => 'general',
-                    'display_name' => 'Business Logo',
-                    'type' => 'string',
-                ]
-            );
+            $saved = $this->storeUploadedLogo($request->file('app_logo'), 'app_logo');
+
+            if ($saved) {
+                Setting::updateOrCreate(
+                    ['key' => 'app_logo'],
+                    [
+                        'value' => '/uploads/logos/'.$saved,
+                        'group' => 'general',
+                        'display_name' => 'Business Logo',
+                        'type' => 'string',
+                    ]
+                );
+            } else {
+                $settingsService->forgetGroup('invoice');
+                $settingsService->forgetGroup('general');
+
+                return back()->withErrors(['app_logo' => 'Failed to upload the brand logo. Please try again.']);
+            }
         }
 
         $settingsService->forgetGroup('invoice');
@@ -194,5 +206,99 @@ class GeneralSettingController extends Controller
             ->setPaper('a4', 'portrait');
 
         return $pdf->stream('invoice-preview.pdf');
+    }
+
+    /**
+     * Store an uploaded logo file with multi-strategy fallback for shared hosting.
+     *
+     * Tries three strategies in order:
+     * 1. Laravel Storage facade (storeAs to 'public' disk)
+     * 2. Direct file write to storage/app/public/logos/
+     * 3. Direct move to public/uploads/logos/
+     *
+     * Returns the saved filename on success, or null on failure.
+     */
+    private function storeUploadedLogo(\Illuminate\Http\UploadedFile $file, string $prefix): ?string
+    {
+        $filename = $prefix.'_'.time().'.'.$file->getClientOriginalExtension();
+
+        // Strategy 1: Laravel Storage facade
+        try {
+            $result = $file->storeAs('logos', $filename, 'public');
+
+            if ($result !== false) {
+                Log::info('Logo uploaded via Storage facade', ['file' => $filename, 'path' => $result]);
+
+                return $filename;
+            }
+
+            Log::warning('Logo upload via Storage facade returned false', ['file' => $filename]);
+        } catch (\Throwable $e) {
+            Log::warning('Logo upload via Storage facade failed', [
+                'file' => $filename,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Strategy 2: Direct write to storage/app/public/logos/
+        try {
+            $targetDir = storage_path('app/public/logos');
+
+            if (! is_dir($targetDir)) {
+                @mkdir($targetDir, 0755, true);
+            }
+
+            if (is_dir($targetDir) && is_writable($targetDir)) {
+                $contents = file_get_contents($file->getRealPath());
+
+                if ($contents !== false && file_put_contents($targetDir.'/'.$filename, $contents) !== false) {
+                    Log::info('Logo uploaded via direct storage write', ['file' => $filename]);
+
+                    return $filename;
+                }
+            }
+
+            Log::warning('Logo upload via direct storage write failed', [
+                'file' => $filename,
+                'dir_exists' => is_dir($targetDir),
+                'dir_writable' => is_dir($targetDir) && is_writable($targetDir),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Logo upload via direct storage write threw exception', [
+                'file' => $filename,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // Strategy 3: Direct move to public/uploads/logos/
+        try {
+            $publicDir = public_path('uploads/logos');
+
+            if (! is_dir($publicDir)) {
+                @mkdir($publicDir, 0755, true);
+            }
+
+            if (is_dir($publicDir) && is_writable($publicDir)) {
+                $file->move($publicDir, $filename);
+                Log::info('Logo uploaded via public directory move', ['file' => $filename]);
+
+                return $filename;
+            }
+
+            Log::warning('Logo upload via public directory move failed', [
+                'file' => $filename,
+                'dir_exists' => is_dir($publicDir),
+                'dir_writable' => is_dir($publicDir) && is_writable($publicDir),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('All logo upload strategies failed', [
+                'file' => $filename,
+                'error' => $e->getMessage(),
+                'storage_path' => storage_path('app/public/logos'),
+                'public_path' => public_path('uploads/logos'),
+            ]);
+        }
+
+        return null;
     }
 }
