@@ -1,8 +1,8 @@
-# 📦 Love Balikbayan — Feature Overview
+# 📦 Eagle Cargo — Feature Overview
 
-> **The complete, end-to-end logistics platform purpose-built for Balikbayan box cargo shipping.**
+> **The complete, end-to-end logistics platform purpose-built for Eagle Cargo Company cargo shipping.**
 
-Love Balikbayan transforms the entire Balikbayan box lifecycle — from the moment a sender books a shipment to the instant it arrives at a loved one's doorstep in the Philippines. Every step is tracked, every role is empowered, and every transaction is transparent.
+Eagle Cargo transforms the entire cargo lifecycle — from the moment a sender books a shipment to the instant it arrives at the destination doorstep. Every step is tracked, every role is empowered, and every transaction is transparent.
 
 ---
 
@@ -33,7 +33,7 @@ Senders enjoy a rich, guided booking wizard that walks them through every step �
 
 ### Digital Customs Declaration
 
-Say goodbye to paper forms. Love Balikbayan offers a **fully digital declaration system** where senders itemize box contents, declare values, and submit declarations — all within the app.
+Say goodbye to paper forms. Eagle Cargo offers a **fully digital declaration system** where senders itemize box contents, declare values, and submit declarations — all within the app.
 
 - **In-app declaration form** — Complete and submit declarations digitally
 - **Physical form upload** — Option to upload scanned paper declaration forms
@@ -48,7 +48,7 @@ Say goodbye to paper forms. Love Balikbayan offers a **fully digital declaration
 
 ### Flexible Payment Options
 
-Love Balikbayan meets senders where they are with multiple payment methods designed for convenience and trust.
+Eagle Cargo meets senders where they are with multiple payment methods designed for convenience and trust.
 
 - **Stripe card payments** — Secure, PCI-compliant online card processing with automatic payment method detection
 - **Payment on pickup** — Pickers can collect and record cash or check payments directly at the sender's door
@@ -126,9 +126,9 @@ A comprehensive dashboard gives warehouse staff full visibility and control over
 
 ## 📦 Batch & Container Management
 
-### Intelligent Container Operations
+### Container Lifecycle Management
 
-Love Balikbayan's batch management system handles the complexity of consolidating hundreds of boxes into shipping containers with smart automation.
+Eagle Cargo's batch management system handles the complexity of consolidating hundreds of boxes into shipping containers with smart automation.
 
 - **Auto-generated batch numbers** — Sequential format (e.g., `LBB-2606-001`) for easy identification
 - **Comprehensive shipping metadata** — Container number, seal number, vessel name, shipping line, voyage number, origin/destination ports
@@ -227,9 +227,9 @@ Powered by **Laravel Reverb WebSockets**, tracking updates are pushed to users i
 
 ## 🔔 Multi-Channel Notification System
 
-### 4 Channels, 16 Events, Total Control
+### Multi-Channel Architecture
 
-Love Balikbayan keeps every stakeholder informed through a sophisticated multi-channel notification engine.
+Eagle Cargo keeps every stakeholder informed through a sophisticated multi-channel notification engine.
 
 #### Notification Channels
 | Channel | Technology | Description |
@@ -302,9 +302,9 @@ Admins and Super Admins have complete control over every aspect of the platform.
 
 ## 🛡️ Data Integrity & System Health
 
-### Automated Audit System
+### Automated Daily Integrity Scans
 
-Love Balikbayan runs **11 automated integrity checks** daily to catch operational issues before they become problems.
+Eagle Cargo runs **11 automated integrity checks** daily to catch operational issues before they become problems.
 
 | Check | Severity | Description |
 |---|---|---|
@@ -376,12 +376,12 @@ Every critical transaction is captured with **immutable point-in-time snapshots*
 
 ## 🌍 Public-Facing Pages
 
-Love Balikbayan includes a complete public website with:
+Eagle Cargo includes a complete public website with:
 
 - **Home / Welcome page** — Brand introduction and call to action
 - **About page** — Company story and mission
 - **Services page** — Service offerings and box types
-- **Community Story page** — "Our Story" — the human side of Balikbayan shipping
+- **Community Story page** — "Our Story" — the company mission and story
 - **FAQ page** — Frequently asked questions
 - **Contact page** — Customer enquiry form with automated admin notification
 - **Shipping Updates** — Public announcements on shipping schedules and milestones
@@ -393,7 +393,7 @@ Love Balikbayan includes a complete public website with:
 
 ### RESTful API Layer
 
-Love Balikbayan exposes a clean, authenticated API layer for mobile apps and third-party integrations.
+Eagle Cargo exposes a clean, authenticated API layer for mobile apps and third-party integrations.
 
 **Public Endpoints** (rate-limited, no auth):
 - Shipment tracking by tracking number
@@ -442,5 +442,5 @@ Critical operations run asynchronously for a fast, responsive user experience.
 ---
 
 <p align="center">
-  <strong>Love Balikbayan</strong> — Connecting families, one box at a time. 💜
+  <strong>Eagle Cargo Company</strong> — Fast, reliable, and secure cargo logistics. 🦅
 </p>

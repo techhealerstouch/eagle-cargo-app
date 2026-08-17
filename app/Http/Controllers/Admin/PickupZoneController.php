@@ -30,9 +30,23 @@ class PickupZoneController extends Controller
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'is_active' => 'boolean',
+            'suburb_ids' => 'nullable|array',
+            'suburb_ids.*' => 'exists:suburbs,id',
         ]);
 
-        PickupZone::create($validated);
+        $validated['code'] = \Illuminate\Support\Str::slug($validated['name'], '_');
+
+        $pickupZone = PickupZone::create([
+            'name' => $validated['name'],
+            'code' => $validated['code'],
+            'description' => $validated['description'] ?? null,
+            'is_active' => $validated['is_active'] ?? true,
+        ]);
+
+        if (!empty($validated['suburb_ids'])) {
+            Suburb::whereIn('id', $validated['suburb_ids'])
+                  ->update(['pickup_zone_id' => $pickupZone->id]);
+        }
 
         return back()->with('success', 'Pickup Zone created successfully.');
     }
@@ -64,7 +78,7 @@ class PickupZoneController extends Controller
             Suburb::where('pickup_zone_id', $pickupZone->id)
                   ->whereNotIn('id', $validated['suburb_ids'] ?? [])
                   ->update(['pickup_zone_id' => null]);
-            
+
             // Assign the new suburbs
             if (!empty($validated['suburb_ids'])) {
                 Suburb::whereIn('id', $validated['suburb_ids'])

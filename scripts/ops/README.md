@@ -1,4 +1,4 @@
-# BBB-Tracker Ops Setup
+# Eagle Cargo Ops Setup
 
 This folder contains production templates for queue workers and scheduler wiring.
 
