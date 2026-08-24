@@ -11,6 +11,7 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Services\SettingsService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
@@ -22,7 +23,7 @@ class InvoiceController extends Controller
     {
         $query = Invoice::with('booking.sender');
 
-        if ($request->boolean('trashed') && auth()->user()?->role === Role::SuperAdmin) {
+        if ($request->boolean('trashed') && Auth::user()?->role === Role::SuperAdmin) {
             $query = Invoice::onlyTrashed()->with('booking.sender');
         }
 
@@ -141,9 +142,9 @@ class InvoiceController extends Controller
                     'payment_method' => $method,
                     'reference_number' => $reference,
                     'paid_at' => now(),
-                    'collected_by' => auth()->id(),
+                    'collected_by' => Auth::id(),
                     'confirmed_at' => now(),
-                    'confirmed_by' => auth()->id(),
+                    'confirmed_by' => Auth::id(),
                     'is_cash_payment' => in_array($method, ['cash', 'cash_on_pickup']),
                     'confirmation_note' => 'Manually marked as Paid via Invoice Edit',
                 ]);
@@ -182,9 +183,9 @@ class InvoiceController extends Controller
                     'payment_method' => 'bank_transfer',
                     'reference_number' => 'Bulk Admin Update',
                     'paid_at' => now(),
-                    'collected_by' => auth()->id(),
+                    'collected_by' => Auth::id(),
                     'confirmed_at' => now(),
-                    'confirmed_by' => auth()->id(),
+                    'confirmed_by' => Auth::id(),
                     'is_cash_payment' => false,
                     'confirmation_note' => 'Manually marked as Paid via Bulk Update',
                 ]);
@@ -242,9 +243,9 @@ class InvoiceController extends Controller
         return redirect()->route('admin.invoices.index')->with('success', 'Invoice archived.');
     }
 
-    public function restore($id)
+    public function restore(string $id)
     {
-        if (auth()->user()?->role !== Role::SuperAdmin) {
+        if (Auth::user()?->role !== Role::SuperAdmin) {
             abort(403, 'Unauthorized');
         }
 
@@ -254,7 +255,7 @@ class InvoiceController extends Controller
         return redirect()->back()->with('success', 'Invoice restored successfully.');
     }
 
-    private function applyFilters($query, Request $request)
+    private function applyFilters(Builder $query, Request $request): Builder
     {
         if ($request->filled('search')) {
             $search = trim($request->search);

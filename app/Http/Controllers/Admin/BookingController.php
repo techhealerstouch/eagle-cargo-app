@@ -28,6 +28,7 @@ use App\Services\ReferenceDataService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -36,7 +37,7 @@ use App\Notifications\AccountCreatedByAdmin;
 
 class BookingController extends Controller
 {
-    protected $bookings;
+    protected BookingRepositoryInterface $bookings;
 
     private SettingsService $settingsService;
 
@@ -53,7 +54,7 @@ class BookingController extends Controller
         $query = Booking::with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone'])
             ->where('status', '!=', BookingStatus::Draft->value);
 
-        if ($request->boolean('trashed') && auth()->user()?->role === Role::SuperAdmin) {
+        if ($request->boolean('trashed') && $request->user()?->role === Role::SuperAdmin) {
             $query = Booking::onlyTrashed()->with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone']);
         }
 
@@ -218,19 +219,25 @@ class BookingController extends Controller
     public function store(StoreAdminBookingRequest $request)
     {
         $validated = $request->validated();
-        
+
         DB::beginTransaction();
         try {
             $senderId = $validated['sender_id'] ?? null;
 
             if (!empty($validated['is_new_sender'])) {
                 $password = Str::password(12);
-                
+
                 // Create the User without firing events to prevent
                 // UserObserver from auto-creating a duplicate Sender
                 // with placeholder data — we create the real Sender below.
                 $user = User::withoutEvents(function () use ($validated, $password) {
+                    $prefix = 'SD';
+                    do {
+                        $customId = $prefix . '-' . strtoupper(Str::random(6));
+                    } while (User::where('custom_id', $customId)->exists());
+
                     return User::create([
+                        'custom_id' => $customId,
                         'name' => $validated['sender_first_name'] . ' ' . $validated['sender_last_name'],
                         'email' => $validated['sender_email'],
                         'password' => Hash::make($password),
@@ -270,9 +277,17 @@ class BookingController extends Controller
             }
 
             $bookingData = Arr::only($validated, [
-                'status', 'preferred_date', 'pickup_zone_id',
-                'payment_status', 'payment_method', 'payment_reference', 'declaration_form_status', 'notes', 'admin_notes',
-                'empty_box_count', 'empty_box_fee',
+                'status',
+                'preferred_date',
+                'pickup_zone_id',
+                'payment_status',
+                'payment_method',
+                'payment_reference',
+                'declaration_form_status',
+                'notes',
+                'admin_notes',
+                'empty_box_count',
+                'empty_box_fee',
             ]);
             $bookingData['sender_id'] = $senderId;
 
@@ -283,7 +298,7 @@ class BookingController extends Controller
                 $bookingData['empty_box_count'] = 0;
                 $bookingData['empty_box_fee'] = 10.00;
             }
-            
+
             if ($proofOfPaymentPath) {
                 $bookingData['proof_of_payment'] = $proofOfPaymentPath;
             }
@@ -320,7 +335,7 @@ class BookingController extends Controller
             // Create boxes linked to single recipient
             foreach ($validated['boxes'] as $index => $boxData) {
 
-                $boxStatus = match($booking->status) {
+                $boxStatus = match ($booking->status) {
                     BookingStatus::Collected => BoxStatus::Collected->value,
                     BookingStatus::Cancelled => BoxStatus::Cancelled->value,
                     default => BoxStatus::Pending->value,
@@ -351,7 +366,7 @@ class BookingController extends Controller
                         $serialNumber->update([
                             'status' => SerialNumberStatus::Assigned->value,
                             'box_id' => $box->id,
-                            'assigned_by' => $validated['picker_id'] ?? auth()->id(),
+                            'assigned_by' => $validated['picker_id'] ?? Auth::id(),
                             'allocated_at' => now(),
                         ]);
                         $box->update(['serial_number' => $serialNumber->serial_number]);
@@ -374,9 +389,9 @@ class BookingController extends Controller
                         'payment_method' => $booking->payment_method ?? 'bank_transfer',
                         'reference_number' => $booking->payment_reference ?? 'Manual Admin Entry',
                         'paid_at' => now(),
-                        'collected_by' => auth()->id(),
+                        'collected_by' => Auth::id(),
                         'confirmed_at' => now(),
-                        'confirmed_by' => auth()->id(),
+                        'confirmed_by' => Auth::id(),
                         'is_cash_payment' => false,
                     ]);
                 }
@@ -428,8 +443,16 @@ class BookingController extends Controller
     {
         $validated = $request->validated();
         $bookingData = Arr::only($validated, [
-            'sender_id', 'status', 'preferred_date', 'pickup_zone_id',
-            'payment_status', 'payment_method', 'payment_reference', 'declaration_form_status', 'notes', 'admin_notes',
+            'sender_id',
+            'status',
+            'preferred_date',
+            'pickup_zone_id',
+            'payment_status',
+            'payment_method',
+            'payment_reference',
+            'declaration_form_status',
+            'notes',
+            'admin_notes',
         ]);
 
         if ($request->hasFile('proof_of_payment')) {
@@ -457,9 +480,9 @@ class BookingController extends Controller
                     'payment_method' => $method,
                     'reference_number' => $reference,
                     'paid_at' => now(),
-                    'collected_by' => auth()->id(),
+                    'collected_by' => Auth::id(),
                     'confirmed_at' => now(),
-                    'confirmed_by' => auth()->id(),
+                    'confirmed_by' => Auth::id(),
                     'is_cash_payment' => in_array($method, ['cash', 'cash_on_pickup']),
                     'confirmation_note' => 'Manually recorded via Admin Booking Edit',
                 ]);
@@ -663,7 +686,7 @@ class BookingController extends Controller
             ]);
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', count($bookings).' bookings accepted successfully.');
+        return redirect()->route('admin.bookings.index')->with('success', count($bookings) . ' bookings accepted successfully.');
     }
 
     public function bulkCancel(Request $request)
@@ -725,7 +748,7 @@ class BookingController extends Controller
             try {
                 if ($booking->status->canTransitionTo($newStatus)) {
                     $booking->status = $newStatus;
-                    
+
                     if ($newStatus === BookingStatus::Confirmed && !$booking->confirmed_at) {
                         $booking->confirmed_at = now();
                     } elseif ($newStatus === BookingStatus::Shipped && !$booking->shipped_at) {
@@ -776,15 +799,15 @@ class BookingController extends Controller
             if ($newPaymentStatus === PaymentStatus::Paid) {
                 $invoice = $booking->invoice()->first();
                 if ($invoice && ! $invoice->payments()->exists()) {
-                    \App\Models\Payment::create([
+                    Payment::create([
                         'invoice_id' => $invoice->id,
                         'amount' => $invoice->amount,
                         'payment_method' => $booking->payment_method ?? 'bank_transfer',
                         'reference_number' => $booking->payment_reference ?? 'Bulk Admin Update',
                         'paid_at' => now(),
-                        'collected_by' => auth()->id(),
+                        'collected_by' => Auth::id(),
                         'confirmed_at' => now(),
-                        'confirmed_by' => auth()->id(),
+                        'confirmed_by' => Auth::id(),
                         'is_cash_payment' => ($booking->payment_method ?? '') === 'cash',
                         'confirmation_note' => 'Manually recorded via Booking Bulk Payment Status Update',
                     ]);
@@ -849,9 +872,9 @@ class BookingController extends Controller
 
         foreach ($bookings as $booking) {
             $status = $booking->status instanceof BookingStatus ? $booking->status->value : $booking->status;
-            
+
             $canDelete = in_array($status, [BookingStatus::Pending->value, BookingStatus::Draft->value, BookingStatus::Cancelled->value], true);
-            if (auth()->user()?->role === Role::SuperAdmin) {
+            if (Auth::user()?->role === Role::SuperAdmin) {
                 $canDelete = true;
             }
 
@@ -876,8 +899,8 @@ class BookingController extends Controller
     {
         $status = $booking->status instanceof BookingStatus ? $booking->status->value : $booking->status;
         $canDelete = in_array($status, [BookingStatus::Pending->value, BookingStatus::Draft->value, BookingStatus::Cancelled->value], true);
-        
-        if (auth()->user()?->role === Role::SuperAdmin) {
+
+        if (Auth::user()?->role === Role::SuperAdmin) {
             $canDelete = true;
         }
 
@@ -892,7 +915,7 @@ class BookingController extends Controller
 
     public function restore($id)
     {
-        if (auth()->user()?->role !== Role::SuperAdmin) {
+        if (Auth::user()?->role !== Role::SuperAdmin) {
             abort(403, 'Unauthorized');
         }
 
@@ -925,13 +948,13 @@ class BookingController extends Controller
 
         try {
             if ($runsheet->type === RunsheetType::Delivery) {
-                $boxIds = $bookings->load('boxes')->flatMap(fn (Booking $booking) => $booking->boxes->pluck('id'))->all();
+                $boxIds = $bookings->load('boxes')->flatMap(fn(Booking $booking) => $booking->boxes->pluck('id'))->all();
                 $runsheetService->attachBoxes($runsheet, $boxIds);
             } else {
                 $runsheetService->attachBookings($runsheet, $bookingIds);
             }
 
-            return redirect()->route('admin.bookings.index')->with('success', count($bookingIds).' bookings assigned to runsheet successfully.');
+            return redirect()->route('admin.bookings.index')->with('success', count($bookingIds) . ' bookings assigned to runsheet successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
         }
