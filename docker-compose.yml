@@ -34,7 +34,7 @@ services:
     container_name: ec-nginx
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8082:80"
     volumes:
       - .:/var/www:ro
       - ./docker/nginx/conf.d/:/etc/nginx/conf.d/:ro
@@ -115,9 +115,9 @@ services:
       - APP_ENV=local
       - APP_DEBUG=true
       - BROADCAST_DRIVER=reverb
-    command: php artisan reverb:start --host=0.0.0.0 --port=8081
+    command: php artisan reverb:start --host=0.0.0.0 --port=8083
     ports:
-      - "8081:8081"
+      - "8083:8083"
     networks:
       - ec-network
     depends_on:

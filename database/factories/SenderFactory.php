@@ -25,9 +25,12 @@ class SenderFactory extends Factory
     public function definition(): array
     {
         return [
+            'user_id' => \App\Models\User::factory()->state(['role' => \App\Enums\Role::Sender]),
             'first_name' => fake()->firstName(),
             'last_name' => fake()->lastName(),
-            'email' => fake()->unique()->safeEmail(),
+            'email' => function (array $attributes) {
+                return \App\Models\User::find($attributes['user_id'])->email ?? fake()->unique()->safeEmail();
+            },
             'mobile' => fake()->phoneNumber(),
             'address' => fake()->streetAddress(),
             'suburb' => fake()->city(),
