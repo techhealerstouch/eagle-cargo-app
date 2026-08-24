@@ -6,14 +6,20 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreSenderRequest;
 use App\Http\Requests\Admin\UpdateSenderRequest;
 use App\Models\Sender;
+use App\Models\User;
+use App\Enums\Role;
 use Illuminate\Http\Request;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class SenderController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Sender::query();
+        $query = Sender::with('user');
         $query = $this->applyFilters($query, $request);
 
         $senders = $query->paginate(10)->withQueryString();
@@ -31,7 +37,33 @@ class SenderController extends Controller
 
     public function store(StoreSenderRequest $request)
     {
-        Sender::create($request->validated());
+        $validated = $request->validated();
+
+        DB::transaction(function () use ($validated) {
+            $plainPassword = Str::random(12);
+
+            $user = User::withoutEvents(function () use ($validated, $plainPassword) {
+                $prefix = 'SD';
+                do {
+                    $customId = $prefix . '-' . strtoupper(Str::random(6));
+                } while (User::where('custom_id', $customId)->exists());
+
+                return User::create([
+                    'custom_id' => $customId,
+                    'name' => trim($validated['first_name'] . ' ' . $validated['last_name']),
+                    'email' => $validated['email'],
+                    'password' => Hash::make($plainPassword),
+                    'role' => Role::Sender->value,
+                ]);
+            });
+
+            // Create the sender, linked to the newly created user
+            $senderData = array_merge($validated, ['user_id' => $user->id]);
+            $sender = Sender::create($senderData);
+
+            // Notify the user about their auto-generated credentials
+            $user->notify(new \App\Notifications\AccountCreatedByAdmin($user, $plainPassword));
+        });
 
         return redirect()->route('admin.senders.index')->with('success', 'Sender created successfully.');
     }
@@ -144,7 +176,7 @@ class SenderController extends Controller
         return redirect()->route('admin.senders.index')->with('success', 'Sender deleted successfully.');
     }
 
-    private function applyFilters($query, Request $request)
+    private function applyFilters(Builder $query, Request $request)
     {
         if ($request->filled('search')) {
             $search = $request->search;
@@ -152,7 +184,10 @@ class SenderController extends Controller
                 $q->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%")
                     ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"])
-                    ->orWhere('email', 'like', "%{$search}%");
+                    ->orWhere('email', 'like', "%{$search}%")
+                    ->orWhereHas('user', function ($uq) use ($search) {
+                        $uq->where('custom_id', 'like', "%{$search}%");
+                    });
             });
         }
 

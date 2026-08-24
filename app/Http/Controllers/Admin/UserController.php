@@ -13,6 +13,7 @@ use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 
 class UserController extends Controller
@@ -27,7 +28,7 @@ class UserController extends Controller
             return redirect()->route('admin.recipients.index', $request->only(['search']));
         }
 
-        if (($request->boolean('trashed') || $request->trashed === 'only') && auth()->user()?->role === Role::SuperAdmin) {
+        if (($request->boolean('trashed') || $request->trashed === 'only') && $request->user()?->role === Role::SuperAdmin) {
             $query = User::onlyTrashed();
         } else {
             $query = User::query();
@@ -72,13 +73,37 @@ class UserController extends Controller
         $validated = $request->validated();
         $userData = Arr::except($validated, ['area_id', 'pickup_zone_id', 'suburb', 'state', 'postcode']);
 
-        $plainPassword = \Illuminate\Support\Str::random(12);
+        $plainPassword = Str::random(12);
         $userData['password'] = Hash::make($plainPassword);
 
         // Create the User without firing events to prevent UserObserver
         // from auto-creating a duplicate Sender with placeholder data —
         // profile records for all roles are created explicitly below.
+        //
+        // NOTE: withoutEvents() also skips the `creating` booted event that
+        // normally generates custom_id, so we generate it manually here using
+        // the same prefix logic defined in User::booted().
         $user = User::withoutEvents(function () use ($userData) {
+            if (empty($userData['custom_id'])) {
+                $roleEnum = Role::tryFrom($userData['role'] ?? '');
+                $prefix = match ($roleEnum) {
+                    Role::SuperAdmin => 'SA',
+                    Role::Admin      => 'AD',
+                    Role::Courier    => 'CR',
+                    Role::Picker     => 'PK',
+                    Role::Warehouse  => 'WH',
+                    Role::Sender     => 'SD',
+                    Role::Recipient  => 'RC',
+                    default          => 'LBA',
+                };
+
+                do {
+                    $customId = $prefix . '-' . strtoupper(Str::random(6));
+                } while (User::where('custom_id', $customId)->exists());
+
+                $userData['custom_id'] = $customId;
+            }
+
             return User::create($userData);
         });
 
@@ -318,10 +343,10 @@ class UserController extends Controller
         return redirect()->route('admin.users.index')->with('success', 'User updated successfully.');
     }
 
-    public function destroy(User $user)
+    public function destroy(Request $request, User $user)
     {
         // Prevent self-deletion
-        if ($user->id === request()->user()->id) {
+        if ($user->id === $request->user()?->id) {
             return redirect()->route('admin.users.index')->with('error', 'You cannot delete your own account.');
         }
 
@@ -344,9 +369,9 @@ class UserController extends Controller
         });
     }
 
-    public function restore($id)
+    public function restore(string $id)
     {
-        if (auth()->user()?->role !== Role::SuperAdmin) {
+        if (request()->user()?->role !== Role::SuperAdmin) {
             abort(403, 'Unauthorized');
         }
 

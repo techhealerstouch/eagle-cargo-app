@@ -13,7 +13,7 @@ export default defineConfig({
         },
         origin: 'http://localhost:5173',
         cors: {
-            origin: 'http://localhost:8080',
+            origin: ['http://localhost:8080', 'http://localhost:8082'],
         },
     },
     plugins: [

@@ -15,6 +15,10 @@ import type { BreadcrumbItem } from '@/types';
 
 interface Sender {
     id: number;
+    user_id: number | null;
+    user?: {
+        custom_id: string;
+    };
     first_name: string;
     last_name: string;
     email: string;
@@ -91,7 +95,7 @@ export default function SendersIndex({
                             <SearchFilter
                                 routeName="/admin/senders"
                                 queryParams={filters}
-                                placeholder="Search by name or email..."
+                                placeholder="Search by name, email or ID..."
                             />
                         </div>
                     </div>
@@ -116,6 +120,7 @@ export default function SendersIndex({
                                             />
                                         </th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Name</th>
+                                        <th scope="col" className="px-4 py-3 font-semibold">User ID</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Email</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Mobile</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Address</th>
@@ -135,6 +140,9 @@ export default function SendersIndex({
                                             </td>
                                             <td className="px-4 py-3.5 font-semibold text-zinc-900">
                                                 {sender.first_name} {sender.last_name}
+                                            </td>
+                                            <td className="px-4 py-3.5 font-mono text-xs font-semibold text-zinc-900">
+                                                {sender.user?.custom_id ?? '—'}
                                             </td>
                                             <td className="px-4 py-3.5 text-zinc-600">
                                                 {sender.email}
