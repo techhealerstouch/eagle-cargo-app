@@ -70,7 +70,7 @@ class InvoiceController extends Controller
             'adminTeamSnapshot'
         ))->setPaper('a4', 'portrait');
 
-        return $pdf->stream($invoice->invoice_number.'.pdf');
+        return $pdf->stream($invoice->invoice_number . '.pdf');
     }
 
     private function authorizePickerInvoiceAccess(Invoice $invoice): void
@@ -82,7 +82,7 @@ class InvoiceController extends Controller
         }
 
         $isAssigned = $invoice->booking()
-            ->whereHas('runsheets', fn ($query) => $query
+            ->whereHas('runsheets', fn($query) => $query
                 ->where('runsheets.type', RunsheetType::Pickup->value)
                 ->where('runsheets.picker_id', $user->id))
             ->exists();
@@ -94,7 +94,7 @@ class InvoiceController extends Controller
     public function edit(Invoice $invoice)
     {
         return Inertia::render('admin/invoices/edit', [
-            'invoice' => $invoice->load('booking.sender'),
+            'invoice' => $invoice->load(['booking.sender', 'booking.boxes']),
         ]);
     }
 
@@ -192,7 +192,7 @@ class InvoiceController extends Controller
             }
         }
 
-        return redirect()->route('admin.invoices.index')->with('success', count($invoices).' invoices marked as Paid.');
+        return redirect()->route('admin.invoices.index')->with('success', count($invoices) . ' invoices marked as Paid.');
     }
 
     public function bulkDestroy(Request $request)
@@ -235,7 +235,7 @@ class InvoiceController extends Controller
     public function destroy(Invoice $invoice)
     {
         if ($invoice->payments()->exists()) {
-             return back()->with('error', 'Cannot delete an invoice that has payments.');
+            return back()->with('error', 'Cannot delete an invoice that has payments.');
         }
 
         $invoice->delete();

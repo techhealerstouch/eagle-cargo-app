@@ -177,6 +177,7 @@ export default function BookingsCreate({
         sender_suburb: '',
         sender_state: '',
         sender_postcode: '',
+        booking_type: 'drop_off',
         pickup_zone_id: '',
         status: 'pending',
         picker_id: '',
@@ -731,6 +732,64 @@ export default function BookingsCreate({
                                                 </Field>
                                             </div>
                                         </div>
+                                    )}
+                                </div>
+
+                                {/* Booking Type */}
+                                <div className="space-y-4 pt-6 border-t border-zinc-200 dark:border-zinc-800">
+                                    <SectionCardHeader
+                                        icon={Truck}
+                                        title="Booking & Collection Type"
+                                        subtitle="Select whether this order is a Drop-Off at warehouse/branch or a Home Pick-Up"
+                                    />
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {[
+                                            {
+                                                id: 'drop_off',
+                                                title: 'Drop-Off',
+                                                desc: 'Sender drops off box at branch/warehouse',
+                                                icon: BoxIcon,
+                                            },
+                                            {
+                                                id: 'home_pickup',
+                                                title: 'Home Pick-Up',
+                                                desc: 'Courier/Picker collects at sender address',
+                                                icon: Truck,
+                                            },
+                                            {
+                                                id: 'other',
+                                                title: 'Other',
+                                                desc: 'Custom / Other collection arrangement',
+                                                icon: Sparkles,
+                                            },
+                                        ].map((t) => {
+                                            const isSelected = data.booking_type === t.id;
+                                            const IconComp = t.icon;
+                                            return (
+                                                <button
+                                                    key={t.id}
+                                                    type="button"
+                                                    onClick={() => setData('booking_type', t.id)}
+                                                    className={`flex flex-col items-start p-4 rounded-xl border text-left transition-all ${
+                                                        isSelected
+                                                            ? 'border-brand-rust bg-brand-warm/15 dark:bg-brand-rust/20 ring-2 ring-brand-rust/30 shadow-sm'
+                                                            : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:border-zinc-300 dark:hover:border-zinc-700'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-center justify-between w-full mb-2">
+                                                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-brand-rust text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}>
+                                                            <IconComp className="size-4" />
+                                                        </div>
+                                                        {isSelected && <CheckCircle className="size-4 text-brand-rust" />}
+                                                    </div>
+                                                    <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-tight">{t.title}</p>
+                                                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">{t.desc}</p>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {errors.booking_type && (
+                                        <p className="text-xs font-semibold text-red-600 mt-1">{errors.booking_type}</p>
                                     )}
                                 </div>
 

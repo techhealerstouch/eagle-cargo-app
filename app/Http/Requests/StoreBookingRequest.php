@@ -101,6 +101,7 @@ class StoreBookingRequest extends FormRequest
             'longitude' => ['nullable', 'numeric', 'between:-180,180'],
 
             // Shared Booking details
+            'booking_type' => ['nullable', 'string', 'max:50'],
             'preferred_date' => ['required', 'date', new ValidPickupDate($this->route('booking'))],
             'pickup_zone_id' => ['nullable', 'exists:pickup_zones,id'],
             'payment_method' => ['required', 'string', 'in:cash,stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],

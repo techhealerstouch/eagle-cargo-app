@@ -276,6 +276,7 @@ class TransactionSnapshotService
                 'reference_number' => null,
                 'destination' => 'N/A',
                 'service_type' => null,
+                'booking_type' => null,
                 'preferred_date' => null,
             ];
         }
@@ -287,6 +288,7 @@ class TransactionSnapshotService
             'reference_number' => $booking->reference_number,
             'destination' => $destination,
             'service_type' => $booking->service_type,
+            'booking_type' => $booking->booking_type instanceof \BackedEnum ? $booking->booking_type->value : ($booking->booking_type ?? 'drop_off'),
             'preferred_date' => optional($booking->preferred_date)->format('Y-m-d H:i:s'),
         ];
     }

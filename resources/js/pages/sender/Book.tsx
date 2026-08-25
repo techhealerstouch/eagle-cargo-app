@@ -318,6 +318,7 @@ export default function Book() {
     pickup_zone_id: sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || '',
 
     // Shared Booking Data
+    booking_type: editingBooking?.booking_type || draftBooking?.draft_data?.booking_type || 'home_pickup',
     preferred_date: getInitialValidDate(sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || ''),
     payment_method: 'stripe',
     notes: '',

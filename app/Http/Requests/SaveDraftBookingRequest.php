@@ -51,6 +51,7 @@ class SaveDraftBookingRequest extends FormRequest
             'longitude' => ['nullable', 'numeric'],
 
             // Booking details (optional)
+            'booking_type' => ['nullable', 'string', 'max:50'],
             'preferred_date' => ['nullable', 'date'],
             'payment_method' => ['nullable', 'string', 'in:stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],
             'notes' => ['nullable', 'string', 'max:1000'],

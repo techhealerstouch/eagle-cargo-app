@@ -278,6 +278,7 @@ class BookingController extends Controller
 
             $bookingData = Arr::only($validated, [
                 'status',
+                'booking_type',
                 'preferred_date',
                 'pickup_zone_id',
                 'payment_status',
@@ -289,6 +290,7 @@ class BookingController extends Controller
                 'empty_box_count',
                 'empty_box_fee',
             ]);
+            $bookingData['booking_type'] = $validated['booking_type'] ?? 'drop_off';
             $bookingData['sender_id'] = $senderId;
 
             if (!empty($validated['request_empty_box']) || !empty($validated['empty_box_count'])) {
@@ -445,6 +447,7 @@ class BookingController extends Controller
         $bookingData = Arr::only($validated, [
             'sender_id',
             'status',
+            'booking_type',
             'preferred_date',
             'pickup_zone_id',
             'payment_status',

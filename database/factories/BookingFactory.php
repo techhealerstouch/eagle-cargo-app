@@ -18,6 +18,7 @@ class BookingFactory extends Factory
             'sender_id' => Sender::factory(),
             'status' => $this->faker->randomElement(BookingStatus::cases()),
             'service_type' => $this->faker->randomElement(['Balikbayan Box', 'Home Delivery', 'Express', 'Bulk Freight']),
+            'booking_type' => $this->faker->randomElement(['drop_off', 'home_pickup']),
             'preferred_date' => $this->faker->dateTimeBetween('now', '+30 days'),
             'payment_status' => $this->faker->randomElement(PaymentStatus::cases()),
             'declaration_form_status' => $this->faker->randomElement(['missing', 'submitted_online', 'physical_copy_received']),

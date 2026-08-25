@@ -29,6 +29,7 @@ class StoreAdminBookingRequest extends FormRequest
             'sender_state' => 'nullable|string|max:100',
             'sender_postcode' => 'nullable|string|max:10',
             'status' => ['required', new Enum(BookingStatus::class)],
+            'booking_type' => ['nullable', 'string', 'max:50'],
             'picker_id' => 'required_if:status,collected|nullable|exists:users,id',
             
             // Boxes Array
