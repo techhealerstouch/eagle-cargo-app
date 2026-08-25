@@ -116,10 +116,15 @@ export default function Recipients({ recipients, filters = {} }: any) {
                                             {recipient.area && <span className="block mt-1 text-xs font-semibold text-zinc-500 uppercase tracking-wider">{recipient.area.name}</span>}
                                         </span>
                                     </div>
-                                    {recipient.phone_number && (
-                                        <div className="flex items-center gap-3 text-sm text-zinc-600 dark:text-zinc-400">
-                                            <Phone className="w-4 h-4 shrink-0" />
-                                            <span>{recipient.phone_number}</span>
+                                    {(recipient.phone_number || recipient.secondary_phone_number) && (
+                                        <div className="flex items-start gap-3 text-sm text-zinc-600 dark:text-zinc-400">
+                                            <Phone className="w-4 h-4 mt-0.5 shrink-0" />
+                                            <div>
+                                                {recipient.phone_number && <span>{recipient.phone_number}</span>}
+                                                {recipient.secondary_phone_number && (
+                                                    <span className="block text-xs text-zinc-400">Alt: {recipient.secondary_phone_number}</span>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                     {recipient.email && (

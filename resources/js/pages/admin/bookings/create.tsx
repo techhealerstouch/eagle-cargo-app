@@ -173,6 +173,7 @@ export default function BookingsCreate({
         sender_last_name: '',
         sender_email: '',
         sender_mobile: '',
+        sender_secondary_mobile: '',
         sender_address: '',
         sender_suburb: '',
         sender_state: '',
@@ -203,6 +204,7 @@ export default function BookingsCreate({
                 recipient_province: '',
                 recipient_zip_code: '',
                 recipient_phone: '',
+                recipient_secondary_phone: '',
                 recipient_landmarks: '',
                 area_id: '',
                 box_type_id: '',
@@ -351,6 +353,10 @@ export default function BookingsCreate({
                 const phoneErr = validatePhone(master.recipient_phone, 'Recipient mobile number', 'PH');
                 if (phoneErr) { setError('boxes.0.recipient_phone', phoneErr); isValid = false; }
             }
+            if (master.recipient_secondary_phone?.trim()) {
+                const secPhoneErr = validatePhone(master.recipient_secondary_phone, 'Recipient secondary phone', 'PH');
+                if (secPhoneErr) { setError('boxes.0.recipient_secondary_phone', secPhoneErr); isValid = false; }
+            }
             if (!master.recipient_address?.trim()) { setError('boxes.0.recipient_address', 'Recipient full address is required.'); isValid = false; }
             if (!master.recipient_city?.trim()) { setError('boxes.0.recipient_city', 'Recipient city is required.'); isValid = false; }
             if (!master.recipient_province?.trim()) { setError('boxes.0.recipient_province', 'Recipient province is required.'); isValid = false; }
@@ -417,6 +423,7 @@ export default function BookingsCreate({
                     recipient_province: master.recipient_province || '',
                     recipient_zip_code: master.recipient_zip_code || '',
                     recipient_phone: master.recipient_phone || '',
+                    recipient_secondary_phone: master.recipient_secondary_phone || '',
                     recipient_landmarks: master.recipient_landmarks || '',
                     area_id: master.area_id || '',
                     box_type_id: master.box_type_id || '',
@@ -444,6 +451,7 @@ export default function BookingsCreate({
                 recipient_province: master.recipient_province || '',
                 recipient_zip_code: master.recipient_zip_code || '',
                 recipient_phone: master.recipient_phone || '',
+                recipient_secondary_phone: master.recipient_secondary_phone || '',
                 recipient_landmarks: master.recipient_landmarks || '',
                 area_id: master.area_id || '',
                 box_type_id: master.box_type_id || '',
@@ -595,6 +603,7 @@ export default function BookingsCreate({
             recipient_province: masterRecipient.recipient_province,
             recipient_zip_code: masterRecipient.recipient_zip_code,
             recipient_phone: masterRecipient.recipient_phone,
+            recipient_secondary_phone: masterRecipient.recipient_secondary_phone || '',
             recipient_landmarks: masterRecipient.recipient_landmarks,
         }));
 
@@ -605,7 +614,7 @@ export default function BookingsCreate({
             onSuccess: () => clearSavedData(),
             onError: (errs) => {
                 const hasSenderErrors = Object.keys(errs).some(k => k.startsWith('sender_') || k === 'is_new_sender' || k === 'picker_id' || k === 'preferred_date' || k === 'status');
-                const hasBoxErrors = Object.keys(errs).some(k => k.startsWith('boxes'));
+                const hasBoxErrors = Object.keys(errs).some(k => k.startsWith('boxes') || k.startsWith('empty_box') || k === 'request_empty_box');
 
                 if (hasSenderErrors) {
                     setCurrentStep(1);
@@ -725,6 +734,9 @@ export default function BookingsCreate({
                                             </Field>
                                             <Field label="Contact Phone" required error={errors.sender_mobile}>
                                                 <PhoneInput value={data.sender_mobile} onChange={val => setData('sender_mobile', val)} defaultCountryCode="AU" />
+                                            </Field>
+                                            <Field label="Secondary Phone (Optional)" error={errors.sender_secondary_mobile}>
+                                                <PhoneInput value={data.sender_secondary_mobile} onChange={val => setData('sender_secondary_mobile', val)} defaultCountryCode="AU" />
                                             </Field>
                                             <div className="md:col-span-2">
                                                 <Field label="Full Address" required error={errors.sender_address}>
@@ -880,46 +892,6 @@ export default function BookingsCreate({
                                         </div>
                                     </div>
                                 </div>
-
-
-                                {/* Empty Box Delivery Request */}
-                                <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800">
-                                    <div className="px-4 py-3 bg-amber-50/40 dark:bg-amber-950/20 rounded-xl border border-amber-200/80 dark:border-amber-900/50 space-y-3">
-                                        <div className="flex items-center gap-2.5">
-                                            <Truck className="size-4 text-amber-500 shrink-0" />
-                                            <Checkbox
-                                                id="request-empty-box"
-                                                checked={data.request_empty_box}
-                                                onCheckedChange={(checked) => setData('request_empty_box', !!checked)}
-                                            />
-                                            <label htmlFor="request-empty-box" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer">
-                                                Sender requests empty box delivery <span className="text-amber-600 dark:text-amber-400 font-extrabold">($10.00 each)</span>
-                                            </label>
-                                        </div>
-
-                                        {data.request_empty_box && (
-                                            <div className="flex items-center justify-between gap-4 pt-2 border-t border-amber-200/60 dark:border-amber-900/40">
-                                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Qty to deliver prior to pickup</p>
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setData('empty_box_count', Math.max(1, data.empty_box_count - 1))}
-                                                        disabled={data.empty_box_count <= 1}
-                                                        className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
-                                                    >-</button>
-                                                    <span className="font-extrabold text-sm min-w-8 text-center text-zinc-900 dark:text-zinc-100">{data.empty_box_count}</span>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setData('empty_box_count', data.empty_box_count + 1)}
-                                                        className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
-                                                    >+</button>
-                                                    <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400">(+${(data.empty_box_count * 10).toFixed(2)})</span>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-
                             </form>
                         )}
 
@@ -946,6 +918,9 @@ export default function BookingsCreate({
                                         </Field>
                                         <Field label="Mobile Number" required error={errors['boxes.0.recipient_phone']}>
                                             <PhoneInput value={data.boxes[0]?.recipient_phone || ''} onChange={val => updatePrimaryRecipient('recipient_phone', val)} defaultCountryCode="PH" />
+                                        </Field>
+                                        <Field label="Secondary Phone (Optional)" error={errors['boxes.0.recipient_secondary_phone']}>
+                                            <PhoneInput value={data.boxes[0]?.recipient_secondary_phone || ''} onChange={val => updatePrimaryRecipient('recipient_secondary_phone', val)} defaultCountryCode="PH" />
                                         </Field>
                                         <div className="md:col-span-2">
                                             <Field label="Full Address" required error={errors['boxes.0.recipient_address']}>
@@ -1193,6 +1168,65 @@ export default function BookingsCreate({
                                             </div>
                                         ))}
                                     </div>
+                                </div>
+
+                                {/* Empty Box Delivery Request */}
+                                <div className="rounded-2xl border border-amber-200/80 bg-amber-50/40 dark:bg-amber-950/20 dark:border-amber-900/50 p-6 space-y-4 shadow-sm">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300">
+                                                <Truck className="size-5" />
+                                            </div>
+                                            <div>
+                                                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">Empty Box Delivery Service</h3>
+                                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Deliver empty boxes to sender before scheduled collection</p>
+                                            </div>
+                                        </div>
+                                        <span className="inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider border border-amber-200/60 dark:border-amber-800/60">
+                                            $10.00 each
+                                        </span>
+                                    </div>
+
+                                    <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-200/60 bg-white/70 dark:bg-zinc-900/60 dark:border-amber-900/40">
+                                        <Checkbox
+                                            id="request-empty-box"
+                                            checked={data.request_empty_box}
+                                            onCheckedChange={(checked) => setData('request_empty_box', !!checked)}
+                                            className="mt-0.5"
+                                        />
+                                        <div className="space-y-0.5 flex-1">
+                                            <label htmlFor="request-empty-box" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer block">
+                                                Sender requests empty box delivery
+                                            </label>
+                                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-tight">
+                                                Courier will drop off empty boxes to the sender's address prior to collection date.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {data.request_empty_box && (
+                                        <div className="flex items-center justify-between gap-4 pt-3 border-t border-amber-200/60 dark:border-amber-900/40">
+                                            <div>
+                                                <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Empty Box Quantity</p>
+                                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Specify number of empty boxes to be delivered</p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setData('empty_box_count', Math.max(1, data.empty_box_count - 1))}
+                                                    disabled={data.empty_box_count <= 1}
+                                                    className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
+                                                >-</button>
+                                                <span className="font-extrabold text-sm min-w-8 text-center text-zinc-900 dark:text-zinc-100">{data.empty_box_count}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setData('empty_box_count', data.empty_box_count + 1)}
+                                                    className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
+                                                >+</button>
+                                                <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400 ml-1">(+${(data.empty_box_count * 10).toFixed(2)})</span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}

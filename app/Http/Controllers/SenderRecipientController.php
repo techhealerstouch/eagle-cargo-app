@@ -117,6 +117,11 @@ class SenderRecipientController extends Controller
                 'phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('phone_number'))
             ]);
         }
+        if ($request->filled('secondary_phone_number')) {
+            $request->merge([
+                'secondary_phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('secondary_phone_number'))
+            ]);
+        }
 
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -126,6 +131,16 @@ class SenderRecipientController extends Controller
                 'string',
                 'max:50',
                 new Phone('phone number'),
+            ],
+            'secondary_phone_number' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('secondary phone number'))->validate($attribute, $value, $fail);
+                    }
+                },
             ],
             'address' => ['required', 'string', 'max:500'],
             'city' => ['required', 'string', 'max:100'],

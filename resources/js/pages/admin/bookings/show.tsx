@@ -24,6 +24,7 @@ interface Recipient {
     province: string;
     zip_code: string;
     phone_number?: string;
+    secondary_phone_number?: string;
     phone?: string;
     email?: string;
 }
@@ -81,6 +82,7 @@ interface Booking {
         email?: string;
         phone?: string;
         mobile?: string;
+        secondary_mobile?: string;
         address?: string;
         suburb?: string;
         state?: string;
@@ -311,6 +313,11 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                                                 <Phone className="size-3" /> {booking.sender.mobile || booking.sender.phone || 'N/A'}
                                             </p>
+                                            {booking.sender.secondary_mobile && (
+                                                <p className="text-[11px] text-muted-foreground font-mono ml-4.5">
+                                                    Alt: {booking.sender.secondary_mobile}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="pt-2 flex items-start gap-1.5 text-xs text-brand-rust/80">
                                             <MapPin className="size-3.5 mt-0.5 shrink-0 text-muted-foreground" />
@@ -340,6 +347,11 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                                                 <Phone className="size-3" /> {booking.boxes?.[0]?.recipient?.phone_number || booking.boxes?.[0]?.recipient?.phone || booking.recipient_phone || 'N/A'}
                                             </p>
+                                            {booking.boxes?.[0]?.recipient?.secondary_phone_number && (
+                                                <p className="text-[11px] text-muted-foreground font-mono ml-4.5">
+                                                    Alt: {booking.boxes[0].recipient.secondary_phone_number}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="pt-2 flex items-start gap-1.5 text-xs text-brand-rust/80">
                                             <MapPin className="size-3.5 mt-0.5 shrink-0 text-muted-foreground" />

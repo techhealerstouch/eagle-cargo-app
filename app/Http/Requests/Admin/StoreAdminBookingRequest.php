@@ -23,7 +23,8 @@ class StoreAdminBookingRequest extends FormRequest
             'sender_first_name' => 'required_if:is_new_sender,true|nullable|string|max:255',
             'sender_last_name' => 'required_if:is_new_sender,true|nullable|string|max:255',
             'sender_email' => 'exclude_unless:is_new_sender,true|required|email|max:255|unique:users,email',
-            'sender_mobile' => 'required_if:is_new_sender,true|nullable|string|max:20',
+            'sender_mobile' => 'required_if:is_new_sender,true|nullable|string|max:50',
+            'sender_secondary_mobile' => 'nullable|string|max:50',
             'sender_address' => 'required_if:is_new_sender,true|nullable|string|max:500',
             'sender_suburb' => 'nullable|string|max:100',
             'sender_state' => 'nullable|string|max:100',
@@ -51,7 +52,8 @@ class StoreAdminBookingRequest extends FormRequest
             'boxes.*.recipient_city' => 'required_without:boxes.*.recipient_id|nullable|string|max:100',
             'boxes.*.recipient_province' => 'required_without:boxes.*.recipient_id|nullable|string|max:100',
             'boxes.*.recipient_zip_code' => 'required_without:boxes.*.recipient_id|nullable|string|max:20',
-            'boxes.*.recipient_phone' => 'required_without:boxes.*.recipient_id|nullable|string|max:20',
+            'boxes.*.recipient_phone' => 'required_without:boxes.*.recipient_id|nullable|string|max:50',
+            'boxes.*.recipient_secondary_phone' => 'nullable|string|max:50',
             'boxes.*.recipient_landmarks' => 'nullable|string|max:255',
 
             // Pickup & Scheduling
@@ -67,6 +69,7 @@ class StoreAdminBookingRequest extends FormRequest
             'declaration_form' => ['nullable', 'file', 'mimes:jpeg,png,jpg,pdf', 'max:10240', new SecureFile],
             
             // Empty Box Purchase Request
+            'request_empty_box' => 'nullable|boolean',
             'empty_box_count' => 'nullable|integer|min:0',
             'empty_box_fee' => 'nullable|numeric|min:0',
 

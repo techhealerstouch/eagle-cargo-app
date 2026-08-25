@@ -14,6 +14,7 @@ interface Sender {
     last_name: string;
     email: string;
     mobile: string;
+    secondary_mobile?: string | null;
     address: string;
     suburb: string | null;
     state: string | null;
@@ -26,6 +27,7 @@ export default function SendersEdit({ sender }: { sender: Sender }) {
         last_name: sender.last_name,
         email: sender.email,
         mobile: sender.mobile,
+        secondary_mobile: sender.secondary_mobile || '',
         address: sender.address,
         suburb: sender.suburb || '',
         state: sender.state || '',
@@ -154,6 +156,21 @@ export default function SendersEdit({ sender }: { sender: Sender }) {
                                 />
                                 {errors.mobile && (
                                     <p className="text-[11px] font-bold text-red-500 ml-1 uppercase tracking-wider">{errors.mobile}</p>
+                                )}
+                            </div>
+
+                            {/* Secondary Mobile */}
+                            <div className="space-y-3">
+                                <Label htmlFor="secondary_mobile" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">
+                                    Secondary Phone Number <span className="text-muted-foreground/60 font-medium normal-case tracking-normal">(Optional)</span>
+                                </Label>
+                                <PhoneInput
+                                    value={data.secondary_mobile || ''}
+                                    onChange={val => setData('secondary_mobile', val)}
+                                    defaultCountryCode="AU"
+                                />
+                                {errors.secondary_mobile && (
+                                    <p className="text-[11px] font-bold text-red-500 ml-1 uppercase tracking-wider">{errors.secondary_mobile}</p>
                                 )}
                             </div>
 

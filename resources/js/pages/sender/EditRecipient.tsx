@@ -17,6 +17,7 @@ export default function EditRecipient({ recipient, areas }: any) {
         name: recipient.name || '',
         email: recipient.email || '',
         phone_number: recipient.phone_number || '',
+        secondary_phone_number: recipient.secondary_phone_number || '',
         address: recipient.address || '',
         city: recipient.city || '',
         province: recipient.province || '',
@@ -33,6 +34,14 @@ export default function EditRecipient({ recipient, areas }: any) {
         if (phoneError) {
             setError('phone_number', phoneError);
             return;
+        }
+
+        if (data.secondary_phone_number) {
+            const secPhoneError = validatePhone(data.secondary_phone_number, 'Secondary Phone', 'PH');
+            if (secPhoneError) {
+                setError('secondary_phone_number', secPhoneError);
+                return;
+            }
         }
 
         put(`/recipients/${recipient.id}`);
@@ -77,15 +86,6 @@ export default function EditRecipient({ recipient, areas }: any) {
                                     {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Phone Number</label>
-                                    <PhoneInput
-                                        value={data.phone_number}
-                                        onChange={(val) => setData('phone_number', val)}
-                                        defaultCountryCode="PH"
-                                    />
-                                    {errors.phone_number && <p className="mt-2 text-sm text-red-600">{errors.phone_number}</p>}
-                                </div>
-                                <div className="md:col-span-2">
                                     <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Email Address</label>
                                     <input
                                         type="email"
@@ -94,6 +94,26 @@ export default function EditRecipient({ recipient, areas }: any) {
                                         onChange={(e) => setData('email', e.target.value)}
                                     />
                                     {errors.email && <p className="mt-2 text-sm text-red-600">{errors.email}</p>}
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Primary Phone Number</label>
+                                    <PhoneInput
+                                        value={data.phone_number}
+                                        onChange={(val) => setData('phone_number', val)}
+                                        defaultCountryCode="PH"
+                                    />
+                                    {errors.phone_number && <p className="mt-2 text-sm text-red-600">{errors.phone_number}</p>}
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">
+                                        Secondary Phone Number <span className="text-zinc-400 font-normal text-xs">(Optional)</span>
+                                    </label>
+                                    <PhoneInput
+                                        value={data.secondary_phone_number}
+                                        onChange={(val) => setData('secondary_phone_number', val)}
+                                        defaultCountryCode="PH"
+                                    />
+                                    {errors.secondary_phone_number && <p className="mt-2 text-sm text-red-600">{errors.secondary_phone_number}</p>}
                                 </div>
                             </div>
                         </div>

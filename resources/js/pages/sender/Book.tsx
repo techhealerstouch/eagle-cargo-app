@@ -309,6 +309,7 @@ export default function Book() {
     last_name: user ? user.name.split(' ').slice(1).join(' ') : '',
     email: user ? user.email : '',
     mobile: sender?.mobile || '',
+    secondary_mobile: sender?.secondary_mobile || '',
     address: sender?.address || '',
     suburb: sender?.suburb || '',
     state: sender?.state || '',
@@ -335,6 +336,7 @@ export default function Book() {
         recipient_province: '',
         recipient_zip_code: '',
         recipient_phone: '',
+        recipient_secondary_phone: '',
         recipient_landmarks: '',
         recipient_latitude: null,
         recipient_longitude: null,
@@ -543,6 +545,7 @@ export default function Book() {
           last_name: data.last_name,
           email: data.email,
           mobile: data.mobile,
+          secondary_mobile: data.secondary_mobile,
           address: data.address,
           suburb: data.suburb,
           state: data.state,
@@ -613,6 +616,7 @@ export default function Book() {
       last_name: editingBooking.sender?.last_name || sender?.last_name || '',
       email: editingBooking.sender?.email || sender?.email || '',
       mobile: editingBooking.sender?.mobile || sender?.mobile || '',
+      secondary_mobile: editingBooking.sender?.secondary_mobile || sender?.secondary_mobile || '',
       address: editingBooking.sender?.address || sender?.address || '',
       suburb: editingBooking.sender?.suburb || sender?.suburb || '',
       state: editingBooking.sender?.state || sender?.state || '',
@@ -633,6 +637,7 @@ export default function Book() {
         recipient_province: box.recipient?.province || '',
         recipient_zip_code: box.recipient?.zip_code || '',
         recipient_phone: box.recipient?.phone_number || '',
+        recipient_secondary_phone: box.recipient?.secondary_phone_number || '',
         recipient_landmarks: box.recipient?.landmarks || '',
         recipient_latitude: box.recipient?.latitude || null,
         recipient_longitude: box.recipient?.longitude || null,
@@ -1258,9 +1263,11 @@ if (step === 2) {
                 body: JSON.stringify({
                     ...data,
                     mobile: data.mobile ? data.mobile.replace(/[\s\-\(\)]/g, '') : '',
+                    secondary_mobile: data.secondary_mobile ? data.secondary_mobile.replace(/[\s\-\(\)]/g, '') : '',
                     boxes: data.boxes.map((box: any) => ({
                       ...box,
                       recipient_phone: (!box.recipient_id && box.recipient_phone) ? box.recipient_phone.replace(/[\s\-\(\)]/g, '') : box.recipient_phone,
+                      recipient_secondary_phone: (!box.recipient_id && box.recipient_secondary_phone) ? box.recipient_secondary_phone.replace(/[\s\-\(\)]/g, '') : (box.recipient_secondary_phone || ''),
                       recipient_id: sanitizeRecipientId(box.recipient_id),
                     })),
                     draft_id: draftId,
@@ -1354,9 +1361,11 @@ if (step === 2) {
     const submissionData = {
       ...data,
       mobile: data.mobile ? data.mobile.replace(/[\s\-\(\)]/g, '') : '',
+      secondary_mobile: data.secondary_mobile ? data.secondary_mobile.replace(/[\s\-\(\)]/g, '') : '',
       boxes: data.boxes.map(box => ({
         ...box,
         recipient_phone: (!box.recipient_id && box.recipient_phone) ? box.recipient_phone.replace(/[\s\-\(\)]/g, '') : box.recipient_phone,
+        recipient_secondary_phone: (!box.recipient_id && box.recipient_secondary_phone) ? box.recipient_secondary_phone.replace(/[\s\-\(\)]/g, '') : (box.recipient_secondary_phone || ''),
         recipient_id: sanitizeRecipientId(box.recipient_id),
       })),
     };
@@ -1460,6 +1469,9 @@ if (step === 2) {
                       <div className="space-y-1">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Contact</p>
                         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{data.mobile}</p>
+                        {data.secondary_mobile && (
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400 font-mono">Alt: {data.secondary_mobile}</p>
+                        )}
                         <p className="text-xs text-zinc-500 dark:text-zinc-400">{data.email}</p>
                       </div>
                       <div className="space-y-1">
@@ -1480,9 +1492,12 @@ if (step === 2) {
                         </Field>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <Field label="Contact Phone" required error={errors.mobile}>
                           <PhoneInput value={data.mobile || ''} onChange={val => setData('mobile', val)} defaultCountryCode={senderCountryCode} />
+                        </Field>
+                        <Field label="Secondary Phone" error={errors.secondary_mobile} hint="Optional">
+                          <PhoneInput value={data.secondary_mobile || ''} onChange={val => setData('secondary_mobile', val)} defaultCountryCode={senderCountryCode} />
                         </Field>
                         <Field label="Email Address" required error={errors.email}>
                           <input title="Email Address" placeholder="Email Address" className={baseInputClass} type="email" value={data.email || ''} onChange={e => setData('email', e.target.value)} />
@@ -1832,11 +1847,19 @@ if (step === 2) {
                     </Field>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Field label="Receiver Phone" required error={errors[`boxes.0.recipient_phone` as keyof typeof errors]}>
                       <PhoneInput
                         value={data.boxes[0].recipient_phone || ''}
                         onChange={val => updatePrimaryRecipient('recipient_phone', val)}
+                        defaultCountryCode="PH"
+                        disabled={!!data.boxes[0].recipient_id}
+                      />
+                    </Field>
+                    <Field label="Secondary Phone" error={errors[`boxes.0.recipient_secondary_phone` as keyof typeof errors]} hint="Optional">
+                      <PhoneInput
+                        value={data.boxes[0].recipient_secondary_phone || ''}
+                        onChange={val => updatePrimaryRecipient('recipient_secondary_phone', val)}
                         defaultCountryCode="PH"
                         disabled={!!data.boxes[0].recipient_id}
                       />
@@ -2206,6 +2229,9 @@ if (step === 2) {
                         <div>
                           <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Contact Number</p>
                           <p className="font-semibold text-zinc-800 dark:text-zinc-200">{data.mobile}</p>
+                          {data.secondary_mobile && (
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-normal">Alt: {data.secondary_mobile}</p>
+                          )}
                         </div>
                         <div>
                           <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Email Address</p>
@@ -2277,7 +2303,8 @@ if (step === 2) {
                           const recCity = recipient?.city || box.recipient_city || '';
                           const recProvince = recipient?.province || box.recipient_province || '';
                           const recZip = recipient?.zip_code || box.recipient_zip_code || '';
-                          const recPhone = recipient?.receiver_phone || box.recipient_phone || '';
+                          const recPhone = recipient?.phone_number || recipient?.receiver_phone || box.recipient_phone || '';
+                          const recSecondaryPhone = recipient?.secondary_phone_number || box.recipient_secondary_phone || '';
 
                           return (
                             <div key={index} className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 p-4 space-y-3">
@@ -2323,7 +2350,7 @@ if (step === 2) {
                                 <div className="sm:col-span-2 pt-2 border-t border-zinc-200/50 dark:border-zinc-800">
                                   <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 mb-1">Recipient</p>
                                   <p className="font-semibold text-zinc-800 dark:text-zinc-200">
-                                    {recFirstName} {recLastName} {recPhone ? `• ${recPhone}` : ''}
+                                    {recFirstName} {recLastName} {recPhone ? `• ${recPhone}` : ''} {recSecondaryPhone ? `(Alt: ${recSecondaryPhone})` : ''}
                                   </p>
                                   <p className="text-zinc-600 dark:text-zinc-400 text-xs">
                                     {recAddress}{recCity ? `, ${recCity}` : ''}{recProvince ? `, ${recProvince}` : ''}{recZip ? ` ${recZip}` : ''}

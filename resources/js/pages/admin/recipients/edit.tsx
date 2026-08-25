@@ -17,6 +17,7 @@ interface Recipient {
     id: number;
     name: string;
     phone_number: string | null;
+    secondary_phone_number: string | null;
     address: string;
     city: string;
     province: string;
@@ -30,6 +31,7 @@ export default function RecipientsEdit({ recipient, areas }: { recipient: Recipi
     const { data, setData, put, processing, errors } = useForm({
         name: recipient.name,
         phone_number: recipient.phone_number || '',
+        secondary_phone_number: recipient.secondary_phone_number || '',
         address: recipient.address,
         city: recipient.city,
         province: recipient.province,
@@ -116,9 +118,26 @@ export default function RecipientsEdit({ recipient, areas }: { recipient: Recipi
                                      onChange={val => setData('phone_number', val)}
                                      defaultCountryCode="PH"
                                  />
+                                 {errors.phone_number && (
+                                     <p className="text-[11px] font-bold text-red-500 ml-1 uppercase tracking-wider">{errors.phone_number}</p>
+                                 )}
                              </div>
 
-                            <div className="space-y-3">
+                             <div className="space-y-3">
+                                 <Label htmlFor="secondary_phone_number" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">
+                                     Secondary Contact Number <span className="text-muted-foreground/60 font-medium normal-case tracking-normal">(Optional)</span>
+                                 </Label>
+                                 <PhoneInput
+                                     value={data.secondary_phone_number || ''}
+                                     onChange={val => setData('secondary_phone_number', val)}
+                                     defaultCountryCode="PH"
+                                 />
+                                 {errors.secondary_phone_number && (
+                                     <p className="text-[11px] font-bold text-red-500 ml-1 uppercase tracking-wider">{errors.secondary_phone_number}</p>
+                                 )}
+                             </div>
+
+                            <div className="space-y-3 md:col-span-2">
                                 <Label htmlFor="area_id" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">Delivery Area</Label>
                                 <div className="relative">
                                     <Globe className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-brand-rust/40" />

@@ -29,6 +29,9 @@ class StoreBookingRequest extends FormRequest
         if ($this->filled('mobile')) {
             $this->merge(['mobile' => preg_replace('/[\s\-\(\)]+/', '', $this->input('mobile'))]);
         }
+        if ($this->filled('secondary_mobile')) {
+            $this->merge(['secondary_mobile' => preg_replace('/[\s\-\(\)]+/', '', $this->input('secondary_mobile'))]);
+        }
         if ($this->filled('sender_address') && ! $this->filled('address')) {
             $this->merge(['address' => $this->input('sender_address')]);
         }
@@ -44,6 +47,9 @@ class StoreBookingRequest extends FormRequest
         foreach ($boxes as $index => $box) {
             if (is_array($box) && isset($box['recipient_phone'])) {
                 $boxes[$index]['recipient_phone'] = preg_replace('/[\s\-\(\)]+/', '', $box['recipient_phone']);
+            }
+            if (is_array($box) && isset($box['recipient_secondary_phone'])) {
+                $boxes[$index]['recipient_secondary_phone'] = preg_replace('/[\s\-\(\)]+/', '', $box['recipient_secondary_phone']);
             }
 
             if (! is_array($box) || ! empty($box['recipient_id'])) {
@@ -93,6 +99,16 @@ class StoreBookingRequest extends FormRequest
                 'max:50',
                 new Phone('contact phone'),
             ],
+            'secondary_mobile' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('secondary contact phone'))->validate($attribute, $value, $fail);
+                    }
+                },
+            ],
             'address' => ['required', 'string', 'max:500'],
             'suburb' => ['required', 'string', 'max:100'],
             'state' => ['required', 'string', 'max:100'],
@@ -138,6 +154,16 @@ class StoreBookingRequest extends FormRequest
                 'string',
                 'max:50',
                 new Phone('receiver phone'),
+            ],
+            'boxes.*.recipient_secondary_phone' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('secondary receiver phone'))->validate($attribute, $value, $fail);
+                    }
+                },
             ],
             'boxes.*.recipient_landmarks' => ['nullable', 'string', 'max:500'],
             'boxes.*.recipient_latitude' => ['nullable', 'numeric', 'between:-90,90'],
