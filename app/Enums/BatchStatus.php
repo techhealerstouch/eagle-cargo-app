@@ -16,10 +16,10 @@ enum BatchStatus: string
         return match ($this) {
             self::Open => in_array($next, [self::Loading, self::ReadyToClose], true),
             self::Loading => in_array($next, [self::Open, self::ReadyToClose], true),
-            self::ReadyToClose => in_array($next, [self::Loading, self::Sailed], true),
-            self::Sailed => $next === self::Arrived,
-            self::Arrived => $next === self::Delivered,
-            self::Delivered => false,
+            self::ReadyToClose => in_array($next, [self::Open, self::Loading, self::Sailed], true),
+            self::Sailed => in_array($next, [self::Open, self::Loading, self::Arrived], true),
+            self::Arrived => in_array($next, [self::Open, self::Loading, self::Delivered], true),
+            self::Delivered => in_array($next, [self::Open, self::Loading], true),
         };
     }
 

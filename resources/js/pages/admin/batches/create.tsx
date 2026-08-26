@@ -430,6 +430,17 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
 
                                     {currentStep === 2 && (
                                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                            {data.cutoff_at && new Date(data.cutoff_at) < new Date() && (
+                                                <div className="bg-amber-50/80 border border-amber-200/60 rounded-xl p-4 flex gap-3 shadow-sm">
+                                                    <div className="size-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                                                        <Info className="size-4 text-amber-600" />
+                                                    </div>
+                                                    <div>
+                                                        <h4 className="text-xs font-bold text-amber-900 mb-1 uppercase tracking-wider">Past Cut-off Date</h4>
+                                                        <p className="text-xs text-amber-800 leading-relaxed font-medium">The selected cut-off date has already passed. The batch will remain open but you will need to manage it manually.</p>
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="space-y-2">
                                                     <Label htmlFor="cutoff_at" className="text-xs font-semibold text-zinc-700 ml-0.5">Cut-off Date & Time</Label>

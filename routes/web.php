@@ -261,6 +261,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::resource('batches', BatchController::class);
         Route::post('batches/{batch}/confirm-manifest', [BatchController::class, 'confirmManifest'])->middleware('throttle:admin-mutations')->name('batches.confirmManifest');
         Route::post('batches/{batch}/confirm-arrival', [BatchController::class, 'confirmArrival'])->middleware('throttle:admin-mutations')->name('batches.confirmArrival');
+        Route::post('batches/{batch}/reopen', [BatchController::class, 'reopen'])->middleware('throttle:admin-mutations')->name('batches.reopen');
         Route::post('batches/{batch}/load-boxes', [BatchController::class, 'loadBoxes'])->middleware('throttle:admin-mutations')->name('batches.loadBoxes');
         Route::post('batches/{batch}/tracking-phase', [BatchController::class, 'bulkUpdateTrackingPhase'])
             ->middleware('throttle:admin-mutations')

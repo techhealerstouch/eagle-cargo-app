@@ -16,7 +16,18 @@ class StoreBatchRequest extends FormRequest
 
     public function rules(): array
     {
-        $batchId = $this->route('batch')?->id;
+        $batch = $this->route('batch');
+        $batchId = $batch?->id;
+
+        $isBackward = false;
+        if ($batch && $this->input('status') && $this->input('status') !== $batch->status->value) {
+            $statuses = array_map(fn($s) => $s->value, BatchStatus::cases());
+            $currentIndex = array_search($batch->status->value, $statuses);
+            $newIndex = array_search($this->input('status'), $statuses);
+            if ($newIndex !== false && $currentIndex !== false && $newIndex < $currentIndex) {
+                $isBackward = true;
+            }
+        }
 
         return [
             'batch_number' => [
@@ -51,6 +62,12 @@ class StoreBatchRequest extends FormRequest
                 Rule::when($this->isMethod('POST'), [
                     Rule::in([BatchStatus::Open->value, BatchStatus::Loading->value]),
                 ]),
+            ],
+            'override_note' => [
+                'nullable',
+                'string',
+                'max:1000',
+                Rule::requiredIf($isBackward),
             ],
         ];
     }

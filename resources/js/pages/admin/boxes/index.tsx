@@ -58,6 +58,10 @@ interface Box {
     tracking_views_count?: number;
     last_tracked_at?: string | null;
     deleted_at?: string | null;
+    batch?: {
+        id: number;
+        batch_number: string;
+    } | null;
 }
 
 interface Area {
@@ -304,6 +308,7 @@ export default function BoxesIndex({
                                         <th scope="col" className="px-4 py-3 font-semibold">Booking Ref</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Sender</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Recipient</th>
+                                        <th scope="col" className="px-4 py-3 font-semibold">Batch</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Status</th>
                                         <th scope="col" className="px-4 py-3 font-semibold text-right">Actions</th>
                                     </tr>
@@ -353,6 +358,15 @@ export default function BoxesIndex({
                                                     </div>
                                                 ) : (
                                                     <span className="text-zinc-400 italic">—</span>
+                                                )}
+                                            </td>
+                                            <td className="px-4 py-3.5 font-mono text-xs font-medium text-zinc-900">
+                                                {box.batch ? (
+                                                    <Link href={`/admin/batches/${box.batch.id}`} className="hover:text-brand-rust transition-colors">
+                                                        {box.batch.batch_number}
+                                                    </Link>
+                                                ) : (
+                                                    <span className="text-zinc-400 font-sans italic font-normal">Pending</span>
                                                 )}
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
