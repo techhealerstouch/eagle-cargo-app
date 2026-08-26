@@ -37,6 +37,7 @@ class UpdateAdminBookingRequest extends FormRequest
         return [
             'sender_id'               => 'required|exists:senders,id',
             'status'                   => 'required|in:pending,confirmed,collected,shipped,delivered,cancelled',
+            'booking_type'             => 'nullable|string|max:50',
             'recipient_name'           => 'required|string|max:255',
             'recipient_address'        => 'nullable|string|max:255',
             'recipient_city'           => 'nullable|string|max:100',

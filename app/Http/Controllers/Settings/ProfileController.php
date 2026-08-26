@@ -47,7 +47,7 @@ class ProfileController extends Controller
         $nameParts = preg_split('/\s+/', trim($user->name)) ?: [];
         $firstName = $nameParts[0] ?? $user->name;
         $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : '';
-        $senderData = $request->safe()->only(['mobile', 'country', 'address', 'suburb', 'state', 'postcode', 'latitude', 'longitude']);
+        $senderData = $request->safe()->only(['mobile', 'secondary_mobile', 'country', 'address', 'suburb', 'state', 'postcode', 'latitude', 'longitude']);
 
         $user->sender()->updateOrCreate(
             ['user_id' => $user->id],
@@ -57,6 +57,7 @@ class ProfileController extends Controller
                 'email' => $user->email,
                 'country' => $senderData['country'] ?? 'Australia',
                 'mobile' => $senderData['mobile'] ?? '',
+                'secondary_mobile' => $senderData['secondary_mobile'] ?? null,
                 'address' => $senderData['address'] ?? '',
                 'suburb' => $senderData['suburb'] ?? null,
                 'state' => $senderData['state'] ?? null,

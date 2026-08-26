@@ -43,6 +43,7 @@ class SaveDraftBookingRequest extends FormRequest
             'last_name' => ['nullable', 'string', 'max:255'],
             'email' => ['nullable', 'string', 'email', 'max:255'],
             'mobile' => ['nullable', 'string', 'max:50'],
+            'secondary_mobile' => ['nullable', 'string', 'max:50'],
             'address' => ['nullable', 'string', 'max:500'],
             'suburb' => ['nullable', 'string', 'max:100'],
             'state' => ['nullable', 'string', 'max:100'],
@@ -51,6 +52,7 @@ class SaveDraftBookingRequest extends FormRequest
             'longitude' => ['nullable', 'numeric'],
 
             // Booking details (optional)
+            'booking_type' => ['nullable', 'string', 'max:50'],
             'preferred_date' => ['nullable', 'date'],
             'payment_method' => ['nullable', 'string', 'in:stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],
             'notes' => ['nullable', 'string', 'max:1000'],
@@ -66,6 +68,7 @@ class SaveDraftBookingRequest extends FormRequest
             'boxes.*.recipient_province' => ['nullable', 'string', 'max:100'],
             'boxes.*.recipient_zip_code' => ['nullable', 'string', 'max:20'],
             'boxes.*.recipient_phone' => ['nullable', 'string', 'max:50'],
+            'boxes.*.recipient_secondary_phone' => ['nullable', 'string', 'max:50'],
             'boxes.*.recipient_landmarks' => ['nullable', 'string', 'max:500'],
             'boxes.*.recipient_latitude' => ['nullable', 'numeric'],
             'boxes.*.recipient_longitude' => ['nullable', 'numeric'],

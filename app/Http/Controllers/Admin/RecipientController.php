@@ -69,18 +69,39 @@ class RecipientController extends Controller
 
     public function update(Request $request, Recipient $recipient)
     {
+        if ($request->filled('phone_number')) {
+            $request->merge([
+                'phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('phone_number'))
+            ]);
+        }
+        if ($request->filled('secondary_phone_number')) {
+            $request->merge([
+                'secondary_phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('secondary_phone_number'))
+            ]);
+        }
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'phone_number' => [
                 'nullable',
                 'string',
-                'max:20',
+                'max:50',
                 new Phone('phone number'),
+            ],
+            'secondary_phone_number' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('secondary phone number'))->validate($attribute, $value, $fail);
+                    }
+                },
             ],
             'address' => 'required|string|max:500',
             'city' => 'required|string|max:100', // Mandate city to avoid N/A destinations (Item 74)
             'province' => 'required|string|max:100', // Mandate province (Item 74)
-            'zip_code' => 'nullable|string|max:10',
+            'zip_code' => 'nullable|string|max:20',
             'landmarks' => 'nullable|string|max:500',
             'area_id' => 'nullable|exists:areas,id',
         ]);

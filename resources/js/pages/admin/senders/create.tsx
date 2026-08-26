@@ -14,6 +14,7 @@ export default function SendersCreate() {
         last_name: '',
         email: '',
         mobile: '',
+        secondary_mobile: '',
         address: '',
         suburb: '',
         state: '',
@@ -137,6 +138,21 @@ export default function SendersCreate() {
                                 />
                                 {errors.mobile && (
                                     <p className="text-[11px] font-bold text-red-500 ml-1 uppercase tracking-wider">{errors.mobile}</p>
+                                )}
+                            </div>
+
+                            {/* Secondary Mobile */}
+                            <div className="space-y-3">
+                                <Label htmlFor="secondary_mobile" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground ml-1">
+                                    Secondary Phone Number <span className="text-muted-foreground/60 font-medium normal-case tracking-normal">(Optional)</span>
+                                </Label>
+                                <PhoneInput
+                                    value={data.secondary_mobile || ''}
+                                    onChange={val => setData('secondary_mobile', val)}
+                                    defaultCountryCode="AU"
+                                />
+                                {errors.secondary_mobile && (
+                                    <p className="text-[11px] font-bold text-red-500 ml-1 uppercase tracking-wider">{errors.secondary_mobile}</p>
                                 )}
                             </div>
 

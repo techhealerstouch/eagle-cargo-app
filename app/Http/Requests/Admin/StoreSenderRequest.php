@@ -21,8 +21,18 @@ class StoreSenderRequest extends FormRequest
             'mobile' => [
                 'required',
                 'string',
-                'max:20',
+                'max:50',
                 new Phone('mobile number'),
+            ],
+            'secondary_mobile' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('secondary phone number'))->validate($attribute, $value, $fail);
+                    }
+                },
             ],
             'address' => 'required|string|max:500',
             'suburb' => 'nullable|string|max:100',

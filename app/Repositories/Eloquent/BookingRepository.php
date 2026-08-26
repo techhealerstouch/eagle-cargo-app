@@ -11,6 +11,7 @@ use App\Jobs\NotifyAdminOfNewBooking;
 use App\Jobs\SendBookingConfirmationMail;
 use App\Models\Area;
 use App\Models\Booking;
+use App\Models\Box;
 use App\Models\Recipient;
 use App\Models\Runsheet;
 use App\Models\Sender;
@@ -18,6 +19,7 @@ use App\Models\User;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\ReferenceDataService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class BookingRepository implements BookingRepositoryInterface
@@ -35,6 +37,7 @@ class BookingRepository implements BookingRepositoryInterface
                     'last_name' => $data['last_name'],
                     'email' => $data['email'],
                     'mobile' => $data['mobile'],
+                    'secondary_mobile' => $data['secondary_mobile'] ?? $sender->secondary_mobile,
                     'address' => $data['address'],
                     'suburb' => $data['suburb'] ?? null,
                     'state' => $data['state'] ?? null,
@@ -44,10 +47,11 @@ class BookingRepository implements BookingRepositoryInterface
                 $sender = Sender::updateOrCreate(
                     ['email' => $data['email']],
                     [
-                        'user_id' => $data['user_id'] ?? auth()->id(),
+                        'user_id' => $data['user_id'] ?? Auth::id(),
                         'first_name' => $data['first_name'],
                         'last_name' => $data['last_name'],
                         'mobile' => $data['mobile'],
+                        'secondary_mobile' => $data['secondary_mobile'] ?? null,
                         'address' => $data['address'],
                         'suburb' => $data['suburb'] ?? null,
                         'state' => $data['state'] ?? null,
@@ -60,6 +64,7 @@ class BookingRepository implements BookingRepositoryInterface
             $booking = $sender->bookings()->create([
                 'reference_number' => null, // Handled by BookingObserver
                 'initialization_key' => $data['initialization_key'] ?? null,
+                'booking_type' => $data['booking_type'] ?? 'home_pickup',
                 'preferred_date' => $data['preferred_date'] ?? null,
                 'pickup_zone_id' => $data['pickup_zone_id'] ?? null,
                 'payment_method' => $data['payment_method'] ?? 'stripe',
@@ -141,6 +146,7 @@ class BookingRepository implements BookingRepositoryInterface
                 'first_name' => $data['first_name'],
                 'last_name' => $data['last_name'],
                 'mobile' => $data['mobile'],
+                'secondary_mobile' => $data['secondary_mobile'] ?? $sender->secondary_mobile,
                 'address' => $data['address'],
                 'suburb' => $data['suburb'] ?? $sender->suburb,
                 'state' => $data['state'] ?? $sender->state,
@@ -150,6 +156,7 @@ class BookingRepository implements BookingRepositoryInterface
             // Update Booking Root
             $booking->update([
                 'initialization_key' => $data['initialization_key'] ?? $booking->initialization_key,
+                'booking_type' => $data['booking_type'] ?? $booking->booking_type,
                 'preferred_date' => $data['preferred_date'] ?? $booking->preferred_date,
                 'pickup_zone_id' => array_key_exists('pickup_zone_id', $data) ? $data['pickup_zone_id'] : $booking->pickup_zone_id,
                 'payment_method' => $data['payment_method'] ?? $booking->payment_method,
@@ -226,6 +233,7 @@ class BookingRepository implements BookingRepositoryInterface
 
             // Encode the full form snapshot as JSON for draft restoration
             $draftPayload = json_encode([
+                'booking_type' => $data['booking_type'] ?? null,
                 'preferred_date' => $data['preferred_date'] ?? null,
                 'payment_method' => $data['payment_method'] ?? null,
                 'notes' => $data['notes'] ?? null,
@@ -233,6 +241,7 @@ class BookingRepository implements BookingRepositoryInterface
             ]);
 
             $bookingData = [
+                'booking_type' => $data['booking_type'] ?? ($existingDraft?->booking_type ?? 'home_pickup'),
                 'preferred_date' => $data['preferred_date'] ?? null,
                 'notes' => '<!--DRAFT_DATA-->'.$draftPayload,
             ];
@@ -287,6 +296,7 @@ class BookingRepository implements BookingRepositoryInterface
             // Update booking to pending
             $draft->update([
                 'status' => BookingStatus::Pending,
+                'booking_type' => $data['booking_type'] ?? ($draft->booking_type ?? 'home_pickup'),
                 'initialization_key' => $data['initialization_key'] ?? $draft->initialization_key,
                 'preferred_date' => $data['preferred_date'] ?? null,
                 'pickup_zone_id' => $data['pickup_zone_id'] ?? null,
@@ -689,6 +699,7 @@ class BookingRepository implements BookingRepositoryInterface
             $address = $firstBox['recipient_address'] ?? null;
 
             if ($firstName && $lastName && $address) {
+                /** @var Recipient|null $candidate */
                 $candidate = $sender->recipients()
                     ->where('first_name', $firstName)
                     ->where('last_name', $lastName)
@@ -702,6 +713,7 @@ class BookingRepository implements BookingRepositoryInterface
                         'name' => trim($firstName.' '.$lastName),
                         'email' => $email,
                         'phone_number' => $firstBox['recipient_phone'] ?? $candidate->phone_number,
+                        'secondary_phone_number' => $firstBox['recipient_secondary_phone'] ?? $candidate->secondary_phone_number,
                         'address' => $address,
                         'city' => $firstBox['recipient_city'] ?? $candidate->city,
                         'province' => $firstBox['recipient_province'] ?? $candidate->province,
@@ -720,6 +732,7 @@ class BookingRepository implements BookingRepositoryInterface
                     'last_name' => $firstBox['recipient_last_name'] ?? null,
                     'email' => $firstBox['recipient_email'] ?? null,
                     'phone_number' => $firstBox['recipient_phone'] ?? null,
+                    'secondary_phone_number' => $firstBox['recipient_secondary_phone'] ?? null,
                     'address' => $firstBox['recipient_address'],
                     'city' => $firstBox['recipient_city'],
                     'province' => $firstBox['recipient_province'],

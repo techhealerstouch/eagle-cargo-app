@@ -21,6 +21,7 @@ class SenderResource extends JsonResource
             'last_name' => $this->last_name,
             'email' => $this->email,
             'mobile' => $this->mobile,
+            'secondary_mobile' => $this->secondary_mobile,
             'phone' => $this->phone,
             'address' => $this->address,
             'suburb' => $this->suburb,

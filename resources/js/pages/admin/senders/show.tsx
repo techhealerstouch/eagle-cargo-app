@@ -11,6 +11,7 @@ interface SenderDetail {
     last_name: string;
     email?: string | null;
     mobile?: string | null;
+    secondary_mobile?: string | null;
     address?: string | null;
     suburb?: string | null;
     state?: string | null;
@@ -22,6 +23,7 @@ interface SenderDetail {
         id: number;
         name: string;
         phone_number?: string | null;
+        secondary_phone_number?: string | null;
         city?: string | null;
         province?: string | null;
         address?: string | null;
@@ -137,12 +139,22 @@ export default function SenderShow({ sender, bookings, stats = {} }: SenderShowP
                                 </div>
 
                                 <div>
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Contact Mobile</span>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Primary Mobile</span>
                                     <span className="font-medium text-zinc-800 flex items-center gap-1.5 font-mono text-xs">
                                         <Phone className="size-3.5 text-zinc-400" />
                                         {sender.mobile || <span className="text-zinc-400 italic font-sans">Not provided</span>}
                                     </span>
                                 </div>
+
+                                {sender.secondary_mobile && (
+                                    <div>
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Secondary Mobile</span>
+                                        <span className="font-medium text-zinc-800 flex items-center gap-1.5 font-mono text-xs">
+                                            <Phone className="size-3.5 text-zinc-400" />
+                                            {sender.secondary_mobile}
+                                        </span>
+                                    </div>
+                                )}
 
                                 <div>
                                     <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Primary Address</span>

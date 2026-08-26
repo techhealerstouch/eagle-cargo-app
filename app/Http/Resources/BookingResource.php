@@ -19,6 +19,7 @@ class BookingResource extends JsonResource
             'id' => $this->id,
             'reference_number' => $this->reference_number,
             'service_type' => $this->service_type,
+            'booking_type' => $this->booking_type instanceof \BackedEnum ? $this->booking_type->value : $this->booking_type,
             'status' => $this->status?->value,
             'payment_status' => $this->payment_status?->value,
             'preferred_date' => $this->preferred_date?->toISOString(),

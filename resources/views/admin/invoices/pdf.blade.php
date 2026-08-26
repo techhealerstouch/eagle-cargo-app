@@ -164,10 +164,27 @@
     $senderState = $senderSnapshot['state'] ?? '';
     $senderPostcode = $senderSnapshot['postcode'] ?? '';
 
+    $bookingTypeLabels = [
+        'drop_off' => 'BOX DROP OFF',
+        'home_pickup' => 'HOME PICK-UP',
+        'other' => 'OTHER',
+    ];
+    $rawBookingType = $bookingSnapshot['booking_type'] ?? ($invoice->booking?->booking_type instanceof \BackedEnum ? $invoice->booking->booking_type->value : ($invoice->booking?->booking_type ?? 'drop_off'));
+    $normalizedType = strtolower(str_replace(['-', '_'], ' ', trim((string) $rawBookingType)));
+    if (isset($bookingTypeLabels[$rawBookingType])) {
+        $typeLabel = $bookingTypeLabels[$rawBookingType];
+    } elseif ($normalizedType === 'drop off' || $normalizedType === 'box drop off' || empty($normalizedType)) {
+        $typeLabel = 'BOX DROP OFF';
+    } elseif ($normalizedType === 'home pickup' || $normalizedType === 'home pick up' || $normalizedType === 'pickup') {
+        $typeLabel = 'HOME PICK-UP';
+    } else {
+        $typeLabel = strtoupper(str_replace('_', ' ', (string) $rawBookingType));
+    }
+
     $batchNumbers = collect($lineItemsSnapshot)->pluck('batch_number')->filter()->unique();
     $subject = $batchNumbers->count() > 0
-        ? "BOX DROP OFF: BATCH " . $batchNumbers->implode(', ') . " SHIPMENT"
-        : "BOX DROP OFF";
+        ? $typeLabel . ": BATCH " . $batchNumbers->implode(', ') . " SHIPMENT"
+        : $typeLabel;
 
     $totalAmount = (float)$invoice->amount;
     $settledPayments = $invoice->payments->filter(function ($payment) {

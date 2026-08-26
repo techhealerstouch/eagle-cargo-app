@@ -254,6 +254,7 @@ class BookingController extends Controller
                         'first_name' => $validated['sender_first_name'],
                         'last_name' => $validated['sender_last_name'],
                         'mobile' => $validated['sender_mobile'],
+                        'secondary_mobile' => $validated['sender_secondary_mobile'] ?? null,
                         'address' => $validated['sender_address'],
                         'suburb' => $validated['sender_suburb'] ?? null,
                         'state' => $validated['sender_state'] ?? null,
@@ -278,6 +279,7 @@ class BookingController extends Controller
 
             $bookingData = Arr::only($validated, [
                 'status',
+                'booking_type',
                 'preferred_date',
                 'pickup_zone_id',
                 'payment_status',
@@ -289,9 +291,11 @@ class BookingController extends Controller
                 'empty_box_count',
                 'empty_box_fee',
             ]);
+            $bookingData['booking_type'] = $validated['booking_type'] ?? 'drop_off';
             $bookingData['sender_id'] = $senderId;
 
-            if (!empty($validated['request_empty_box']) || !empty($validated['empty_box_count'])) {
+            $requestEmptyBox = filter_var($validated['request_empty_box'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            if ($requestEmptyBox) {
                 $bookingData['empty_box_count'] = (int) ($validated['empty_box_count'] ?? 1);
                 $bookingData['empty_box_fee'] = (float) ($validated['empty_box_fee'] ?? 10.00);
             } else {
@@ -322,6 +326,7 @@ class BookingController extends Controller
                     'last_name' => $firstBox['recipient_last_name'] ?? null,
                     'email' => $firstBox['recipient_email'] ?? null,
                     'phone_number' => $firstBox['recipient_phone'] ?? null,
+                    'secondary_phone_number' => $firstBox['recipient_secondary_phone'] ?? null,
                     'address' => $firstBox['recipient_address'] ?? null,
                     'city' => $firstBox['recipient_city'] ?? null,
                     'province' => $firstBox['recipient_province'] ?? null,
@@ -445,6 +450,7 @@ class BookingController extends Controller
         $bookingData = Arr::only($validated, [
             'sender_id',
             'status',
+            'booking_type',
             'preferred_date',
             'pickup_zone_id',
             'payment_status',

@@ -24,6 +24,7 @@ interface Recipient {
     province: string;
     zip_code: string;
     phone_number?: string;
+    secondary_phone_number?: string;
     phone?: string;
     email?: string;
 }
@@ -69,6 +70,7 @@ interface Booking {
     estimated_delivery?: string | null;
     shipping_method?: string;
     service_type?: string;
+    booking_type?: string;
     declaration_form_status: string;
     declaration_form_path?: string | null;
     declaration_data?: any;
@@ -80,6 +82,7 @@ interface Booking {
         email?: string;
         phone?: string;
         mobile?: string;
+        secondary_mobile?: string;
         address?: string;
         suburb?: string;
         state?: string;
@@ -173,6 +176,15 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                 }`}>
                                     {booking.status === 'confirmed' ? <CheckCircle2 className="size-3" /> : <Clock className="size-3" />}
                                     {humanize(booking.status)}
+                                </div>
+                                <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                    booking.booking_type === 'home_pickup'
+                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                        : booking.booking_type === 'other'
+                                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                                            : 'bg-zinc-100 text-zinc-700 border border-zinc-200'
+                                }`}>
+                                    {booking.booking_type === 'home_pickup' ? 'Home Pick-Up' : booking.booking_type === 'other' ? 'Other' : 'Drop-Off'}
                                 </div>
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-sm">
@@ -301,6 +313,11 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                                                 <Phone className="size-3" /> {booking.sender.mobile || booking.sender.phone || 'N/A'}
                                             </p>
+                                            {booking.sender.secondary_mobile && (
+                                                <p className="text-[11px] text-muted-foreground font-mono ml-4.5">
+                                                    Alt: {booking.sender.secondary_mobile}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="pt-2 flex items-start gap-1.5 text-xs text-brand-rust/80">
                                             <MapPin className="size-3.5 mt-0.5 shrink-0 text-muted-foreground" />
@@ -330,6 +347,11 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
                                                 <Phone className="size-3" /> {booking.boxes?.[0]?.recipient?.phone_number || booking.boxes?.[0]?.recipient?.phone || booking.recipient_phone || 'N/A'}
                                             </p>
+                                            {booking.boxes?.[0]?.recipient?.secondary_phone_number && (
+                                                <p className="text-[11px] text-muted-foreground font-mono ml-4.5">
+                                                    Alt: {booking.boxes[0].recipient.secondary_phone_number}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className="pt-2 flex items-start gap-1.5 text-xs text-brand-rust/80">
                                             <MapPin className="size-3.5 mt-0.5 shrink-0 text-muted-foreground" />

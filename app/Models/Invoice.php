@@ -301,6 +301,7 @@ public static function generateForBooking(Booking $booking): self
         $payload['booking']['sender'] = array_merge($payload['booking']['sender'] ?? [], $senderSnapshot);
         $payload['booking']['reference_number'] = $bookingSnapshot['reference_number'] ?? ($payload['booking']['reference_number'] ?? null);
         $payload['booking']['destination'] = $bookingSnapshot['destination'] ?? ($payload['booking']['destination'] ?? null);
+        $payload['booking']['booking_type'] = $bookingSnapshot['booking_type'] ?? ($this->booking?->booking_type instanceof \BackedEnum ? $this->booking->booking_type->value : ($this->booking?->booking_type ?? 'drop_off'));
         $payload['booking']['boxes'] = $lineItemsSnapshot;
         $payload['admin_team'] = $this->resolveAdminTeamSnapshot();
 

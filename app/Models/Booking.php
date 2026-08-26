@@ -6,6 +6,7 @@ use App\Concerns\LogsActivity;
 use App\Concerns\NormalizesNotes;
 use App\Concerns\VersionsEntity;
 use App\Enums\BookingStatus;
+use App\Enums\BookingType;
 use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\RunsheetStatus;
@@ -40,6 +41,7 @@ class Booking extends Model
         'reference_number',
         'initialization_key',
         'service_type',
+        'booking_type',
         'status',
         'preferred_date',
         'payment_status',
@@ -73,6 +75,7 @@ class Booking extends Model
         'primary_recipient_snapshot' => 'array',
         'snapshot_taken_at' => 'datetime',
         'status' => BookingStatus::class,
+        'booking_type' => BookingType::class,
         'payment_status' => PaymentStatus::class,
         'declaration_data' => 'array',
         'is_manual' => 'boolean',

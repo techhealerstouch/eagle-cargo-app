@@ -243,6 +243,7 @@ class TransactionSnapshotService
             'last_name' => $sender?->last_name,
             'email' => $sender?->email,
             'mobile' => $sender?->mobile,
+            'secondary_mobile' => $sender?->secondary_mobile,
             'phone' => $sender?->mobile,
             'address' => $sender?->address,
             'suburb' => $sender?->suburb,
@@ -259,6 +260,7 @@ class TransactionSnapshotService
             'id' => $recipient?->id,
             'name' => $recipient?->name,
             'phone_number' => $recipient?->phone_number,
+            'secondary_phone_number' => $recipient?->secondary_phone_number,
             'address' => $recipient?->address,
             'city' => $recipient?->city,
             'province' => $recipient?->province,
@@ -276,6 +278,7 @@ class TransactionSnapshotService
                 'reference_number' => null,
                 'destination' => 'N/A',
                 'service_type' => null,
+                'booking_type' => null,
                 'preferred_date' => null,
             ];
         }
@@ -287,6 +290,7 @@ class TransactionSnapshotService
             'reference_number' => $booking->reference_number,
             'destination' => $destination,
             'service_type' => $booking->service_type,
+            'booking_type' => $booking->booking_type instanceof \BackedEnum ? $booking->booking_type->value : ($booking->booking_type ?? 'drop_off'),
             'preferred_date' => optional($booking->preferred_date)->format('Y-m-d H:i:s'),
         ];
     }

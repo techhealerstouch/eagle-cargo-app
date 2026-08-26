@@ -31,6 +31,7 @@ interface InvoiceShowProps {
         booking: {
             reference_number: string;
             destination: string;
+            booking_type?: string;
             sender: {
                 first_name: string;
                 last_name: string;
@@ -103,10 +104,28 @@ export default function InvoiceShow({ invoice, invoiceSettings }: InvoiceShowPro
 
     const senderName = `${sender.first_name || ''} ${sender.last_name || ''}`.trim();
 
+    const BOOKING_TYPE_LABELS: Record<string, string> = {
+        drop_off: 'BOX DROP OFF',
+        home_pickup: 'HOME PICK-UP',
+        other: 'OTHER',
+    };
+    const rawBookingType = invoice.booking?.booking_type || booking.booking_type || 'drop_off';
+    const normalizedType = String(rawBookingType).toLowerCase().replace(/[-_]/g, ' ').trim();
+    let typeLabel = BOOKING_TYPE_LABELS[rawBookingType];
+    if (!typeLabel) {
+        if (normalizedType === 'drop off' || normalizedType === 'box drop off') {
+            typeLabel = 'BOX DROP OFF';
+        } else if (normalizedType === 'home pickup' || normalizedType === 'home pick up' || normalizedType === 'pickup') {
+            typeLabel = 'HOME PICK-UP';
+        } else {
+            typeLabel = String(rawBookingType).replace(/_/g, ' ').toUpperCase();
+        }
+    }
+
     const batchNumbers = Array.from(new Set(lineItems.map(i => i.batch_number).filter(Boolean)));
     const subject = batchNumbers.length > 0
-        ? `BOX DROP OFF: BATCH ${batchNumbers.join(', ')} SHIPMENT`
-        : 'BOX DROP OFF';
+        ? `${typeLabel}: BATCH ${batchNumbers.join(', ')} SHIPMENT`
+        : typeLabel;
 
     const totalAmount = Number(invoice.amount);
     const settledPayments = (invoice.payments || []).filter(p => p.paid_at !== null || p.stripe_status === 'succeeded');

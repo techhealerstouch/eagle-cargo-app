@@ -41,6 +41,7 @@ interface Booking {
     status: string;
     payment_status: string;
     service_type: string;
+    booking_type?: string;
     destination: string;
     preferred_date: string | null;
     is_potential_duplicate?: boolean;
@@ -594,9 +595,21 @@ export default function BookingsIndex({
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex flex-col">
                                                         <span className="font-semibold text-zinc-900">{booking.sender.first_name} {booking.sender.last_name}</span>
-                                                        <span className="text-zinc-500 text-[11px] font-normal mt-0.5">
-                                                            {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}
-                                                        </span>
+                                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                                            <span className="text-zinc-500 text-[11px] font-normal">
+                                                                {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}
+                                                            </span>
+                                                            <span className="text-zinc-300">•</span>
+                                                            <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
+                                                                booking.booking_type === 'home_pickup'
+                                                                    ? 'bg-blue-50 text-blue-700'
+                                                                    : booking.booking_type === 'other'
+                                                                        ? 'bg-purple-50 text-purple-700'
+                                                                        : 'bg-zinc-100 text-zinc-600'
+                                                            }`}>
+                                                                {booking.booking_type === 'home_pickup' ? 'Pick-Up' : booking.booking_type === 'other' ? 'Other' : 'Drop-Off'}
+                                                            </span>
+                                                        </div>
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5 text-zinc-600">

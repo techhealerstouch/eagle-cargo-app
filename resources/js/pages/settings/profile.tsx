@@ -29,6 +29,7 @@ interface Sender {
     user_id: number;
     country: string;
     mobile: string;
+    secondary_mobile?: string | null;
     address: string;
     suburb: string;
     state: string;
@@ -77,6 +78,7 @@ export default function Profile({
     const [suburb, setSuburb] = React.useState(sender?.suburb || '');
     const [postcode, setPostcode] = React.useState(sender?.postcode || '');
     const [mobile, setMobile] = React.useState(sender?.mobile || '');
+    const [secondaryMobile, setSecondaryMobile] = React.useState(sender?.secondary_mobile || '');
     const [gpsAutoFilled, setGpsAutoFilled] = React.useState(false);
 
     const detectedCountryCode = COUNTRIES.find(c => c.name === selectedCountry)?.code || 'AU';
@@ -231,7 +233,7 @@ export default function Profile({
                                             )}
                                         </div>
 
-                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                                             <div className="space-y-1.5">
                                                 <Label htmlFor="country" className="text-xs font-semibold text-zinc-700">
                                                     Country
@@ -257,7 +259,7 @@ export default function Profile({
 
                                             <div className="space-y-1.5">
                                                 <Label htmlFor="mobile" className="text-xs font-semibold text-zinc-700">
-                                                    Mobile Number
+                                                    Primary Mobile
                                                 </Label>
                                                 <PhoneInput
                                                     name="mobile"
@@ -266,6 +268,19 @@ export default function Profile({
                                                     defaultCountryCode={detectedCountryCode}
                                                 />
                                                 <InputError message={errors.mobile} />
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <Label htmlFor="secondary_mobile" className="text-xs font-semibold text-zinc-700">
+                                                    Secondary Mobile <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                </Label>
+                                                <PhoneInput
+                                                    name="secondary_mobile"
+                                                    value={secondaryMobile}
+                                                    onChange={setSecondaryMobile}
+                                                    defaultCountryCode={detectedCountryCode}
+                                                />
+                                                <InputError message={errors.secondary_mobile} />
                                             </div>
                                         </div>
 

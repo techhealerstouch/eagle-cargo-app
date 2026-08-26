@@ -19,6 +19,7 @@ class RecipientResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'phone_number' => $this->phone_number,
+            'secondary_phone_number' => $this->secondary_phone_number,
             'address' => $this->address,
             'city' => $this->city,
             'province' => $this->province,

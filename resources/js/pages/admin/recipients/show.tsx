@@ -12,6 +12,7 @@ interface RecipientDetail {
     last_name?: string | null;
     email?: string | null;
     phone_number?: string | null;
+    secondary_phone_number?: string | null;
     address?: string | null;
     city?: string | null;
     province?: string | null;
@@ -24,6 +25,7 @@ interface RecipientDetail {
         last_name: string;
         email?: string | null;
         mobile?: string | null;
+        secondary_mobile?: string | null;
     } | null;
     area?: {
         id: number;
@@ -138,12 +140,22 @@ export default function RecipientShow({ recipient, boxes, stats = {} }: Recipien
                                 </div>
 
                                 <div>
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Contact Phone</span>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Primary Phone</span>
                                     <span className="font-medium text-zinc-800 flex items-center gap-1.5 font-mono text-xs">
                                         <Phone className="size-3.5 text-zinc-400" />
                                         {recipient.phone_number || <span className="text-zinc-400 italic font-sans">Not provided</span>}
                                     </span>
                                 </div>
+
+                                {recipient.secondary_phone_number && (
+                                    <div>
+                                        <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Secondary Phone</span>
+                                        <span className="font-medium text-zinc-800 flex items-center gap-1.5 font-mono text-xs">
+                                            <Phone className="size-3.5 text-zinc-400" />
+                                            {recipient.secondary_phone_number}
+                                        </span>
+                                    </div>
+                                )}
 
                                 <div>
                                     <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block mb-1">Delivery Address</span>

@@ -13,7 +13,7 @@ class Recipient extends Model
     use HasFactory, LogsActivity, SoftDeletes, VersionsEntity;
 
     protected $fillable = [
-        'sender_id', 'user_id', 'area_id', 'name', 'first_name', 'last_name', 'email', 'phone_number',
+        'sender_id', 'user_id', 'area_id', 'name', 'first_name', 'last_name', 'email', 'phone_number', 'secondary_phone_number',
         'address', 'city', 'province', 'zip_code', 'landmarks', 'latitude', 'longitude',
     ];
 

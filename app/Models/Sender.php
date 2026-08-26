@@ -32,6 +32,7 @@ class Sender extends Model
         'email',
         'country',
         'mobile',
+        'secondary_mobile',
         'address',
         'suburb',
         'state',

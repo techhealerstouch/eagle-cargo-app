@@ -130,7 +130,7 @@ class SenderController extends Controller
 
         $callback = function () use ($senders) {
             $file = fopen('php://output', 'w');
-            fputcsv($file, ['ID', 'First Name', 'Last Name', 'Email', 'Mobile', 'Address', 'Created At']);
+            fputcsv($file, ['ID', 'First Name', 'Last Name', 'Email', 'Mobile', 'Secondary Mobile', 'Address', 'Created At']);
 
             foreach ($senders as $sender) {
                 fputcsv($file, [
@@ -139,6 +139,7 @@ class SenderController extends Controller
                     $sender->last_name,
                     $sender->email,
                     $sender->mobile,
+                    $sender->secondary_mobile ?? '',
                     $sender->address,
                     $sender->created_at->format('Y-m-d H:i:s'),
                 ]);
