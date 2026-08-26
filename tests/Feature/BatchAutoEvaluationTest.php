@@ -44,7 +44,7 @@ class BatchAutoEvaluationTest extends TestCase
     // 1. Box Count Capacity
     // ---------------------------------------------------------------
 
-    public function test_batch_becomes_ready_to_close_when_box_capacity_reached(): void
+    public function test_batch_stays_open_when_box_capacity_reached(): void
     {
         $batch = $this->createBatchWithCapacity(boxCapacity: 2);
 
@@ -52,7 +52,8 @@ class BatchAutoEvaluationTest extends TestCase
         $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
 
         $this->addBoxToBatch($batch);
-        $this->assertEquals(BatchStatus::ReadyToClose, $batch->fresh()->status);
+        // Batch remains open, warning is generated instead of auto-closing
+        $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
     }
 
     public function test_batch_does_not_close_before_capacity_reached(): void
@@ -71,7 +72,7 @@ class BatchAutoEvaluationTest extends TestCase
     // 2. Weight Capacity
     // ---------------------------------------------------------------
 
-    public function test_batch_becomes_ready_to_close_when_weight_capacity_reached(): void
+    public function test_batch_stays_open_when_weight_capacity_reached(): void
     {
         $batch = $this->createBatchWithCapacity(boxCapacity: 100, weightCapacity: 50.0);
 
@@ -79,15 +80,15 @@ class BatchAutoEvaluationTest extends TestCase
         $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
 
         $this->addBoxToBatch($batch, weight: 25.0);
-        // Total: 55 > 50 capacity → Ready to Close
-        $this->assertEquals(BatchStatus::ReadyToClose, $batch->fresh()->status);
+        // Total: 55 > 50 capacity → Stays Open
+        $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
     }
 
     // ---------------------------------------------------------------
     // 3. CBM Capacity
     // ---------------------------------------------------------------
 
-    public function test_batch_becomes_ready_to_close_when_cbm_capacity_reached(): void
+    public function test_batch_stays_open_when_cbm_capacity_reached(): void
     {
         $batch = $this->createBatchWithCapacity(boxCapacity: 100, weightCapacity: 10000, cbmCapacity: 1.0);
 
@@ -95,8 +96,8 @@ class BatchAutoEvaluationTest extends TestCase
         $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
 
         $this->addBoxToBatch($batch, cbm: 0.5);
-        // Total: 1.1 > 1.0 → Ready to Close
-        $this->assertEquals(BatchStatus::ReadyToClose, $batch->fresh()->status);
+        // Total: 1.1 > 1.0 → Stays Open
+        $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
     }
 
     // ---------------------------------------------------------------
@@ -108,7 +109,8 @@ class BatchAutoEvaluationTest extends TestCase
         $batch = $this->createBatchWithCapacity(boxCapacity: 1);
         $this->addBoxToBatch($batch);
 
-        // Batch should be ready to close
+        // Manually move to ReadyToClose
+        $batch->update(['status' => BatchStatus::ReadyToClose]);
         $this->assertEquals(BatchStatus::ReadyToClose, $batch->fresh()->status);
 
         $sailed = app(BatchService::class)->confirmManifest($batch->fresh());
@@ -120,10 +122,23 @@ class BatchAutoEvaluationTest extends TestCase
     public function test_confirm_manifest_fails_if_not_ready_to_close(): void
     {
         $batch = $this->createBatchWithCapacity(boxCapacity: 10);
-        // No boxes added → still Open
+        // Add one box so it's not empty, but not full yet
+        $this->addBoxToBatch($batch);
+        $this->assertEquals(BatchStatus::Open, $batch->fresh()->status);
 
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('not yet ready to close');
+
+        app(BatchService::class)->confirmManifest($batch);
+    }
+
+    public function test_confirm_manifest_fails_for_empty_batch(): void
+    {
+        $batch = $this->createBatchWithCapacity(boxCapacity: 10);
+        $this->assertEquals(0, $batch->current_box_count);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cannot confirm manifest for an empty batch. Assign boxes first.');
 
         app(BatchService::class)->confirmManifest($batch);
     }
@@ -136,6 +151,8 @@ class BatchAutoEvaluationTest extends TestCase
     {
         $batch = $this->createBatchWithCapacity(boxCapacity: 1);
         $this->addBoxToBatch($batch);
+
+        $batch->update(['status' => BatchStatus::ReadyToClose]);
 
         $batch = app(BatchService::class)->confirmManifest($batch->fresh());
         $this->assertEquals(BatchStatus::Sailed, $batch->fresh()->status);
@@ -167,14 +184,14 @@ class BatchAutoEvaluationTest extends TestCase
         $box1 = $this->addBoxToBatch($batch1);
         $box2 = $this->addBoxToBatch($batch1);
 
-        // batch1 is now full → ReadyToClose
-        $this->assertEquals(BatchStatus::ReadyToClose, $batch1->fresh()->status);
+        // batch1 is now full but stays Open
+        $this->assertEquals(BatchStatus::Open, $batch1->fresh()->status);
         $this->assertSame(2, $batch1->fresh()->current_box_count);
 
         // Move box2 from batch1 to batch2
         $box2->update(['batch_id' => $batch2->id]);
 
-        // batch1 should revert to Open (only 1 box now)
+        // batch1 should stay Open (only 1 box now)
         $this->assertSame(1, $batch1->fresh()->current_box_count);
         // batch2 should now have 1 box, still Open
         $this->assertSame(1, $batch2->fresh()->current_box_count);
@@ -187,11 +204,23 @@ class BatchAutoEvaluationTest extends TestCase
     public function test_batch_cannot_skip_statuses(): void
     {
         $batch = $this->createBatchWithCapacity(boxCapacity: 10);
+        $this->addBoxToBatch($batch);
 
         $this->expectException(\InvalidArgumentException::class);
 
         // Open → Arrived is invalid (must go through Loading/ReadyToClose → Sailed → Arrived)
         app(BatchService::class)->update($batch, ['status' => BatchStatus::Arrived]);
+    }
+
+    public function test_cannot_transition_empty_batch_to_shipping_status(): void
+    {
+        $batch = $this->createBatchWithCapacity(boxCapacity: 10);
+        $this->assertEquals(0, $batch->current_box_count);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Cannot transition an empty batch to a shipping status.');
+
+        app(BatchService::class)->update($batch, ['status' => BatchStatus::ReadyToClose->value]);
     }
 
     // ---------------------------------------------------------------

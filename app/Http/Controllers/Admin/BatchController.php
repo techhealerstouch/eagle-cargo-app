@@ -138,6 +138,20 @@ class BatchController extends Controller
         );
     }
 
+    public function reopen(Batch $batch, BatchService $batchService): RedirectResponse
+    {
+        try {
+            $reopenedBatch = $batchService->update($batch, ['status' => BatchStatus::Open->value]);
+        } catch (\InvalidArgumentException $exception) {
+            return back()->withErrors(['status' => $exception->getMessage()]);
+        }
+
+        return back()->with(
+            'success',
+            sprintf('Batch %s has been reopened to %s status.', $reopenedBatch->batch_number, $reopenedBatch->status->label()),
+        );
+    }
+
     /**
      * Search for boxes available to load into this batch.
      */
@@ -195,11 +209,8 @@ class BatchController extends Controller
             }
         })->get();
 
-        // Hybrid capacity check: block if adding these boxes would exceed capacity
-        $capacityError = $batchService->checkCapacity($batch, count($boxes));
-        if ($capacityError) {
-            return back()->with('error', $capacityError);
-        }
+        // Hybrid capacity check: check if adding these boxes would exceed capacity
+        $capacityWarning = $batchService->checkCapacity($batch, count($boxes));
 
         $loaded = 0;
         $skipped = 0;
@@ -324,10 +335,16 @@ class BatchController extends Controller
         $batch->refresh();
         $isFull = $batch->status === BatchStatus::ReadyToClose->value;
 
-        return back()
+        $response = back()
             ->with('success', $message)
             ->with('batch_full', $isFull)
             ->with('skipped_reasons', $skippedReasons);
+
+        if ($capacityWarning) {
+            $response->with('warning', $capacityWarning);
+        }
+
+        return $response;
     }
 
     public function bulkUpdateTrackingPhase(

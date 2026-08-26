@@ -219,4 +219,73 @@ class BatchLifecycleTest extends TestCase
             'updated_by' => $actor->id,
         ]);
     }
+
+    public function test_reopening_batch_resets_status_and_timestamps(): void
+    {
+        $service = app(BatchService::class);
+
+        $batch = $service->create([
+            'branch_name' => 'Sydney Hub',
+            'capacity_boxes' => 5,
+            'status' => BatchStatus::Open,
+        ]);
+
+        $boxType = BoxType::factory()->create(['dimensions' => '24x24x24']);
+        Box::factory()->create([
+            'batch_id' => $batch->id,
+            'box_type_id' => $boxType->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'weight' => 10,
+        ]);
+
+        // Move to Sailed
+        $batch = $service->update($batch, [
+            'status' => BatchStatus::Sailed->value,
+        ]);
+
+        $this->assertSame(BatchStatus::Sailed, $batch->status);
+        $this->assertNotNull($batch->sailed_at);
+
+        // Reopen to Open
+        $reopened = $service->update($batch, [
+            'status' => BatchStatus::Open->value,
+        ]);
+
+        $this->assertSame(BatchStatus::Open, $reopened->status);
+        $this->assertNull($reopened->sailed_at);
+        $this->assertNull($reopened->arrived_at);
+        $this->assertNull($reopened->delivered_at);
+    }
+
+    public function test_admin_can_reopen_batch_via_route(): void
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => \App\Enums\Role::Admin]);
+        $this->actingAs($admin);
+
+        $service = app(BatchService::class);
+        $batch = $service->create([
+            'branch_name' => 'Sydney Hub',
+            'capacity_boxes' => 5,
+            'status' => BatchStatus::Open,
+        ]);
+
+        $boxType = BoxType::factory()->create(['dimensions' => '24x24x24']);
+        Box::factory()->create([
+            'batch_id' => $batch->id,
+            'box_type_id' => $boxType->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'weight' => 10,
+        ]);
+
+        $batch = $service->update($batch, ['status' => BatchStatus::Sailed->value]);
+        $this->assertSame(BatchStatus::Sailed, $batch->status);
+
+        $response = $this->post(route('admin.batches.reopen', $batch));
+        $response->assertSessionHasNoErrors();
+        $response->assertSessionHas('success');
+
+        $this->assertSame(BatchStatus::Open, $batch->fresh()->status);
+        $this->assertNull($batch->fresh()->sailed_at);
+    }
 }

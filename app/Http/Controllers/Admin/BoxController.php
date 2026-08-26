@@ -240,18 +240,23 @@ class BoxController extends Controller
         }
 
         $failedBoxes = [];
+        $eligibleBoxes = [];
         foreach ($boxes as $box) {
             if ($box->booking->status === BookingStatus::Cancelled) {
                 $failedBoxes[] = "{$box->tracking_number} (Cancelled)";
-            } elseif ($box->booking->payment_status !== PaymentStatus::Paid) {
+            } elseif (!in_array($box->booking->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)) {
                 $failedBoxes[] = "{$box->tracking_number} (Not Paid)";
             } elseif ($box->booking->needsDeclaration()) {
                 $failedBoxes[] = "{$box->tracking_number} (Missing Declaration)";
+            } elseif ($box->batch_id !== null) {
+                $failedBoxes[] = "{$box->tracking_number} (Already in a Batch)";
+            } else {
+                $eligibleBoxes[] = $box;
             }
         }
 
-        if (count($failedBoxes) > 0) {
-            $msg = "Cannot assign boxes to batch. The following are not eligible: " . implode(', ', $failedBoxes);
+        if (count($eligibleBoxes) === 0) {
+            $msg = "Cannot assign boxes to batch. All selected boxes are ineligible: " . implode(', ', $failedBoxes);
             return redirect()->back()->with('error', $msg);
         }
 
@@ -259,7 +264,7 @@ class BoxController extends Controller
         $userId = Auth::id();
         $batch = Batch::find($validated['batch_id']);
 
-        foreach ($boxes as $box) {
+        foreach ($eligibleBoxes as $box) {
             $box->update(['batch_id' => $validated['batch_id']]);
             $boxRepo->updateStatus(
                 $box,
@@ -270,7 +275,13 @@ class BoxController extends Controller
             $count++;
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', "{$count} boxes assigned to batch successfully.");
+        $msg = "{$count} boxes assigned to batch successfully.";
+        if (count($failedBoxes) > 0) {
+            $msg .= " The following boxes were skipped: " . implode(', ', $failedBoxes);
+            return redirect()->route('admin.boxes.index')->with('warning', $msg);
+        }
+
+        return redirect()->route('admin.boxes.index')->with('success', $msg);
     }
 
     public function bulkDestroy(Request $request)

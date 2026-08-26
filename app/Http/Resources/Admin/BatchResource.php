@@ -57,7 +57,32 @@ class BatchResource extends JsonResource
             'boxes' => $this->resource->relationLoaded('boxes') ? $this->resource->boxes : [],
             'latest_tracking_phase' => $latestTrackingPhase,
             'latest_tracking_phase_order' => $this->getTrackingStepOrder($trackingSteps, $latestTrackingPhase),
+            'warnings' => $this->getWarnings(),
         ];
+    }
+
+    private function getWarnings(): array
+    {
+        $warnings = [];
+        $batch = $this->resource;
+
+        if ((int) ($batch->capacity_boxes ?? 0) > 0 && (int) $batch->current_box_count >= (int) $batch->capacity_boxes) {
+            $warnings[] = 'Box capacity reached';
+        }
+
+        if ((float) ($batch->capacity_weight_kg ?? 0) > 0 && (float) $batch->current_weight_kg >= (float) $batch->capacity_weight_kg) {
+            $warnings[] = 'Weight capacity reached';
+        }
+
+        if ((float) ($batch->capacity_cbm ?? 0) > 0 && (float) $batch->current_cbm >= (float) $batch->capacity_cbm) {
+            $warnings[] = 'CBM capacity reached';
+        }
+
+        if ($batch->cutoff_at !== null && now()->greaterThanOrEqualTo($batch->cutoff_at)) {
+            $warnings[] = 'Cut-off date has passed';
+        }
+
+        return $warnings;
     }
 
     private function getConfiguredTrackingSteps(TrackingStepService $service): Collection

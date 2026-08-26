@@ -38,6 +38,7 @@ class WarehouseOperationTest extends TestCase
     {
         $booking = Booking::factory()->create([
             'status' => BookingStatus::Confirmed,
+            'payment_status' => \App\Enums\PaymentStatus::Paid,
             'declaration_form_status' => 'submitted_online',
         ]);
 
@@ -116,6 +117,58 @@ class WarehouseOperationTest extends TestCase
         $this->assertEquals($batch->id, $box1->fresh()->batch_id);
         $this->assertEquals($batch->id, $box2->fresh()->batch_id);
         $this->assertSame(2, $batch->fresh()->current_box_count);
+    }
+
+    public function test_bulk_assign_skips_ineligible_boxes(): void
+    {
+        $warehouse = $this->createWarehouseUser();
+        $this->actingAs($warehouse);
+
+        $batch = app(BatchService::class)->create([
+            'branch_name' => 'Sydney Hub',
+            'capacity_boxes' => 10,
+            'status' => BatchStatus::Open,
+        ]);
+
+        $box1 = $this->createBoxWithBooking(BoxStatus::ReceivedByWarehouse);
+        // Valid
+
+        $booking2 = Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'payment_status' => \App\Enums\PaymentStatus::Paid,
+            'declaration_form_status' => 'missing',
+        ]);
+        $box2 = Box::factory()->create([
+            'booking_id' => $booking2->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'weight' => 20.0,
+        ]);
+        // Missing declaration
+
+        $booking3 = Booking::factory()->create([
+            'status' => BookingStatus::Cancelled,
+            'payment_status' => \App\Enums\PaymentStatus::Paid,
+            'declaration_form_status' => 'submitted_online',
+        ]);
+        $box3 = Box::factory()->create([
+            'booking_id' => $booking3->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'weight' => 20.0,
+        ]);
+        // Cancelled booking
+
+        $response = $this->post(route('admin.boxes.bulk-assign-to-batch'), [
+            'ids' => [$box1->id, $box2->id, $box3->id],
+            'batch_id' => $batch->id,
+        ]);
+
+        // Box2 and Box3 should be skipped, generating a warning flash message
+        $response->assertSessionHas('warning');
+
+        $this->assertEquals($batch->id, $box1->fresh()->batch_id);
+        $this->assertNull($box2->fresh()->batch_id);
+        $this->assertNull($box3->fresh()->batch_id);
+        $this->assertSame(1, $batch->fresh()->current_box_count);
     }
 
     // ---------------------------------------------------------------

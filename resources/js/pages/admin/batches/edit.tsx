@@ -1,6 +1,6 @@
 import { Head, useForm, Link } from '@inertiajs/react';
 import {
-    Save, ArrowLeft, Ship, MapPin, CalendarClock, RefreshCw,
+    Save, ArrowLeft, Ship, MapPin, CalendarClock, RefreshCw, RotateCcw,
     Container, AlertTriangle, ShieldCheck, CheckCircle2,
     Package, Clock, Anchor, Box, ChevronRight, ChevronLeft, Info, Sparkles, Activity
 } from 'lucide-react';
@@ -32,6 +32,8 @@ interface BatchPayload {
     cutoff_at: string | null;
     eta_at: string | null;
     status: string;
+    current_box_count?: number;
+    warnings?: string[];
 }
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -96,6 +98,8 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
         return 30;
     })();
+
+    const isBatchEmpty = (batch.current_box_count ?? 0) === 0;
 
     const handleCutoffChange = (newCutoffStr: string) => {
         setData((prev) => {
@@ -182,6 +186,22 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={`Edit Batch ${batch.batch_number} | Admin`} />
             <div className="flex flex-col gap-6 p-8 max-w-[1600px] mx-auto w-full">
+                {/* Warnings Banner */}
+                {batch.warnings && batch.warnings.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm flex gap-3 shadow-sm">
+                        <AlertTriangle className="size-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="font-semibold text-amber-900 mb-1">Warning: Action Required</h4>
+                            <p>This batch has reached capacity limits or its cut-off date has passed. Please consider closing the batch.</p>
+                            <ul className="list-disc pl-5 mt-2 text-xs font-medium">
+                                {batch.warnings.map((warning, i) => (
+                                    <li key={i}>{warning}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                )}
+
                 {/* Page Header */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-zinc-100 pb-8">
                     <div className="flex items-center gap-4">
@@ -351,10 +371,10 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                         >
                                                             <option value="open">Open</option>
                                                             <option value="loading">Loading</option>
-                                                            <option value="ready_to_close">Ready to Close</option>
-                                                            <option value="sailed">Sailed</option>
-                                                            <option value="arrived">Arrived</option>
-                                                            <option value="delivered">Delivered</option>
+                                                            <option value="ready_to_close" disabled={isBatchEmpty}>Ready to Close</option>
+                                                            <option value="sailed" disabled={isBatchEmpty}>Sailed</option>
+                                                            <option value="arrived" disabled={isBatchEmpty}>Arrived</option>
+                                                            <option value="delivered" disabled={isBatchEmpty}>Delivered</option>
                                                         </select>
 
                                                         {nextAction && data.status === batch.status && (
@@ -380,6 +400,30 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                             <p className="text-xs font-bold text-amber-900">Conditional Transition</p>
                                                             <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
                                                                 The system will automatically revert this to <strong className="font-semibold">Loading</strong> if the batch has not yet reached its capacity limit or passed its cut-off date.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {(data.status === 'open' || data.status === 'loading') && ['ready_to_close', 'sailed', 'arrived', 'delivered'].includes(batch.status) && (
+                                                    <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
+                                                        <RotateCcw className="size-4.5 text-sky-600 mt-0.5 shrink-0" />
+                                                        <div>
+                                                            <p className="text-xs font-bold text-sky-900">Reopening Batch</p>
+                                                            <p className="text-[11px] text-sky-800 mt-0.5 leading-relaxed">
+                                                                Setting status to <strong className="font-semibold">{data.status === 'open' ? 'Open' : 'Loading'}</strong> will reopen this batch for box modifications and reset sailing/arrival timestamps.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isBatchEmpty && (
+                                                    <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50/70 p-4">
+                                                        <AlertTriangle className="size-4.5 text-red-600 mt-0.5 shrink-0" />
+                                                        <div>
+                                                            <p className="text-xs font-bold text-red-900">Empty Batch</p>
+                                                            <p className="text-[11px] text-red-800 mt-0.5 leading-relaxed">
+                                                                This batch contains no boxes. You must assign at least one box before it can be closed or manifested.
                                                             </p>
                                                         </div>
                                                     </div>

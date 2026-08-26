@@ -39,6 +39,36 @@ export default function BulkAssignBatchModal({
     const [batchId, setBatchId] = useState('');
     const [isAssigning, setIsAssigning] = useState(false);
 
+    const ineligibleBoxes = React.useMemo(() => {
+        if (!selectedBoxes || isGlobalSelection) return [];
+        return selectedBoxes.filter((box) => {
+            if (box.booking?.status === 'cancelled') return true;
+            if (box.booking?.payment_status !== 'paid' && box.booking?.payment_status !== 'cash_collected') return true;
+            
+            const declStatus = box.booking?.declaration_form_status || '';
+            if (!['submitted_online', 'physical_copy_received'].includes(declStatus)) {
+                const hasData = box.booking?.declaration_data && Object.keys(box.booking.declaration_data).length > 0;
+                const hasPath = !!box.booking?.declaration_form_path;
+                if (!hasData && !hasPath) return true;
+            }
+            return false;
+        });
+    }, [selectedBoxes, isGlobalSelection]);
+
+    const alreadyAssignedBoxes = React.useMemo(() => {
+        if (!selectedBoxes || isGlobalSelection) return [];
+        return selectedBoxes.filter(box => box.batch_id !== null);
+    }, [selectedBoxes, isGlobalSelection]);
+
+    const eligibleBoxesCount = React.useMemo(() => {
+        if (isGlobalSelection) return null;
+        const skippedIds = new Set([
+            ...ineligibleBoxes.map(b => b.id),
+            ...alreadyAssignedBoxes.map(b => b.id)
+        ]);
+        return selectedIds.length - skippedIds.size;
+    }, [selectedIds, ineligibleBoxes, alreadyAssignedBoxes, isGlobalSelection]);
+
     useEffect(() => {
         if (isOpen) {
             setBatchId(activeBatches[0]?.id?.toString() || '');
@@ -83,6 +113,56 @@ export default function BulkAssignBatchModal({
                 </div>
 
                 <div className="p-5 space-y-4 text-xs">
+                    {isGlobalSelection ? (
+                        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                            <AlertTriangle className="size-4.5 text-amber-600 mt-0.5 shrink-0" />
+                            <div>
+                                <p className="text-xs font-bold text-amber-900">Eligibility Check</p>
+                                <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                                    Boxes with missing customs declarations, unpaid balances, or that are already assigned to a batch will be automatically skipped during assignment.
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {alreadyAssignedBoxes.length > 0 && (
+                                <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50/70 p-4">
+                                    <AlertTriangle className="size-4.5 text-rose-600 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="text-xs font-bold text-rose-900">
+                                            {alreadyAssignedBoxes.length} {alreadyAssignedBoxes.length === 1 ? 'box' : 'boxes'} already assigned
+                                        </p>
+                                        <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
+                                            The following boxes are already assigned to a batch and will be skipped:
+                                            <br />
+                                            <span className="font-mono mt-1 block">
+                                                {alreadyAssignedBoxes.map(b => b.tracking_number).join(', ')}
+                                            </span>
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {ineligibleBoxes.length > 0 && (
+                                <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+                                    <AlertTriangle className="size-4.5 text-amber-600 mt-0.5 shrink-0" />
+                                    <div>
+                                        <p className="text-xs font-bold text-amber-900">
+                                            {ineligibleBoxes.length} {ineligibleBoxes.length === 1 ? 'box' : 'boxes'} will be skipped
+                                        </p>
+                                        <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                                            The following boxes are missing customs declarations or have unpaid balances, and will not be assigned:
+                                            <br />
+                                            <span className="font-mono mt-1 block">
+                                                {ineligibleBoxes.map(b => b.tracking_number).join(', ')}
+                                            </span>
+                                        </p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <div className="space-y-2">
                         <Label htmlFor="bulk-batch" className="text-xs font-semibold text-zinc-700">
                             Select Shipment Batch
@@ -119,10 +199,14 @@ export default function BulkAssignBatchModal({
                     <Button
                         type="button"
                         onClick={handleAssign}
-                        disabled={isAssigning || !batchId}
+                        disabled={isAssigning || !batchId || (eligibleBoxesCount !== null && eligibleBoxesCount === 0)}
                         className="h-9 rounded-lg px-4 text-xs font-medium bg-brand-rust text-white hover:bg-brand-rust/90 transition-colors shadow-2xs"
                     >
-                        {isAssigning ? 'Assigning...' : 'Assign Batch'}
+                        {isAssigning 
+                            ? 'Assigning...' 
+                            : (eligibleBoxesCount !== null 
+                                ? `Assign ${eligibleBoxesCount} ${eligibleBoxesCount === 1 ? 'Box' : 'Boxes'}` 
+                                : 'Assign Batch')}
                     </Button>
                 </DialogFooter>
             </DialogContent>

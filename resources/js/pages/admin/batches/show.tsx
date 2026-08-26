@@ -1,5 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
+    AlertTriangle,
     Anchor,
     ArrowLeft,
     Bell,
@@ -22,6 +23,7 @@ import {
     User,
     Warehouse,
     Activity,
+    RotateCcw,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -89,6 +91,7 @@ interface BatchData {
     capacity_boxes: number | null;
     latest_tracking_phase: string | null;
     latest_tracking_phase_order: number | null;
+    warnings?: string[];
     boxes: BoxData[];
 }
 
@@ -202,6 +205,23 @@ export default function BatchShow({
     const [isTrackingPhaseSubmitting, setIsTrackingPhaseSubmitting] = useState(false);
     const [isArriving, setIsArriving] = useState(false);
     const [isCustomsSubmitting, setIsCustomsSubmitting] = useState<string | null>(null);
+    const [isReopening, setIsReopening] = useState(false);
+    const [showReopenConfirm, setShowReopenConfirm] = useState(false);
+
+    const handleReopenBatch = () => {
+        setIsReopening(true);
+        router.post(`/admin/batches/${batch.id}/reopen`, {}, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setShowReopenConfirm(false);
+                toast.success('Batch reopened to Open status.');
+            },
+            onError: (err: any) => {
+                toast.error(err?.status || 'Failed to reopen batch.');
+            },
+            onFinish: () => setIsReopening(false),
+        });
+    };
 
     const canLoadBoxes = ['open', 'loading'].includes(batch.status);
     const hasBatchBoxes = (batch.boxes?.length ?? 0) > 0;
@@ -419,6 +439,22 @@ export default function BatchShow({
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={`Batch ${batch.batch_number} | Admin`} />
             <div className="flex flex-col gap-6 p-8 max-w-[1600px] mx-auto w-full">
+                {/* Warnings Banner */}
+                {batch.warnings && batch.warnings.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm flex gap-3 shadow-sm">
+                        <AlertTriangle className="size-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="font-semibold text-amber-900 mb-1">Warning: Action Required</h4>
+                            <p>This batch has reached capacity limits or its cut-off date has passed. Please consider closing the batch.</p>
+                            <ul className="list-disc pl-5 mt-2 text-xs font-medium">
+                                {batch.warnings.map((warning, i) => (
+                                    <li key={i}>{warning}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
+                )}
+
                 {/* Header Section */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-zinc-100 pb-8">
                     <div className="flex items-center gap-4">
@@ -521,6 +557,18 @@ export default function BatchShow({
                                         </button>
                                     )}
                             </>
+                        )}
+
+                        {!['open', 'loading'].includes(batch.status) && (
+                            <button
+                                type="button"
+                                onClick={() => setShowReopenConfirm(true)}
+                                disabled={isReopening}
+                                className="h-11 px-5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold uppercase tracking-wide transition-all hover:bg-amber-100 active:scale-[0.98] flex items-center gap-2"
+                            >
+                                <RotateCcw className="size-3.5 text-amber-600" />
+                                Reopen Batch
+                            </button>
                         )}
 
                         <button
@@ -1251,6 +1299,18 @@ export default function BatchShow({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Reopen Batch Confirmation Modal */}
+            <ConfirmModal
+                isOpen={showReopenConfirm}
+                onClose={() => setShowReopenConfirm(false)}
+                onConfirm={handleReopenBatch}
+                title="Reopen Shipment Batch?"
+                description={`Are you sure you want to reopen batch ${batch.batch_number}? This will change the status back to Open and reset any sailing/arrival timestamps so you can continue managing container boxes.`}
+                confirmText={isReopening ? 'Reopening...' : 'Yes, Reopen Batch'}
+                cancelText="Cancel"
+                variant="primary"
+            />
         </AppLayout>
     );
 }

@@ -372,11 +372,11 @@ export default function BatchesIndex({
                         setIsGlobalSelection(false);
                     }}
                     actions={[
-                        ...(isSuperAdmin ? [{
+                        {
                             label: 'Update Selected',
                             icon: Sparkles,
                             onClick: () => setIsBatchBulkUpdateModalOpen(true),
-                        }] : [])
+                        },
                     ]}
                 />
 
