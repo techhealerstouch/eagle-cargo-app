@@ -14,6 +14,7 @@ import {
     Loader2,
     ArrowRight,
     Sparkles,
+    MapPin,
 } from 'lucide-react';
 import { useState } from 'react';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
@@ -283,6 +284,14 @@ export default function BatchesIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                     <div className="flex justify-end items-center gap-1.5">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setTrackingBatch(batch)}
+                                                            title="Update Tracking Phase"
+                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-300 transition-all flex items-center justify-center shadow-2xs"
+                                                        >
+                                                            <MapPin className="size-3.5" />
+                                                        </button>
                                                         <button
                                                             type="button"
                                                             onClick={() => setGenerateTemplateBatch(batch)}

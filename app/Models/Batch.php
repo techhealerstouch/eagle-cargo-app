@@ -39,6 +39,7 @@ class Batch extends Model
         'arrived_at',
         'delivered_at',
         'status',
+        'override_note',
     ];
 
     protected $casts = [

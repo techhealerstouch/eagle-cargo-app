@@ -32,6 +32,7 @@ interface BatchPayload {
     cutoff_at: string | null;
     eta_at: string | null;
     status: string;
+    override_note?: string | null;
     current_box_count?: number;
     warnings?: string[];
 }
@@ -86,7 +87,13 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
         cutoff_at: toDateTimeLocal(batch.cutoff_at),
         eta_at: toDateTimeLocal(batch.eta_at),
         status: batch.status || 'open',
+        override_note: batch.override_note || '',
     });
+
+    const STAGE_KEYS = ['open', 'loading', 'ready_to_close', 'sailed', 'arrived', 'delivered'];
+    const originalStatusIndex = STAGE_KEYS.indexOf(batch.status || 'open');
+    const newStatusIndex = STAGE_KEYS.indexOf(data.status);
+    const isBackward = newStatusIndex !== -1 && originalStatusIndex !== -1 && newStatusIndex < originalStatusIndex;
 
     const transitDays = (() => {
         if (batch.cutoff_at && batch.eta_at) {
@@ -425,6 +432,39 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                             <p className="text-[11px] text-red-800 mt-0.5 leading-relaxed">
                                                                 This batch contains no boxes. You must assign at least one box before it can be closed or manifested.
                                                             </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {isBackward && (
+                                                    <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50/70 p-4 animate-in fade-in slide-in-from-top-2">
+                                                        <div className="flex items-start gap-3">
+                                                            <AlertTriangle className="size-4.5 text-rose-600 mt-0.5 shrink-0" />
+                                                            <div>
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <p className="text-xs font-bold text-rose-900">Backward Status Override Required</p>
+                                                                    <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 uppercase tracking-wider">
+                                                                        {batch.status.replace(/_/g, ' ')} → {data.status.replace(/_/g, ' ')}
+                                                                    </span>
+                                                                </div>
+                                                                <p className="text-[11px] text-rose-800 mt-0.5 leading-relaxed">
+                                                                    You are moving this batch backwards in its lifecycle. Please provide a mandatory justification for auditing purposes.
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="pl-7 w-full">
+                                                            <textarea
+                                                                required={isBackward}
+                                                                value={data.override_note}
+                                                                onChange={(e) => setData('override_note', e.target.value)}
+                                                                className="w-full min-h-[80px] text-sm rounded-xl border-rose-200 bg-white placeholder:text-rose-300 focus:border-rose-400 focus:ring-rose-400/20 resize-none p-3 shadow-sm"
+                                                                placeholder="Reason for overriding status..."
+                                                            />
+                                                            {errors.override_note && (
+                                                                <p className="text-[11px] font-semibold text-red-600 mt-1.5 uppercase tracking-wider">
+                                                                    {errors.override_note}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 )}

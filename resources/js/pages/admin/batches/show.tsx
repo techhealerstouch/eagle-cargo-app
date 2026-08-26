@@ -91,6 +91,13 @@ interface BatchData {
     capacity_boxes: number | null;
     latest_tracking_phase: string | null;
     latest_tracking_phase_order: number | null;
+    override_note?: string | null;
+    override_details?: {
+        from_status: string;
+        to_status: string;
+        overridden_by: string;
+        overridden_at: string;
+    } | null;
     warnings?: string[];
     boxes: BoxData[];
 }
@@ -589,8 +596,27 @@ export default function BatchShow({
                     </div>
                 </div>
 
+                {/* Override Alert Banner */}
+                {batch.override_note && batch.override_details && (
+                    <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 text-sm flex gap-3 shadow-sm">
+                        <AlertTriangle className="size-5 text-rose-600 shrink-0 mt-0.5" />
+                        <div>
+                            <h4 className="font-semibold text-rose-900 mb-0.5 flex items-center gap-2">
+                                Status Overridden
+                                <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 uppercase tracking-wider">
+                                    {batch.override_details.from_status.replace(/_/g, ' ')} → {batch.override_details.to_status.replace(/_/g, ' ')}
+                                </span>
+                            </h4>
+                            <p className="text-xs mt-1 mb-2 italic">"{batch.override_note}"</p>
+                            <p className="text-[10px] font-medium text-rose-700/80 uppercase tracking-wider">
+                                By {batch.override_details.overridden_by} on {batch.override_details.overridden_at}
+                            </p>
+                        </div>
+                    </div>
+                )}
+
                 {/* Visual Roadmap Pipeline */}
-                <div className="bg-white rounded-2xl border border-zinc-200/80 p-8 shadow-sm">
+                <div className="bg-white rounded-2xl border border-zinc-200/80 p-5 shadow-sm">
                     {(() => {
                         const statuses = [
                             'open',
@@ -630,7 +656,7 @@ export default function BatchShow({
                                             <div className="relative">
                                                 <div
                                                     className={cn(
-                                                        'size-11 rounded-xl flex items-center justify-center transition-all duration-300 border shadow-2xs',
+                                                        'size-9 rounded-xl flex items-center justify-center transition-all duration-300 border shadow-2xs',
                                                         isActive
                                                             ? 'bg-sky-600 text-white ring-4 ring-sky-600/15 scale-110 border-sky-600 shadow-md shadow-sky-600/20'
                                                             : isCompleted
@@ -638,7 +664,7 @@ export default function BatchShow({
                                                             : 'bg-white border-zinc-200 text-zinc-400'
                                                     )}
                                                 >
-                                                    <Icon className="size-5" />
+                                                    <Icon className="size-4" />
                                                 </div>
 
                                                 {/* Checkmark overlay for completed steps */}
@@ -678,73 +704,73 @@ export default function BatchShow({
                 {/* Summary Stat Grid */}
                 <div className="bg-white rounded-2xl border border-zinc-200/80 shadow-sm overflow-hidden">
                     <div className="grid grid-cols-2 divide-y divide-zinc-100 lg:grid-cols-5 lg:divide-x lg:divide-y-0">
-                        <div className="group flex items-center gap-4 p-5 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <Package className="size-5" />
+                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
+                                <Package className="size-4" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
                                     Loaded Boxes
                                 </p>
-                                <p className="text-base font-bold text-zinc-900 truncate">
+                                <p className="text-sm font-bold text-zinc-900 truncate">
                                     {capacityLabel}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-4 p-5 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <ContainerIcon className="size-5" />
+                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
+                                <ContainerIcon className="size-4" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
                                     Container Ref
                                 </p>
-                                <p className="font-mono text-base font-bold text-zinc-900 truncate">
+                                <p className="font-mono text-sm font-bold text-zinc-900 truncate">
                                     {batch.container_number?.toUpperCase() ?? '—'}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-4 p-5 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <ShieldCheck className="size-5" />
+                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
+                                <ShieldCheck className="size-4" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
                                     Seal Number
                                 </p>
-                                <p className="font-mono text-base font-bold text-zinc-900 truncate">
+                                <p className="font-mono text-sm font-bold text-zinc-900 truncate">
                                     {batch.seal_number ?? '—'}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-4 p-5 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <Ship className="size-5" />
+                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
+                                <Ship className="size-4" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
                                     Vessel
                                 </p>
-                                <p className="text-base font-bold text-zinc-900 uppercase truncate">
+                                <p className="text-sm font-bold text-zinc-900 uppercase truncate">
                                     {batch.vessel_name ?? '—'}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-4 p-5 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <Activity className="size-5" />
+                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
+                                <Activity className="size-4" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
                                     Status
                                 </p>
                                 <span
                                     className={cn(
-                                        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold border capitalize',
+                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
                                         BATCH_STATUS_STYLES[batch.status ?? ''] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200'
                                     )}
                                 >

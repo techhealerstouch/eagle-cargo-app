@@ -54,10 +54,40 @@ class BatchResource extends JsonResource
             'arrived_at' => $this->resource->arrived_at,
             'delivered_at' => $this->resource->delivered_at,
             'status' => $this->resource->status,
+            'override_note' => $this->resource->override_note,
+            'override_details' => $this->getOverrideDetails(),
             'boxes' => $this->resource->relationLoaded('boxes') ? $this->resource->boxes : [],
             'latest_tracking_phase' => $latestTrackingPhase,
             'latest_tracking_phase_order' => $this->getTrackingStepOrder($trackingSteps, $latestTrackingPhase),
             'warnings' => $this->getWarnings(),
+        ];
+    }
+
+    private function getOverrideDetails(): ?array
+    {
+        if (! $this->resource->override_note) {
+            return null;
+        }
+
+        $log = \App\Models\ActivityLog::with('user')
+            ->where('model_type', Batch::class)
+            ->where('model_id', $this->resource->id)
+            ->where('action', 'updated')
+            ->latest('id')
+            ->get()
+            ->first(function ($log) {
+                return isset($log->changes['status']);
+            });
+
+        if (! $log) {
+            return null;
+        }
+
+        return [
+            'from_status' => $log->changes['status']['old'] ?? null,
+            'to_status' => $log->changes['status']['new'] ?? null,
+            'overridden_by' => $log->user?->first_name ? trim($log->user->first_name . ' ' . $log->user->last_name) : ($log->user?->name ?? 'System'),
+            'overridden_at' => $log->created_at->format('M j, Y h:i A'),
         ];
     }
 
