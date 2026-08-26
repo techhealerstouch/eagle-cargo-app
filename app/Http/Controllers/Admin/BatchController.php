@@ -353,6 +353,9 @@ class BatchController extends Controller
         BatchService $batchService,
         TrackingStepService $trackingStepService,
     ): RedirectResponse {
+        if (in_array($batch->status, [\App\Enums\BatchStatus::Open, \App\Enums\BatchStatus::Loading], true)) {
+            return back()->with('error', 'Tracking phase cannot be updated for batches that are still Open or Loading.');
+        }
         $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
 
         $validated = $request->validate([

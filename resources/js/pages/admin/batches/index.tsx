@@ -25,6 +25,7 @@ import Pagination, { type PaginationData } from '@/components/common/pagination'
 import SearchFilter from '@/components/common/search-filter';
 import TableSelectionBar from '@/components/common/table-selection-bar';
 import BatchBulkUpdateModal from '@/components/admin/batch-bulk-update-modal';
+import BatchTrackingModal from '@/components/admin/batch-tracking-modal';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -95,10 +96,10 @@ export default function BatchesIndex({
     const [isGlobalSelection, setIsGlobalSelection] = useState(false);
     const [isBatchBulkUpdateModalOpen, setIsBatchBulkUpdateModalOpen] = useState(false);
 
-    // Tracking update state
+    // Modals state
     const [trackingBatch, setTrackingBatch] = useState<BatchData | null>(null);
-    const [selectedPhase, setSelectedPhase] = useState<string>('');
-    const [isTrackingSubmitting, setIsTrackingSubmitting] = useState(false);
+    const [closingBatch, setClosingBatch] = useState<BatchData | null>(null);
+    const [isClosing, setIsClosing] = useState(false);
     const [generateTemplateBatch, setGenerateTemplateBatch] = useState<BatchData | null>(null);
 
     const toggleSelectAll = () => {
@@ -284,14 +285,26 @@ export default function BatchesIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                     <div className="flex justify-end items-center gap-1.5">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => setTrackingBatch(batch)}
-                                                            title="Update Tracking Phase"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-300 transition-all flex items-center justify-center shadow-2xs"
-                                                        >
-                                                            <MapPin className="size-3.5" />
-                                                        </button>
+                                                        {!['open', 'loading', 'ready_to_close'].includes(batch.status) && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setTrackingBatch(batch)}
+                                                                title="Update Tracking Phase"
+                                                                className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            >
+                                                                <MapPin className="size-3.5" />
+                                                            </button>
+                                                        )}
+                                                        {batch.status === 'ready_to_close' && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setClosingBatch(batch)}
+                                                                title="Confirm Close (Sail Batch)"
+                                                                className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-green-600 hover:bg-green-50 hover:border-green-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            >
+                                                                <Ship className="size-3.5" />
+                                                            </button>
+                                                        )}
                                                         <button
                                                             type="button"
                                                             onClick={() => setGenerateTemplateBatch(batch)}
@@ -402,209 +415,38 @@ export default function BatchesIndex({
                 />
             </div>
 
-            <Dialog
-                open={!!trackingBatch}
-                onOpenChange={(open) => !open && setTrackingBatch(null)}
-            >
-                <DialogContent className="max-w-md gap-0 overflow-hidden rounded-[2rem] border-none p-0 shadow-2xl [&>button]:!top-6 [&>button]:!right-6 [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:!rounded-xl [&>button]:border [&>button]:border-brand-warm/15 [&>button]:bg-white [&>button]:p-2.5 [&>button]:shadow-xs [&>button]:transition-all [&>button]:hover:bg-brand-warm/5">
-                    <div className="p-8 pb-4">
-                        <div className="flex items-start gap-5">
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-warm/10 text-brand-text">
-                                <Truck className="size-6 text-brand-text" />
-                            </div>
-                            <div className="flex-1 pt-1">
-                                <DialogHeader>
-                                    <DialogTitle className="flex flex-col items-start gap-1.5 font-sans text-xl font-semibold tracking-tight text-brand-text">
-                                        Update Batch Tracking
-                                    </DialogTitle>
-                                    <div className="mt-1.5 flex items-center gap-2 text-sm font-medium text-brand-text-mid opacity-85">
-                                        <span>
-                                            {trackingBatch?.batch_number}
-                                        </span>
-                                        <span>•</span>
-                                        <span>
-                                            {trackingBatch?.current_box_count}{' '}
-                                            box
-                                            {trackingBatch?.current_box_count !==
-                                            1
-                                                ? 'es'
-                                                : ''}
-                                        </span>
-                                        {trackingBatch?.status && (
-                                            <span
-                                                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${BATCH_STATUS_CONFIG[trackingBatch.status]?.badge ?? 'border-gray-200 bg-gray-100 text-gray-700'}`}
-                                            >
-                                                {BATCH_STATUS_CONFIG[
-                                                    trackingBatch.status
-                                                ]?.label ??
-                                                    trackingBatch.status.replaceAll(
-                                                        '_',
-                                                        ' ',
-                                                    )}
-                                            </span>
-                                        )}
-                                    </div>
-                                </DialogHeader>
-                            </div>
-                        </div>
-                    </div>
+            <BatchTrackingModal
+                isOpen={!!trackingBatch}
+                onClose={() => setTrackingBatch(null)}
+                batch={trackingBatch}
+                trackingPhases={trackingPhases}
+            />
 
-                    <div className="flex flex-col gap-6 px-8 py-2">
-                        {/* Current & Next Phase Flow */}
-                        <div className="rounded-2xl border border-neutral-200 bg-white p-5 shadow-xs">
-                            <div className="mb-4">
-                                <span className="text-[10px] font-bold tracking-wider text-neutral-400 uppercase">
-                                    Phase Preview
-                                </span>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="flex flex-1 flex-col gap-1">
-                                    <span className="text-[11px] leading-none font-medium text-neutral-400">
-                                        Current
-                                    </span>
-                                    <div className="mt-1 min-h-12">
-                                        <p className="text-sm leading-tight font-bold text-neutral-900">
-                                            {trackingPhases.find(
-                                                (p) =>
-                                                    p.value ===
-                                                    trackingBatch?.latest_tracking_phase,
-                                            )?.label || 'Awaiting Start'}
-                                        </p>
-                                        <span className="mt-1.5 inline-block rounded-md border border-neutral-200 bg-white px-2 py-0.5 text-[10px] font-medium text-neutral-600">
-                                            {trackingPhases.find(
-                                                (p) =>
-                                                    p.value ===
-                                                    trackingBatch?.latest_tracking_phase,
-                                            )?.group || 'Warehouse'}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-400 shadow-xs">
-                                    <ArrowRight className="size-4" />
-                                </div>
-
-                                <div className="flex flex-1 flex-col items-end gap-1 text-right">
-                                    <span className="text-[11px] leading-none font-semibold text-green-600">
-                                        Moving to
-                                    </span>
-                                    <div className="mt-1 min-h-12 text-right">
-                                        <p className="text-sm leading-tight font-bold text-neutral-900">
-                                            {selectedPhase
-                                                ? trackingPhases.find(
-                                                      (p) =>
-                                                          p.value ===
-                                                          selectedPhase,
-                                                  )?.label
-                                                : 'Select Target'}
-                                        </p>
-                                        <span className="mt-1.5 inline-block rounded-md bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-800">
-                                            {selectedPhase
-                                                ? trackingPhases.find(
-                                                      (p) =>
-                                                          p.value ===
-                                                          selectedPhase,
-                                                  )?.group
-                                                : '---'}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="grid gap-2">
-                            <Label
-                                htmlFor="phase"
-                                className="px-0.5 text-sm font-semibold text-neutral-700"
-                            >
-                                Choose next tracking step
-                            </Label>
-                            <Select
-                                value={selectedPhase}
-                                onValueChange={setSelectedPhase}
-                            >
-                                <SelectTrigger
-                                    id="phase"
-                                    className="h-16 rounded-xl border border-neutral-200 bg-white px-4 text-brand-text shadow-sm transition-all focus:ring-2 focus:ring-brand-rust/20"
-                                >
-                                    <SelectValue placeholder="Select target phase..." />
-                                </SelectTrigger>
-                                <SelectContent className="rounded-xl border border-neutral-200 p-1 shadow-2xl">
-                                    {trackingPhases
-                                        .filter(
-                                            (p) =>
-                                                p.order >
-                                                (trackingBatch?.latest_tracking_phase_order ??
-                                                    -1),
-                                        )
-                                        .map((phase) => (
-                                            <SelectItem
-                                                key={phase.value}
-                                                value={phase.value}
-                                                className="cursor-pointer rounded-lg py-2 focus:bg-brand-rust/5 focus:text-brand-rust"
-                                            >
-                                                <div className="flex flex-col gap-0.5">
-                                                    <span className="text-sm leading-tight font-bold">
-                                                        {phase.label}
-                                                    </span>
-                                                    <span className="text-[10px] leading-tight font-medium text-brand-text-mid/70">
-                                                        {phase.group}
-                                                    </span>
-                                                </div>
-                                            </SelectItem>
-                                        ))}
-                                </SelectContent>
-                            </Select>
-                            {trackingPhases.length === 0 && (
-                                <p className="mt-2 rounded-lg border border-red-100 bg-red-50 p-2 text-[10px] font-bold tracking-wider text-red-500 uppercase">
-                                    No valid next phases available for your
-                                    role.
-                                </p>
-                            )}
-                        </div>
-                    </div>
-
-                    <DialogFooter className="flex-row gap-3 bg-transparent p-6 px-8 pt-6 pb-8 sm:justify-end">
-                        <Button
-                            variant="outline"
-                            onClick={() => setTrackingBatch(null)}
-                            className="h-12 flex-1 rounded-xl border border-brand-warm/20 bg-white px-8 text-sm font-bold text-brand-text hover:bg-brand-warm/5 hover:text-brand-text sm:flex-none"
-                            disabled={isTrackingSubmitting}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            onClick={() => {
-                                if (!selectedPhase || !trackingBatch) {
-                                    return;
-                                }
-
-                                setIsTrackingSubmitting(true);
-                                router.post(
-                                    `/admin/batches/${trackingBatch.id}/tracking-phase`,
-                                    {
-                                        tracking_phase: selectedPhase,
-                                        description: `Batch manually updated from list view.`,
-                                    },
-                                    {
-                                        onSuccess: () => setTrackingBatch(null),
-                                        onFinish: () =>
-                                            setIsTrackingSubmitting(false),
-                                    },
-                                );
-                            }}
-                            className="flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-black px-10 text-sm font-bold text-white shadow-lg transition-all hover:bg-neutral-900 active:scale-95 sm:flex-none"
-                            disabled={!selectedPhase || isTrackingSubmitting}
-                        >
-                            {isTrackingSubmitting ? (
-                                <Loader2 className="size-4 animate-spin" />
-                            ) : null}
-                            Update Batch
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <ConfirmModal
+                isOpen={!!closingBatch}
+                onClose={() => setClosingBatch(null)}
+                title="Sail Batch"
+                description={
+                    closingBatch
+                        ? `Are you sure you want to lock and sail batch ${closingBatch.batch_number}? This will lock the batch from further edits.`
+                        : ''
+                }
+                confirmText="Sail Batch"
+                variant="primary"
+                loading={isClosing}
+                onConfirm={() => {
+                    if (!closingBatch) return;
+                    setIsClosing(true);
+                    router.post(
+                        `/admin/batches/${closingBatch.id}/confirm-manifest`,
+                        {},
+                        {
+                            onSuccess: () => setClosingBatch(null),
+                            onFinish: () => setIsClosing(false),
+                        }
+                    );
+                }}
+            />
 
             <ConfirmModal
                 isOpen={generateTemplateBatch !== null}

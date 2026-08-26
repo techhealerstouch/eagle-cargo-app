@@ -115,6 +115,18 @@ class BatchService
             ? $trackingPhase
             : TrackingPhase::from((string) $trackingPhase);
 
+        $targetStatusForBatch = $this->getTargetBatchStatusForTrackingPhase($trackingPhase);
+        if ($targetStatusForBatch && $batch->status !== $targetStatusForBatch) {
+            if (! $batch->status->canTransitionTo($targetStatusForBatch)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Cannot apply "%s" because the batch cannot transition from %s to %s.',
+                    $trackingPhase->label(),
+                    $batch->status->label(),
+                    $targetStatusForBatch->label(),
+                ));
+            }
+        }
+
         $targetStatus = $systemStatus instanceof BoxStatus
             ? $systemStatus
             : ($systemStatus ? BoxStatus::tryFrom((string) $systemStatus) : $this->resolveSystemStatusForTrackingPhase($trackingPhase));
@@ -188,21 +200,12 @@ class BatchService
         return $updated;
     }
 
-    /**
-     * Automatically synchronize the batch status when a tracking phase is applied.
-     */
-    private function syncBatchStatusWithTrackingPhase(Batch $batch, TrackingPhase $phase): void
+    public function getTargetBatchStatusForTrackingPhase(TrackingPhase $phase): ?BatchStatus
     {
-        $currentStatus = $batch->status;
-        $targetStatus = null;
-
-        // Map specific tracking phases to major batch statuses.
-        // This ensures the batch progress bar/status aligns with the bulk tracking updates.
         switch ($phase) {
             case TrackingPhase::DEPARTED_FROM_ORIGIN:
             case TrackingPhase::IN_TRANSIT_SEA:
-                $targetStatus = BatchStatus::Sailed;
-                break;
+                return BatchStatus::Sailed;
 
             case TrackingPhase::ARRIVED_MANILA_PORT:
             case TrackingPhase::CUSTOMS_CLEARANCE:
@@ -211,13 +214,22 @@ class BatchService
             case TrackingPhase::SORTING:
             case TrackingPhase::DISPATCHED_TO_LOCAL_HUB:
             case TrackingPhase::OUT_FOR_DELIVERY:
-                $targetStatus = BatchStatus::Arrived;
-                break;
+                return BatchStatus::Arrived;
 
             case TrackingPhase::DELIVERED:
-                $targetStatus = BatchStatus::Delivered;
-                break;
+                return BatchStatus::Delivered;
         }
+
+        return null;
+    }
+
+    /**
+     * Automatically synchronize the batch status when a tracking phase is applied.
+     */
+    private function syncBatchStatusWithTrackingPhase(Batch $batch, TrackingPhase $phase): void
+    {
+        $currentStatus = $batch->status;
+        $targetStatus = $this->getTargetBatchStatusForTrackingPhase($phase);
 
         if ($targetStatus && $currentStatus !== $targetStatus) {
             try {
