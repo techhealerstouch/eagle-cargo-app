@@ -22,7 +22,8 @@ class RecipientController extends Controller
                     ->orWhere('province', 'like', "%{$search}%")
                     ->orWhereHas('sender', function ($sq) use ($search) {
                         $sq->where('first_name', 'like', "%{$search}%")
-                            ->orWhere('last_name', 'like', "%{$search}%");
+                            ->orWhere('last_name', 'like', "%{$search}%")
+                            ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"]);
                     });
             });
         })->when($request->sender_id, function ($q, $sender_id) {

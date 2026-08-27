@@ -39,7 +39,8 @@ class PaymentController extends Controller
                         $bq->where('reference_number', 'like', "%{$search}%")
                             ->orWhereHas('sender', function ($sq) use ($search) {
                                 $sq->where('first_name', 'like', "%{$search}%")
-                                    ->orWhere('last_name', 'like', "%{$search}%");
+                                    ->orWhere('last_name', 'like', "%{$search}%")
+                                    ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"]);
                             });
                     });
             });

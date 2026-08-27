@@ -72,10 +72,17 @@ interface BoxData {
     destination: string;
     recipient: Recipient | null;
     box_type: BoxType | null;
+    batch_id?: number | null;
     booking: {
         id: number;
         reference_number: string;
         sender: Sender;
+        declaration_form_status?: string | null;
+        payment_status?: string | null;
+        payment_method?: string | null;
+        invoice?: {
+            status: string;
+        } | null;
     } | null;
 }
 
@@ -138,7 +145,73 @@ const BATCH_STATUS_STYLES: Record<string, string> = {
     ready_to_close: 'bg-amber-50 text-amber-700 border-amber-200/80',
     sailed: 'bg-indigo-50 text-indigo-700 border-indigo-200/80',
     arrived: 'bg-purple-50 text-purple-700 border-purple-200/80',
-    delivered: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+};
+
+const INVOICE_STATUS_STYLES: Record<string, string> = {
+    unpaid: 'bg-rose-50 text-rose-700 border-rose-200/80',
+    partial: 'bg-amber-50 text-amber-700 border-amber-200/80',
+    paid: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+    voided: 'bg-zinc-50 text-zinc-700 border-zinc-200/80',
+};
+
+const checkEligibility = (box: BoxData) => {
+    const invoiceStatus = box.booking?.invoice?.status;
+    const paymentStatus = box.booking?.payment_status;
+    const paymentMethod = box.booking?.payment_method;
+
+    const isPaid = 
+        invoiceStatus === 'paid' || 
+        paymentStatus === 'paid' || 
+        paymentStatus === 'cash_collected' || 
+        paymentMethod === 'cash_on_pickup';
+    const hasDeclaration = ['submitted_online', 'physical_copy_received', 'submitted'].includes(box.booking?.declaration_form_status ?? '');
+    
+    if (isPaid && hasDeclaration) {
+        return { eligible: true, text: 'Ready', className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80' };
+    }
+    return { eligible: false, text: 'Not Ready', className: 'bg-rose-50 text-rose-700 border-rose-200/80' };
+};
+
+const getPaymentStatusInfo = (box: BoxData) => {
+    const method = box.booking?.payment_method;
+    const paymentStatus = box.booking?.payment_status;
+    const invoiceStatus = box.booking?.invoice?.status;
+
+    if (method === 'cash_on_pickup') {
+        return {
+            text: 'Cash on Pickup',
+            className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+        };
+    }
+    
+    if (paymentStatus === 'cash_collected') {
+        return {
+            text: 'Cash Collected',
+            className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+        };
+    }
+
+    if (paymentStatus === 'paid' || invoiceStatus === 'paid') {
+        return {
+            text: 'Paid',
+            className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
+        };
+    }
+
+    if (paymentStatus === 'partially_paid' || invoiceStatus === 'partial') {
+        return {
+            text: 'Partial',
+            className: 'bg-amber-50 text-amber-700 border-amber-200/80',
+        };
+    }
+
+    const defaultText = humanize(paymentStatus || invoiceStatus || 'N/A');
+    const defaultClass = INVOICE_STATUS_STYLES[invoiceStatus ?? ''] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200';
+
+    return {
+        text: defaultText,
+        className: defaultClass,
+    };
 };
 
 /* ------------------------------------------------------------------ */
@@ -246,6 +319,13 @@ export default function BatchShow({
     const selectedPhaseLabel = selectedPhase
         ? `${selectedPhase.group} - ${selectedPhase.label}`
         : 'this tracking phase';
+
+    const hasReassignedBoxes = Array.from(selectedIds).some(
+        (id) => {
+            const box = availableBoxes.find((b) => b.id === id);
+            return box && box.batch_id != null && box.batch_id !== batch.id;
+        }
+    );
 
     /* ---- search available boxes ---- */
     const searchAvailableBoxes = useCallback(
@@ -807,16 +887,19 @@ export default function BatchShow({
                                             Sender
                                         </th>
                                         <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Recipient
+                                            Booking
                                         </th>
                                         <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Box Type
+                                            Payment
                                         </th>
                                         <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
                                             Destination
                                         </th>
                                         <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
                                             Status
+                                        </th>
+                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                            Eligibility
                                         </th>
                                     </tr>
                                 </thead>
@@ -839,16 +922,23 @@ export default function BatchShow({
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="px-6 py-4 text-zinc-700">
-                                                <div className="flex items-center gap-2">
-                                                    <Truck className="size-3.5 text-zinc-400" />
-                                                    <span className="text-sm font-medium">
-                                                        {box.recipient?.name ?? '—'}
-                                                    </span>
-                                                </div>
-                                            </td>
                                             <td className="px-6 py-4 text-xs font-medium uppercase text-zinc-600">
-                                                {box.box_type?.name ?? '—'}
+                                                {box.booking?.reference_number ?? '—'}
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {(() => {
+                                                    const paymentInfo = getPaymentStatusInfo(box);
+                                                    return (
+                                                        <span
+                                                            className={cn(
+                                                                'inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold border capitalize',
+                                                                paymentInfo.className
+                                                            )}
+                                                        >
+                                                            {paymentInfo.text}
+                                                        </span>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="px-6 py-4 text-zinc-700">
                                                 <div className="flex items-center gap-2">
@@ -867,6 +957,21 @@ export default function BatchShow({
                                                 >
                                                     {humanize(box.status)}
                                                 </span>
+                                            </td>
+                                            <td className="px-6 py-4">
+                                                {(() => {
+                                                    const eligibility = checkEligibility(box);
+                                                    return (
+                                                        <span
+                                                            className={cn(
+                                                                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
+                                                                eligibility.className
+                                                            )}
+                                                        >
+                                                            {eligibility.text}
+                                                        </span>
+                                                    );
+                                                })()}
                                             </td>
                                         </tr>
                                     ))}
@@ -1084,13 +1189,22 @@ export default function BatchShow({
                                                                 Sender
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                                                                Recipient
+                                                                Booking
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                                                                Box Type
+                                                                Payment
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
                                                                 Destination
+                                                            </th>
+                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                                                                Box Status
+                                                            </th>
+                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                                                                Eligibility
+                                                            </th>
+                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                                                                Assignment
                                                             </th>
                                                         </tr>
                                                     </thead>
@@ -1122,14 +1236,62 @@ export default function BatchShow({
                                                                             ? `${box.booking.sender.first_name} ${box.booking.sender.last_name}`
                                                                             : '—'}
                                                                     </td>
-                                                                    <td className="px-4 py-3 text-sm text-zinc-700">
-                                                                        {box.recipient?.name ?? '—'}
-                                                                    </td>
                                                                     <td className="px-4 py-3 text-xs font-medium uppercase text-zinc-600">
-                                                                        {box.box_type?.name ?? '—'}
+                                                                        {box.booking?.reference_number ?? '—'}
+                                                                    </td>
+                                                                    <td className="px-4 py-3">
+                                                                        {(() => {
+                                                                            const paymentInfo = getPaymentStatusInfo(box);
+                                                                            return (
+                                                                                <span
+                                                                                    className={cn(
+                                                                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
+                                                                                        paymentInfo.className
+                                                                                    )}
+                                                                                >
+                                                                                    {paymentInfo.text}
+                                                                                </span>
+                                                                            );
+                                                                        })()}
                                                                     </td>
                                                                     <td className="px-4 py-3 text-sm text-zinc-700">
                                                                         {box.destination || '—'}
+                                                                    </td>
+                                                                    <td className="px-4 py-3">
+                                                                        <span
+                                                                            className={cn(
+                                                                                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
+                                                                                BOX_STATUS_STYLES[box.status] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200'
+                                                                            )}
+                                                                        >
+                                                                            {humanize(box.status)}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-3">
+                                                                        {(() => {
+                                                                            const eligibility = checkEligibility(box);
+                                                                            return (
+                                                                                <span
+                                                                                    className={cn(
+                                                                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
+                                                                                        eligibility.className
+                                                                                    )}
+                                                                                >
+                                                                                    {eligibility.text}
+                                                                                </span>
+                                                                            );
+                                                                        })()}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-sm">
+                                                                        {box.batch_id != null && box.batch_id !== batch.id ? (
+                                                                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
+                                                                                Re-assign
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="inline-flex items-center rounded-full bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
+                                                                                Unassigned
+                                                                            </span>
+                                                                        )}
                                                                     </td>
                                                                 </tr>
                                                             );
@@ -1192,10 +1354,14 @@ export default function BatchShow({
                 onClose={() => setShowConfirm(false)}
                 onConfirm={confirmLoad}
                 loading={isSubmitting}
-                title="Confirm Load"
-                description={`You are about to load ${selectedIds.size} box${selectedIds.size !== 1 ? 'es' : ''} into batch ${batch.batch_number}. Each box will be transitioned from "Received by Warehouse" to "In Transit". Senders will be notified.`}
-                variant="primary"
-                confirmText="Confirm Load"
+                title={hasReassignedBoxes ? "Warning: Re-assigning Boxes" : "Confirm Load"}
+                description={
+                    hasReassignedBoxes 
+                    ? `You have selected boxes that are currently assigned to another batch. Proceeding will remove them from their current batch and load them into batch ${batch.batch_number}.`
+                    : `You are about to load ${selectedIds.size} box${selectedIds.size !== 1 ? 'es' : ''} into batch ${batch.batch_number}. Each box will be transitioned from "Received by Warehouse" to "In Transit". Senders will be notified.`
+                }
+                variant={hasReassignedBoxes ? "warning" : "primary"}
+                confirmText={hasReassignedBoxes ? "Yes, Re-assign and Load" : "Confirm Load"}
             />
 
             <ConfirmModal

@@ -199,6 +199,41 @@ class WarehouseOperationTest extends TestCase
         $this->assertEquals($batch->id, $box2->fresh()->batch_id);
     }
 
+    public function test_admin_can_search_available_boxes_by_full_sender_name(): void
+    {
+        $admin = $this->createAdminUser();
+        $this->actingAs($admin);
+
+        $batch = app(BatchService::class)->create([
+            'branch_name' => 'Sydney Hub',
+            'capacity_boxes' => 10,
+            'status' => BatchStatus::Open,
+        ]);
+
+        $sender = User::factory()->create([
+            'role' => Role::Sender,
+            'first_name' => 'Gary',
+            'last_name' => 'dela Cruz',
+        ]);
+
+        $booking = Booking::factory()->create([
+            'sender_id' => $sender->id,
+            'status' => BookingStatus::Confirmed,
+            'payment_status' => \App\Enums\PaymentStatus::Paid,
+            'declaration_form_status' => 'submitted_online',
+        ]);
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'weight' => 20.0,
+        ]);
+
+        $response = $this->getJson('/admin/batches/' . $batch->id . '/available-boxes?search=' . urlencode('Gary dela Cruz'));
+        $response->assertStatus(200);
+        $response->assertJsonFragment(['id' => $box->id]);
+    }
+
     // ---------------------------------------------------------------
     // 4. Warehouse Dashboard Access
     // ---------------------------------------------------------------
