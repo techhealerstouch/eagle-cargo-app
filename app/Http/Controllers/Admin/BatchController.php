@@ -157,16 +157,39 @@ class BatchController extends Controller
      */
     public function availableBoxes(Request $request, Batch $batch)
     {
-        $query = Box::whereIn('status', [BoxStatus::ReceivedByWarehouse, BoxStatus::Arrived])
+        $query = Box::whereIn('status', [
+            BoxStatus::Pending,
+            BoxStatus::Collected,
+            BoxStatus::ReceivedByWarehouse,
+            BoxStatus::Arrived
+        ])
+            ->where(function($q) use ($batch) {
+                $q->whereNull('batch_id')
+                  ->orWhere('batch_id', '!=', $batch->id);
+            })
             ->with(['booking.sender', 'booking.invoice', 'recipient', 'boxType']);
 
         if ($request->filled('search')) {
             $search = $request->search;
             $query->where(function ($q) use ($search) {
                 $q->where('tracking_number', 'like', "%{$search}%")
-                    ->orWhereHas('booking.sender', function ($sq) use ($search) {
-                        $sq->where('first_name', 'like', "%{$search}%")
-                            ->orWhere('last_name', 'like', "%{$search}%");
+                    ->orWhere('serial_number', 'like', "%{$search}%")
+                    ->orWhereHas('booking', function ($bq) use ($search) {
+                        $bq->where('reference_number', 'like', "%{$search}%")
+                            ->orWhereHas('sender', function ($sq) use ($search) {
+                                $sq->where('first_name', 'like', "%{$search}%")
+                                    ->orWhere('last_name', 'like', "%{$search}%")
+                                    ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"])
+                                    ->orWhere('email', 'like', "%{$search}%")
+                                    ->orWhere('mobile', 'like', "%{$search}%");
+                            });
+                    })
+                    ->orWhereHas('recipient', function ($rq) use ($search) {
+                        $rq->where('name', 'like', "%{$search}%")
+                            ->orWhere('first_name', 'like', "%{$search}%")
+                            ->orWhere('last_name', 'like', "%{$search}%")
+                            ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"])
+                            ->orWhere('phone_number', 'like', "%{$search}%");
                     });
             });
         }
@@ -250,9 +273,14 @@ class BatchController extends Controller
                     continue;
                 }
 
-                if ($box->booking->payment_status !== PaymentStatus::Paid) {
+                $isPaid = $box->booking->payment_status === PaymentStatus::Paid 
+                    || $box->booking->payment_status === PaymentStatus::CashCollected 
+                    || $box->booking->payment_method === 'cash_on_pickup'
+                    || $box->booking->invoice?->status === InvoiceStatus::Paid;
+
+                if (!$isPaid) {
                     $skipped++;
-                    $skippedReasons[] = "{$box->tracking_number}: payment is not paid";
+                    $skippedReasons[] = "{$box->tracking_number}: payment is not paid or cash on pickup";
                     continue;
                 }
 

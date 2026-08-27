@@ -189,7 +189,7 @@ class BookingController extends Controller
             'pickers' => $pickers,
             'couriers' => $couriers,
             'activeRunsheets' => $activeRunsheets,
-            'filters' => $request->only(['search', 'status', 'sort', 'direction', 'trashed']),
+            'filters' => $request->only(['search', 'status', 'sort', 'direction', 'trashed', 'payment_status', 'declaration_form_status']),
         ]);
     }
 
@@ -463,6 +463,10 @@ class BookingController extends Controller
 
         if ($request->hasFile('proof_of_payment')) {
             $bookingData['proof_of_payment'] = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
+        }
+
+        if ($request->hasFile('declaration_form')) {
+            $bookingData['declaration_form_path'] = $request->file('declaration_form')->store('declarations', 'public');
         }
 
         try {
@@ -988,7 +992,15 @@ class BookingController extends Controller
         }
 
         if ($request->filled('payment_status')) {
-            $query->where('payment_status', $request->payment_status);
+            if ($request->payment_status === 'paid') {
+                $query->whereIn('payment_status', ['paid', 'cash_collected']);
+            } elseif ($request->payment_status === 'unpaid') {
+                $query->whereIn('payment_status', ['pending', 'cash_on_pickup']);
+            } elseif ($request->payment_status === 'partial') {
+                $query->whereIn('payment_status', ['partially_paid', 'balance_pending']);
+            } else {
+                $query->where('payment_status', $request->payment_status);
+            }
         }
 
         if ($request->filled('declaration_form_status')) {

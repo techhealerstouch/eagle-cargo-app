@@ -120,6 +120,8 @@ export default function BookingsIndex({
         sort?: string;
         direction?: string;
         trashed?: boolean | string;
+        payment_status?: string;
+        declaration_form_status?: string;
     };
 }) {
     const { post, processing, data: formData, setData } = useForm({
