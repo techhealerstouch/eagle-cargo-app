@@ -91,15 +91,18 @@ export default function BoxesIndex({
     boxes,
     areas = [],
     activeBatches = [],
+    filterBatches = [],
     filters = { search: '', status: 'all', sort: 'created_at', direction: 'desc', trashed: false },
 }: {
     boxes: BoxPagination;
     areas?: Area[];
     activeBatches?: any[];
+    filterBatches?: any[];
     filters?: {
         search?: string;
         status?: string;
         area_id?: string;
+        batch_id?: string;
         sort?: string;
         direction?: string;
         trashed?: boolean | string;
@@ -267,6 +270,20 @@ export default function BoxesIndex({
                                     { label: 'Submitted (Any)', value: 'submitted' },
                                     { label: 'Submitted Online', value: 'submitted_online' },
                                     { label: 'Physical Copy', value: 'physical_copy_received' },
+                                ]}
+                            />
+                            <FilterSelect
+                                label="Batch"
+                                routeName="/admin/boxes"
+                                paramName="batch_id"
+                                queryParams={filters}
+                                placeholder="All Batches"
+                                options={[
+                                    { label: 'Unassigned', value: 'unassigned' },
+                                    ...filterBatches.map((b: any) => ({
+                                        label: b.name ? `${b.batch_number} - ${b.name}` : `Batch ${b.batch_number}`,
+                                        value: String(b.id)
+                                    }))
                                 ]}
                             />
                             <select

@@ -5,7 +5,9 @@ import {
     Ban, 
     CreditCard, 
     Activity,
-    FileText
+    FileText,
+    Package,
+    Truck
 } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import BulkUpdateModal, { BulkUpdateAction } from '@/components/common/bulk-update-modal';
@@ -125,6 +127,78 @@ export default function BookingBulkUpdateModal(props: BookingBulkUpdateModalProp
                             value={formState.admin_notes || ''}
                             onChange={(e) => setFormState({ ...formState, admin_notes: e.target.value })}
                         />
+                    </div>
+                </div>
+            )
+        },
+        {
+            id: 'empty_boxes',
+            label: 'Update Empty Boxes',
+            icon: Package,
+            description: 'Update empty box counts and fees for selected bookings.',
+            endpoint: '/admin/bookings/bulk-update-empty-boxes',
+            getPayload: (formState) => ({ 
+                empty_box_count: formState.empty_box_count !== undefined ? formState.empty_box_count : 0, 
+                empty_box_fee: formState.empty_box_fee !== undefined ? formState.empty_box_fee : 10,
+                filter_status: props.filters?.status 
+            }),
+            renderForm: (formState, setFormState) => (
+                <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label htmlFor="bulk-empty-box-count" className="text-xs font-semibold text-zinc-700">
+                                Target Box Count
+                            </Label>
+                            <input
+                                type="number"
+                                id="bulk-empty-box-count"
+                                min="0"
+                                className="flex h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 shadow-2xs transition-all"
+                                value={formState.empty_box_count ?? 0}
+                                onChange={(e) => setFormState({ ...formState, empty_box_count: parseInt(e.target.value) || 0 })}
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="bulk-empty-box-fee" className="text-xs font-semibold text-zinc-700">
+                                Target Box Fee ($)
+                            </Label>
+                            <input
+                                type="number"
+                                id="bulk-empty-box-fee"
+                                min="0"
+                                step="0.01"
+                                className="flex h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 shadow-2xs transition-all"
+                                value={formState.empty_box_fee ?? 10}
+                                onChange={(e) => setFormState({ ...formState, empty_box_fee: parseFloat(e.target.value) || 0 })}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )
+        },
+        {
+            id: 'booking_type',
+            label: 'Update Booking Type',
+            icon: Truck,
+            description: 'Update the collection method (Booking Type) for the selected bookings.',
+            endpoint: '/admin/bookings/bulk-update-booking-type',
+            getPayload: (formState) => ({ booking_type: formState.booking_type || 'drop_off', filter_status: props.filters?.status }),
+            renderForm: (formState, setFormState) => (
+                <div className="space-y-4">
+                    <div className="space-y-2">
+                        <Label htmlFor="bulk-booking-type" className="text-xs font-semibold text-zinc-700">
+                            New Booking Type
+                        </Label>
+                        <select
+                            id="bulk-booking-type"
+                            className="flex h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 shadow-2xs transition-all"
+                            value={formState.booking_type || 'drop_off'}
+                            onChange={(e) => setFormState({ ...formState, booking_type: e.target.value })}
+                        >
+                            <option value="drop_off">Drop-Off</option>
+                            <option value="home_pickup">Home Pick-Up</option>
+                            <option value="other">Other</option>
+                        </select>
                     </div>
                 </div>
             )

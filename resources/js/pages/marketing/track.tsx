@@ -195,54 +195,67 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
         ];
     }, []);
 
+    const latestJourneyPhase = useMemo(() => {
+        if (!activeTrackingData) return null;
+        
+        if (activeTrackingData.timeline && activeTrackingData.timeline.length > 0) {
+            const latestEvent = activeTrackingData.timeline[0];
+            if (latestEvent.tracking_phase) {
+                return latestEvent.tracking_phase.toLowerCase();
+            }
+        }
+        
+        return (activeTrackingData.status_label || activeTrackingData.status || '').toLowerCase();
+    }, [activeTrackingData]);
+
     const simplifiedStepIndex = useMemo(() => {
         if (!activeTrackingData) {
             return 0;
         }
 
-        const rawStatus = (activeTrackingData.status_label || activeTrackingData.status || '').toLowerCase();
-        const s = rawStatus.replace(/_/g, ' ');
+        const phase = (latestJourneyPhase || '').replace(/_/g, ' ');
 
-        if (s === 'delivered') {
+        if (phase === 'delivered') {
             return 4;
         }
 
-        if (
-            s.includes('manila') ||
-            s.includes('sorting') ||
-            s.includes('hub') ||
-            s.includes('out for delivery') ||
-            s.includes('dispatched') ||
-            s.includes('delivery scheduling')
-        ) {
+        if (phase.includes('out for delivery')) {
             return 3;
         }
 
         if (
-            s.includes('transit') ||
-            s.includes('shipping') ||
-            s.includes('container') ||
-            s.includes('philippines') ||
-            s.includes('boc') ||
-            s.includes('clearance') ||
-            s.includes('arrived') ||
-            s.includes('unloaded') ||
-            s.includes('roro')
+            phase.includes('transit') ||
+            phase.includes('shipping') ||
+            phase.includes('container') ||
+            phase.includes('philippines') ||
+            phase.includes('boc') ||
+            phase.includes('clearance') ||
+            phase.includes('arrived') ||
+            phase.includes('unloaded') ||
+            phase.includes('roro') ||
+            phase.includes('sorting') ||
+            phase.includes('hub') ||
+            phase.includes('dispatched') ||
+            phase.includes('manila')
         ) {
             return 2;
         }
 
         if (
-            s.includes('collected') ||
-            s.includes('picked') ||
-            s.includes('warehouse') ||
-            s.includes('received')
+            phase.includes('collected') ||
+            phase.includes('picked') ||
+            phase.includes('warehouse') ||
+            phase.includes('received') ||
+            phase.includes('processing') ||
+            phase.includes('loading') ||
+            phase.includes('departed') ||
+            phase.includes('manifested')
         ) {
             return 1;
         }
 
         return 0;
-    }, [activeTrackingData]);
+    }, [activeTrackingData, latestJourneyPhase]);
 
     const currentStepIndex = useMemo(() => {
         if (!activeTrackingData) {

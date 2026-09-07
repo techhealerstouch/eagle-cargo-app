@@ -459,6 +459,8 @@ class BookingController extends Controller
             'declaration_form_status',
             'notes',
             'admin_notes',
+            'empty_box_count',
+            'empty_box_fee',
         ]);
 
         if ($request->hasFile('proof_of_payment')) {
@@ -471,7 +473,16 @@ class BookingController extends Controller
 
         try {
             $booking->bypassStatusValidation = true;
+            $oldEmptyBoxCount = $booking->empty_box_count;
+            $oldEmptyBoxFee = $booking->empty_box_fee;
+            
             $booking->update($bookingData);
+            
+            if ($booking->empty_box_count != $oldEmptyBoxCount || $booking->empty_box_fee != $oldEmptyBoxFee) {
+                if ($booking->invoice) {
+                    $booking->invoice->recalculateAmount();
+                }
+            }
         } catch (\RuntimeException $e) {
             return back()->withErrors(['status' => $e->getMessage()])->withInput();
         }
@@ -828,6 +839,77 @@ class BookingController extends Controller
         }
 
         return redirect()->back()->with('success', $updatedCount . ' bookings payment status updated.');
+    }
+
+    public function bulkUpdateEmptyBoxes(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'empty_box_count' => 'required|integer|min:0',
+            'empty_box_fee' => 'required|numeric|min:0',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Booking::query();
+            $requestForFilters = $request->duplicate();
+            $requestForFilters->merge(['status' => $request->filter_status]);
+            $query = $this->applyFilters($query, $requestForFilters);
+            $bookings = $query->get();
+        } else {
+            $bookings = Booking::whereIn('id', $validated['ids'])->get();
+        }
+
+        $updatedCount = 0;
+        foreach ($bookings as $booking) {
+            $oldEmptyBoxCount = $booking->empty_box_count;
+            $oldEmptyBoxFee = $booking->empty_box_fee;
+
+            $booking->empty_box_count = $validated['empty_box_count'];
+            $booking->empty_box_fee = $validated['empty_box_fee'];
+            $booking->save();
+            
+            if ($booking->empty_box_count != $oldEmptyBoxCount || $booking->empty_box_fee != $oldEmptyBoxFee) {
+                if ($booking->invoice) {
+                    $booking->invoice->recalculateAmount();
+                }
+            }
+            $updatedCount++;
+        }
+
+        return redirect()->back()->with('success', $updatedCount . ' bookings empty boxes updated.');
+    }
+
+    public function bulkUpdateBookingType(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'booking_type' => 'required|string|max:50',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Booking::query();
+            $requestForFilters = $request->duplicate();
+            $requestForFilters->merge(['status' => $request->filter_status]);
+            $query = $this->applyFilters($query, $requestForFilters);
+            $bookings = $query->get();
+        } else {
+            $bookings = Booking::whereIn('id', $validated['ids'])->get();
+        }
+
+        $updatedCount = 0;
+        foreach ($bookings as $booking) {
+            $booking->booking_type = $validated['booking_type'];
+            $booking->save();
+            $updatedCount++;
+        }
+
+        return redirect()->back()->with('success', $updatedCount . ' bookings type updated.');
     }
 
     public function bulkUpdateNotes(Request $request)

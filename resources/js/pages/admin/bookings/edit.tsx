@@ -53,6 +53,8 @@ interface Booking {
     reference_number: string;
     payment_reference?: string | null;
     proof_of_payment?: string | null;
+    empty_box_count?: number;
+    empty_box_fee?: number;
 }
 
 const BOOKING_TYPE_CONFIG: Record<string, { label: string; badgeClass: string }> = {
@@ -161,6 +163,8 @@ export default function BookingsEdit({
         declaration_form: null as File | null,
         notes: booking.notes || '',
         admin_notes: booking.admin_notes || '',
+        empty_box_count: booking.empty_box_count ?? 0,
+        empty_box_fee: booking.empty_box_fee ?? 10.00,
     });
 
     const breadcrumbs: BreadcrumbItem[] = [
@@ -189,7 +193,9 @@ export default function BookingsEdit({
     const DeclarationStatusIcon = currentDeclarationConfig.icon;
 
     const isCashPayment = ['cash', 'cash_on_pickup'].includes(data.payment_method || '');
+    const isOnlinePayment = ['stripe', 'afterpay', 'square'].includes(data.payment_method || '');
     const isPaid = data.payment_status === 'paid';
+    const isTransitioningToPaid = isPaid && booking.payment_status !== 'paid';
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -506,7 +512,7 @@ export default function BookingsEdit({
                                 {/* Reference / Transaction Number */}
                                 <div className="space-y-2">
                                     <Label htmlFor="payment_reference" className="text-xs font-medium flex items-center gap-1 text-emerald-950">
-                                        Reference / Transaction No. {isPaid && !isCashPayment ? <span className="text-red-500">*</span> : <span className="text-xs font-normal text-emerald-700/80">(optional)</span>}
+                                        Reference / Transaction No. {isTransitioningToPaid && !isCashPayment ? <span className="text-red-500">*</span> : <span className="text-xs font-normal text-emerald-700/80">(optional)</span>}
                                     </Label>
                                     <div className="relative">
                                         <Banknote className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-700/60" />
@@ -533,7 +539,9 @@ export default function BookingsEdit({
                                                 <span className="text-xs font-normal text-emerald-700/80">(file on file — upload to replace)</span>
                                             ) : isCashPayment ? (
                                                 <span className="text-xs font-normal text-emerald-700/80">(optional for cash)</span>
-                                            ) : isPaid ? (
+                                            ) : isOnlinePayment ? (
+                                                <span className="text-xs font-normal text-emerald-700/80">(optional for online)</span>
+                                            ) : isTransitioningToPaid ? (
                                                 <span className="text-red-500">*</span>
                                             ) : (
                                                 <span className="text-xs text-emerald-700/80 font-normal">(optional)</span>
@@ -781,6 +789,53 @@ export default function BookingsEdit({
                                         onChange={(e) => setData('admin_notes', e.target.value)}
                                         placeholder="Internal notes only (not visible to sender)..."
                                     />
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Empty Box Configuration */}
+                        <div className="p-5 bg-muted/20 rounded-xl border border-border space-y-4">
+                            <div className="flex items-center gap-2">
+                                <Package className="size-4 text-muted-foreground" />
+                                <h3 className="text-xs font-semibold text-foreground">Empty Box Configuration</h3>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                <div className="space-y-2">
+                                    <Label htmlFor="empty_box_count" className="text-xs font-medium text-foreground">
+                                        Empty Box Count
+                                    </Label>
+                                    <Input
+                                        id="empty_box_count"
+                                        type="number"
+                                        min="0"
+                                        className="h-10 rounded-lg border-input bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-ring transition-all"
+                                        value={data.empty_box_count}
+                                        onChange={(e) => setData('empty_box_count', parseInt(e.target.value) || 0)}
+                                    />
+                                    {errors.empty_box_count && (
+                                        <p className="text-xs text-red-500">
+                                            {errors.empty_box_count}
+                                        </p>
+                                    )}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="empty_box_fee" className="text-xs font-medium text-foreground">
+                                        Empty Box Fee ($)
+                                    </Label>
+                                    <Input
+                                        id="empty_box_fee"
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className="h-10 rounded-lg border-input bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-ring transition-all"
+                                        value={data.empty_box_fee}
+                                        onChange={(e) => setData('empty_box_fee', parseFloat(e.target.value) || 0)}
+                                    />
+                                    {errors.empty_box_fee && (
+                                        <p className="text-xs text-red-500">
+                                            {errors.empty_box_fee}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                         </div>
