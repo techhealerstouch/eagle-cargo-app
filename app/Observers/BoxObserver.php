@@ -9,6 +9,7 @@ use App\Notifications\BoxStatusChanged;
 use App\Services\BatchService;
 use App\Services\ReferenceDataService;
 use App\Services\TrackingCacheService;
+use Illuminate\Support\Facades\Auth;
 
 class BoxObserver
 {
@@ -186,24 +187,34 @@ class BoxObserver
     {
         $statusValue = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
 
-        $phase = match ($statusValue) {
-            'collected' => \App\Enums\TrackingPhase::PICKED_UP->value,
-            'received_by_branch' => \App\Enums\TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
-            'loaded_to_container' => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
-            'in_transit' => \App\Enums\TrackingPhase::IN_TRANSIT_SEA->value,
-            'arrived' => \App\Enums\TrackingPhase::ARRIVED_MANILA_PORT->value,
-            'out_for_delivery' => \App\Enums\TrackingPhase::OUT_FOR_DELIVERY->value,
-            'delivered' => \App\Enums\TrackingPhase::DELIVERED->value,
-            default => null,
-        };
+        $stepKey = $box->tracking_step_key;
+        $phase = null;
+        if ($stepKey) {
+            $phaseEnum = \App\Enums\TrackingPhase::tryFrom($stepKey);
+            $phase = $phaseEnum?->value;
+        }
+
+        if (! $phase) {
+            $phase = match ($statusValue) {
+                'collected' => \App\Enums\TrackingPhase::PICKED_UP->value,
+                'received_by_branch' => \App\Enums\TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
+                'loaded_to_container' => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
+                'in_transit' => \App\Enums\TrackingPhase::IN_TRANSIT_SEA->value,
+                'arrived' => \App\Enums\TrackingPhase::ARRIVED_MANILA_PORT->value,
+                'out_for_delivery' => \App\Enums\TrackingPhase::OUT_FOR_DELIVERY->value,
+                'delivered' => \App\Enums\TrackingPhase::DELIVERED->value,
+                default => null,
+            };
+        }
 
         \App\Models\BoxUpdate::create([
             'box_id' => $box->id,
             'status' => $statusValue,
+            'tracking_step_key' => $stepKey,
             'description' => 'Booking created and box registered.',
             'location' => 'System',
             'tracking_phase' => $phase,
-            'updated_by' => auth()->id(),
+            'updated_by' => Auth::id(),
         ]);
 
         app(TrackingCacheService::class)->forgetBox($box);

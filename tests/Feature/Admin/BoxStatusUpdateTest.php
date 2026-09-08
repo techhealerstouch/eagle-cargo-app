@@ -4,9 +4,12 @@ namespace Tests\Feature\Admin;
 
 use App\Enums\BoxStatus;
 use App\Enums\Role;
+use App\Enums\TrackingPhase;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\User;
+use App\Repositories\Contracts\TrackingRepositoryInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Event;
 use Tests\TestCase;
@@ -150,4 +153,116 @@ class BoxStatusUpdateTest extends TestCase
         $this->assertEquals('in_transit_sea', $box->tracking_step_key);
         $this->assertEquals('Loaded for ocean transit', $box->courier_notes);
     }
+
+    public function test_admin_status_update_with_sorting_step_syncs_tracking_phase_and_public_label()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'tracking_step_key' => 'received_by_branch',
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('admin.boxes.update-status', $box), [
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'sorting',
+            'courier_notes' => 'Sorting at distribution center',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasNoErrors();
+
+        $box->refresh();
+
+        $this->assertEquals(BoxStatus::InTransit, $box->status);
+        $this->assertEquals('sorting', $box->tracking_step_key);
+
+        $latestUpdate = BoxUpdate::where('box_id', $box->id)->latest('id')->first();
+        $this->assertNotNull($latestUpdate);
+        $this->assertEquals('sorting', $latestUpdate->tracking_step_key);
+        $this->assertEquals(TrackingPhase::SORTING, $latestUpdate->tracking_phase);
+
+        /** @var TrackingRepositoryInterface $trackingRepo */
+        $trackingRepo = app(TrackingRepositoryInterface::class);
+        $trackingData = $trackingRepo->getTrackingData($box->tracking_number);
+
+        $this->assertNotNull($trackingData);
+        $this->assertEquals('At Sorting Facility', $trackingData['status_label']);
+        $this->assertEquals('sorting', $trackingData['tracking_step_key']);
+    }
+
+    public function test_admin_bulk_status_update_with_sorting_step_syncs_tracking_phase_and_public_label()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'tracking_step_key' => 'received_by_branch',
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('admin.boxes.bulk-update-status'), [
+            'ids' => [$box->id],
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'sorting',
+            'courier_notes' => 'Bulk sorted at hub',
+        ]);
+
+        $response->assertRedirect();
+        $box->refresh();
+
+        $this->assertEquals(BoxStatus::InTransit, $box->status);
+        $this->assertEquals('sorting', $box->tracking_step_key);
+
+        $latestUpdate = BoxUpdate::where('box_id', $box->id)->latest('id')->first();
+        $this->assertNotNull($latestUpdate);
+        $this->assertEquals('sorting', $latestUpdate->tracking_step_key);
+        $this->assertEquals(TrackingPhase::SORTING, $latestUpdate->tracking_phase);
+
+        /** @var TrackingRepositoryInterface $trackingRepo */
+        $trackingRepo = app(TrackingRepositoryInterface::class);
+        $trackingData = $trackingRepo->getTrackingData($box->tracking_number);
+
+        $this->assertNotNull($trackingData);
+        $this->assertEquals('At Sorting Facility', $trackingData['status_label']);
+        $this->assertEquals('sorting', $trackingData['tracking_step_key']);
+    }
+
+    public function test_admin_bulk_assign_to_batch_loads_box_to_container()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create([
+            'status' => \App\Enums\BookingStatus::Confirmed,
+            'payment_status' => \App\Enums\PaymentStatus::Paid,
+            'declaration_form_status' => 'submitted_online',
+        ]);
+
+        $batch = \App\Models\Batch::factory()->create();
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::Pending,
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('admin.boxes.bulk-assign-to-batch'), [
+            'ids' => [$box->id],
+            'batch_id' => $batch->id,
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasNoErrors();
+        $response->assertSessionHas('success');
+
+        $box->refresh();
+        $this->assertEquals(BoxStatus::LoadedToContainer, $box->status);
+        $this->assertEquals('loading_container', $box->tracking_step_key);
+        $this->assertEquals($batch->id, $box->batch_id);
+    }
 }
+

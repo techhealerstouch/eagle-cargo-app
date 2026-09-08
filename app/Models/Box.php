@@ -114,7 +114,9 @@ class Box extends Model
 
             // Validation logic (only if changing)
             if (! $this->bypassStatusValidation && $currentStatus && $currentStatus !== $newStatus && ! $currentStatus->canTransitionTo($newStatus)) {
-                throw new \RuntimeException("Unauthorized transition from {$currentStatus->value} to {$newStatus->value}");
+                $from = $currentStatus->label();
+                $to = $newStatus->label();
+                throw new \RuntimeException("Cannot change box status from \"{$from}\" to \"{$to}\". This status transition is not permitted by workflow rules.");
             }
         }
 

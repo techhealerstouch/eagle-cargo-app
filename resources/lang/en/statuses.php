@@ -73,7 +73,7 @@ return [
         'under_customs_clearance' => 'Under Customs Clearance',
         'released_by_boc' => 'Released by BOC',
         'received_manila_warehouse' => 'Received at Manila Warehouse',
-        'sorting' => 'Sorting',
+        'sorting' => 'At Sorting Facility',
         'dispatched_to_local_hub' => 'Dispatched to Local Hub',
         'out_for_delivery' => 'Out for Delivery',
         'delivered' => 'Delivered',

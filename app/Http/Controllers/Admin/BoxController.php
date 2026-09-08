@@ -256,15 +256,24 @@ class BoxController extends Controller
 
         $failedBoxes = [];
         $eligibleBoxes = [];
+
+        $statusesBelowLoaded = [
+            BoxStatus::Pending->value,
+            BoxStatus::Collected->value,
+            BoxStatus::ReceivedByWarehouse->value,
+        ];
+
         foreach ($boxes as $box) {
+            $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+
             if ($box->booking?->status === BookingStatus::Cancelled) {
                 $failedBoxes[] = "{$box->tracking_number} (Cancelled)";
             } elseif (!in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)) {
                 $failedBoxes[] = "{$box->tracking_number} (Not Paid)";
             } elseif ($box->booking?->needsDeclaration()) {
                 $failedBoxes[] = "{$box->tracking_number} (Missing Declaration)";
-            } elseif ($box->batch_id === $targetBatchId) {
-                $failedBoxes[] = "{$box->tracking_number} (Already in this Batch)";
+            } elseif ($box->batch_id === $targetBatchId && !in_array($statusVal, $statusesBelowLoaded, true)) {
+                $failedBoxes[] = "{$box->tracking_number} (Already loaded in this Batch)";
             } else {
                 $eligibleBoxes[] = $box;
             }
@@ -275,44 +284,45 @@ class BoxController extends Controller
             return redirect()->back()->with('error', $msg);
         }
 
-        $statusesBelowLoaded = [
-            BoxStatus::Pending->value,
-            BoxStatus::Collected->value,
-            BoxStatus::ReceivedByWarehouse->value,
-        ];
-
         $freshCount = 0;
         $preservedCount = 0;
         $userId = Auth::id();
 
         foreach ($eligibleBoxes as $box) {
-            $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
-            $box->update(['batch_id' => $targetBatchId]);
+            try {
+                $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+                $box->update(['batch_id' => $targetBatchId]);
 
-            if (in_array($statusVal, $statusesBelowLoaded, true)) {
-                $boxRepo->updateStatus(
-                    $box,
-                    BoxStatus::LoadedToContainer->value,
-                    "Assigned to batch: {$batch->batch_number}",
-                    $userId
-                );
-                $freshCount++;
-            } else {
-                // Preserved progress for boxes already at or beyond LoadedToContainer (transfers/reassignments)
-                $latestUpdate = $box->updates()->latest('id')->first();
-                $latestPhase = $latestUpdate?->tracking_phase?->value;
+                if (in_array($statusVal, $statusesBelowLoaded, true)) {
+                    $boxRepo->updateStatus(
+                        $box,
+                        BoxStatus::LoadedToContainer->value,
+                        "Assigned to batch: {$batch->batch_number}",
+                        $userId,
+                        bypassValidation: true,
+                        trackingStepKey: 'loading_container'
+                    );
+                    $freshCount++;
+                } else {
+                    // Preserved progress for boxes already at or beyond LoadedToContainer (transfers/reassignments)
+                    $latestUpdate = $box->updates()->latest('id')->first();
+                    $latestPhase = $latestUpdate?->tracking_phase?->value;
 
-                BoxUpdate::create([
-                    'box_id' => $box->id,
-                    'status' => $statusVal,
-                    'description' => "Transferred to batch: {$batch->batch_number}",
-                    'location' => 'In-Transit',
-                    'tracking_phase' => $latestPhase,
-                    'updated_by' => $userId,
-                ]);
+                    BoxUpdate::create([
+                        'box_id' => $box->id,
+                        'status' => $statusVal,
+                        'tracking_step_key' => $box->tracking_step_key,
+                        'description' => "Transferred to batch: {$batch->batch_number}",
+                        'location' => 'In-Transit',
+                        'tracking_phase' => $latestPhase,
+                        'updated_by' => $userId,
+                    ]);
 
-                app(TrackingCacheService::class)->forgetBox($box->refresh());
-                $preservedCount++;
+                    app(TrackingCacheService::class)->forgetBox($box->refresh());
+                    $preservedCount++;
+                }
+            } catch (\Exception $e) {
+                $failedBoxes[] = "{$box->tracking_number} (" . $e->getMessage() . ")";
             }
         }
 
