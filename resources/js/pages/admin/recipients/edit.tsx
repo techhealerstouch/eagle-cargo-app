@@ -1,4 +1,4 @@
-import { Head, useForm, Link } from '@inertiajs/react';
+import { Head, useForm, Link, usePage } from '@inertiajs/react';
 import { Save, ArrowLeft, User, Phone, MapPin, Globe, ShieldCheck, Info } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,9 @@ interface Recipient {
 }
 
 export default function RecipientsEdit({ recipient, areas }: { recipient: Recipient; areas: Area[] }) {
-    const { data, setData, put, processing, errors } = useForm({
+    const { return_url } = usePage<any>().props;
+
+    const { data, setData, put, processing, errors, transform } = useForm({
         name: recipient.name,
         phone_number: recipient.phone_number || '',
         secondary_phone_number: recipient.secondary_phone_number || '',
@@ -42,12 +44,16 @@ export default function RecipientsEdit({ recipient, areas }: { recipient: Recipi
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
-        { title: 'Recipients', href: '/admin/recipients' },
+        { title: 'Recipients', href: return_url || '/admin/recipients' },
         { title: 'Edit Recipient', href: '#' },
     ];
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        transform((data) => ({
+            ...data,
+            ...(return_url ? { return_to: return_url } : {}),
+        }));
         put(`/admin/recipients/${recipient.id}`);
     };
 
@@ -59,7 +65,7 @@ export default function RecipientsEdit({ recipient, areas }: { recipient: Recipi
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-brand-warm/20 pb-8">
                     <div className="flex items-center gap-4">
                         <Link
-                            href="/admin/recipients"
+                            href={return_url || '/admin/recipients'}
                             className="mt-1 rounded-xl p-2.5 bg-card border border-border text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground shadow-sm"
                         >
                             <ArrowLeft className="size-5" />
@@ -232,7 +238,7 @@ export default function RecipientsEdit({ recipient, areas }: { recipient: Recipi
                         </div>
 
                         <div className="flex justify-end gap-5 pt-10 border-t border-brand-warm/10">
-                            <Link href="/admin/recipients" className="px-10 h-14 flex items-center justify-center rounded-2xl border-2 border-brand-warm/20 text-[11px] font-black uppercase tracking-[0.2em] hover:bg-brand-warm/5 transition-all active:scale-95 text-muted-foreground">
+                            <Link href={return_url || '/admin/recipients'} className="px-10 h-14 flex items-center justify-center rounded-2xl border-2 border-brand-warm/20 text-[11px] font-black uppercase tracking-[0.2em] hover:bg-brand-warm/5 transition-all active:scale-95 text-muted-foreground">
                                 Cancel
                             </Link>
                             <Button

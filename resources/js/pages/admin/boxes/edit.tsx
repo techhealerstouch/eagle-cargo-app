@@ -21,12 +21,20 @@ interface Box {
     serial_number: string | null;
     booking_id: number;
     status: string;
+    tracking_step_key?: string | null;
     courier_notes: string | null;
     delivery_proof_path: string | null;
     signature_path: string | null;
     pickup_proof_path: string | null;
     eta_date?: string | null;
     eta_message?: string | null;
+    estimate_delivery_date?: string | null;
+    estimate_delivery_message?: string | null;
+    latest_update?: {
+        status: string;
+        tracking_step_key?: string | null;
+        description?: string | null;
+    } | null;
     booking?: {
         sender: {
             first_name: string;
@@ -74,13 +82,83 @@ export default function BoxesEdit({
     box: Box;
     bookings: Booking[];
 }) {
-    const { auth, tracking_steps } = usePage<any>().props;
+    const { auth, tracking_steps, return_url } = usePage<any>().props;
 
-    const getValueForSystemStatus = (status: string | undefined) => {
-        if (!status) return '';
-        const step = tracking_steps?.find((s: any) => s.system_status === status);
-        return step ? step.key : status;
+    const humanize = (str: string | null | undefined) => {
+        if (!str) return '';
+        return str
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, (char) => char.toUpperCase());
     };
+
+    const dynamicOptions = (tracking_steps || []).map((step: any) => ({
+        value: step.key,
+        system_status: step.system_status,
+        label: step.label,
+    }));
+
+    const hasPendingOption = dynamicOptions.some((o: any) => o.value === 'pending' || o.system_status === 'pending');
+    const pendingOption = hasPendingOption ? [] : [
+        { value: 'pending', system_status: 'pending', label: 'Pending / Booked' }
+    ];
+
+    const exceptionOptions = [
+        { value: 'cancelled', system_status: 'cancelled', label: 'Cancelled' },
+        { value: 'damaged', system_status: 'damaged', label: 'Damaged' },
+        { value: 'held', system_status: 'held', label: 'Held' },
+        { value: 'held_bulging', system_status: 'held_bulging', label: 'Held (Bulging)' },
+    ];
+
+    const allOptions: Array<{ value: string; system_status: string; label: string }> = [
+        ...pendingOption,
+        ...dynamicOptions,
+        ...exceptionOptions,
+    ];
+
+    const savedStepKey = box.tracking_step_key || box.latest_update?.tracking_step_key || null;
+    const savedStatus = box.status || box.latest_update?.status || 'pending';
+
+    // Ensure any custom or unlisted saved status is present in allOptions
+    const hasSavedMatch = allOptions.some((o) =>
+        (savedStepKey && o.value === savedStepKey) ||
+        o.value === savedStatus ||
+        o.system_status === savedStatus
+    );
+
+    if (!hasSavedMatch && savedStatus) {
+        allOptions.unshift({
+            value: savedStepKey || savedStatus,
+            system_status: savedStatus,
+            label: humanize(savedStatus),
+        });
+    }
+
+    const initialSelectedKey = (() => {
+        // Priority 1: Exact saved tracking_step_key match
+        if (savedStepKey) {
+            const match = allOptions.find((o) => o.value === savedStepKey);
+            if (match) return match.value;
+        }
+
+        // Priority 2: Exact value match with savedStatus (e.g. pending, cancelled, etc.)
+        const matchByVal = allOptions.find((o) => o.value === savedStatus);
+        if (matchByVal) return matchByVal.value;
+
+        // Priority 3: Match by system_status
+        const matchBySystem = allOptions.find((o) => o.system_status === savedStatus);
+        if (matchBySystem) return matchBySystem.value;
+
+        // Priority 4: Alias support
+        if (savedStatus === 'received_by_warehouse') {
+            const branch = allOptions.find((o) => o.system_status === 'received_by_branch' || o.value === 'received_by_branch');
+            if (branch) return branch.value;
+        }
+
+        return savedStepKey || savedStatus || allOptions[0]?.value || '';
+    })();
+
+    const initialSavedOption = allOptions.find((o) => o.value === initialSelectedKey);
+    const initialSavedLabel = initialSavedOption?.label || humanize(savedStatus);
 
     const getStepOrder = (val: string | null | undefined) => {
         if (!val) return 0;
@@ -88,12 +166,12 @@ export default function BoxesEdit({
         return step ? step.order : 0;
     };
 
-    const [selectedStepKey, setSelectedStepKey] = useState(getValueForSystemStatus(box.status));
+    const [selectedStepKey, setSelectedStepKey] = useState(initialSelectedKey);
 
-    const { data, setData, put, processing, errors } = useForm({
+    const { data, setData, put, processing, errors, transform } = useForm({
         booking_id: box.booking_id.toString(),
-        status: box.status,
-        tracking_step_key: getValueForSystemStatus(box.status),
+        status: initialSavedOption ? initialSavedOption.system_status : box.status,
+        tracking_step_key: initialSelectedKey,
         courier_notes: box.courier_notes || '',
         admin_delivery_override_reason: '',
         update_eta: false,
@@ -106,24 +184,28 @@ export default function BoxesEdit({
 
     const handleStatusChange = (val: string) => {
         setSelectedStepKey(val);
-        const selectedStep = tracking_steps?.find((s: any) => s.key === val);
+        const selectedStep = allOptions.find((s: any) => s.value === val);
         const systemStatus = selectedStep ? selectedStep.system_status : val;
         
         setData((prev) => ({
             ...prev,
             status: systemStatus,
-            tracking_step_key: selectedStep ? selectedStep.key : '',
+            tracking_step_key: selectedStep ? selectedStep.value : val,
         }));
     };
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
-        { title: 'Boxes', href: '/admin/boxes' },
+        { title: 'Boxes', href: return_url || '/admin/boxes' },
         { title: box.tracking_number, href: `/admin/boxes/${box.id}/edit` },
     ];
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        transform((data) => ({
+            ...data,
+            ...(return_url ? { return_to: return_url } : {}),
+        }));
         put(`/admin/boxes/${box.id}`);
     };
 
@@ -137,7 +219,7 @@ export default function BoxesEdit({
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-brand-warm/20 pb-8">
                     <div className="flex items-center gap-4">
                         <Link
-                            href="/admin/boxes"
+                            href={return_url || '/admin/boxes'}
                             className="flex h-9 w-9 items-center justify-center rounded-lg border border-brand-warm/30 bg-white text-brand-text-mid transition-all hover:bg-brand-rust/5 hover:text-brand-rust"
                         >
                             <ArrowLeft className="size-4" />
@@ -180,7 +262,7 @@ export default function BoxesEdit({
                                         Current Journey
                                     </span>
                                     <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full capitalize border ${
-                                        ['cancelled', 'damaged', 'held'].includes(data.status)
+                                        ['cancelled', 'damaged', 'held', 'held_bulging'].includes(data.status)
                                             ? 'text-red-700 bg-red-50 border-red-200'
                                             : 'text-brand-rust bg-brand-rust/10 border-brand-rust/20'
                                     }`}>
@@ -197,7 +279,8 @@ export default function BoxesEdit({
                                          className="absolute left-0 top-1/2 -translate-y-1/2 h-0.5 bg-brand-rust transition-all duration-500 z-0"
                                          style={{ 
                                              width: `${(() => {
-                                                 const currentStepIdx = STEPPER_STEPS.findIndex(s => s.key === selectedStepKey);
+                                                 const activeSystemStatus = data.status || box.status;
+                                                 const currentStepIdx = STEPPER_STEPS.findIndex(s => s.key === activeSystemStatus);
                                                  return currentStepIdx === -1 ? 0 : (currentStepIdx / (STEPPER_STEPS.length - 1)) * 100;
                                              })()}%` 
                                          }}
@@ -205,7 +288,8 @@ export default function BoxesEdit({
 
                                     {/* Step Dots */}
                                     {STEPPER_STEPS.map((step, index) => {
-                                        const currentStepIdx = STEPPER_STEPS.findIndex(s => s.key === selectedStepKey);
+                                        const activeSystemStatus = data.status || box.status;
+                                        const currentStepIdx = STEPPER_STEPS.findIndex(s => s.key === activeSystemStatus);
                                         const isCompleted = currentStepIdx !== -1 && index < currentStepIdx;
                                         const isCurrent = currentStepIdx !== -1 && index === currentStepIdx;
 
@@ -274,46 +358,39 @@ export default function BoxesEdit({
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="status" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Status</Label>
+                                <div className="flex items-center justify-between">
+                                    <Label htmlFor="status" className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Status</Label>
+                                    {initialSavedLabel && (
+                                        <span className="text-[11px] font-medium text-brand-text-mid/80 bg-brand-warm/15 border border-brand-warm/30 px-2.5 py-0.5 rounded-full flex items-center gap-1.5">
+                                            <span className="h-1.5 w-1.5 rounded-full bg-brand-rust"></span>
+                                            Previously Saved: <strong className="text-brand-rust font-semibold">{initialSavedLabel}</strong>
+                                        </span>
+                                    )}
+                                </div>
                                 <select
                                     id="status"
                                     title="Select status"
-                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-ring focus:outline-none transition-all"
+                                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-ring focus:outline-none transition-all"
                                     value={selectedStepKey}
                                     onChange={(e) =>
                                         handleStatusChange(e.target.value)
                                     }
                                 >
-                                    {(() => {
-                                        const dynamicOptions = tracking_steps?.map((step: any) => ({
-                                            value: step.key,
-                                            system_status: step.system_status,
-                                            label: step.label,
-                                        })) || [];
+                                    {allOptions.map((opt) => {
+                                        const isCurrentSaved = opt.value === initialSelectedKey;
+                                        const isDisabled = !isCurrentSaved && isStatusDisabled(box.status, opt.system_status);
 
-                                        const exceptionOptions = [
-                                            { value: 'cancelled', system_status: 'cancelled', label: 'Cancelled' },
-                                            { value: 'damaged', system_status: 'damaged', label: 'Damaged' },
-                                            { value: 'held', system_status: 'held', label: 'Held' },
-                                        ];
-
-                                        const allOptions = [...dynamicOptions, ...exceptionOptions];
-
-                                        const getSystemStatusForValue = (val: string) => {
-                                            const opt = allOptions.find(o => o.value === val);
-                                            return opt ? opt.system_status : val;
-                                        };
-
-                                        return allOptions.map((opt) => (
+                                        return (
                                             <option 
                                                 key={opt.value} 
                                                 value={opt.value} 
-                                                disabled={isStatusDisabled(box.status, getSystemStatusForValue(opt.value))}
+                                                disabled={isDisabled}
+                                                className={isCurrentSaved ? 'font-bold text-brand-rust' : ''}
                                             >
-                                                {opt.label}
+                                                {isCurrentSaved ? `✓ ${opt.label} (Current)` : opt.label}
                                             </option>
-                                        ));
-                                    })()}
+                                        );
+                                    })}
                                 </select>
                                 {errors.status && (
                                     <p className="text-sm text-red-500 font-medium ml-1">{errors.status}</p>
@@ -321,7 +398,7 @@ export default function BoxesEdit({
                             </div>
 
                             {(() => {
-                                const currentOrder = getStepOrder(box.status);
+                                const currentOrder = getStepOrder(initialSelectedKey);
                                 const newOrder = getStepOrder(selectedStepKey);
                                 const skippedSteps = tracking_steps?.filter((s: any) => s.order > currentOrder && s.order < newOrder) || [];
                                 
@@ -493,7 +570,7 @@ export default function BoxesEdit({
                         </div>
 
                         <div className="flex justify-end gap-4 border-t border-brand-warm/10 pt-10">
-                            <Link href="/admin/boxes" className="btn-outline px-8 h-12 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all active:scale-95">
+                            <Link href={return_url || '/admin/boxes'} className="btn-outline px-8 h-12 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] transition-all active:scale-95">
                                 Cancel
                             </Link>
                             <Button

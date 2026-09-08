@@ -154,6 +154,10 @@ class BoxRepository implements BoxRepositoryInterface
                 'signature_path' => $signaturePath ?? $lockedBox->signature_path,
             ];
 
+            if ($trackingStepKey !== null) {
+                $updates['tracking_step_key'] = $trackingStepKey;
+            }
+
             if ($serialNumber !== null) {
                 $updates['serial_number'] = $serialNumber;
             }

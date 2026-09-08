@@ -57,7 +57,7 @@ class BoxController extends Controller
             BatchStatus::Loading,
         ])->latest()->get();
 
-        $filterBatches = Batch::latest()->get(['id', 'batch_number', 'name']);
+        $filterBatches = Batch::latest()->get(['id', 'batch_number']);
 
         $areas = Area::where('is_active', true)->orderBy('name')->get(['id', 'name']);
 
@@ -98,7 +98,7 @@ class BoxController extends Controller
         $bookings = Booking::with('sender')->latest()->get();
 
         return Inertia::render('admin/boxes/edit', [
-            'box' => $box->load('booking.sender'),
+            'box' => $box->load(['booking.sender', 'latestUpdate']),
             'bookings' => $bookings,
         ]);
     }
@@ -124,7 +124,11 @@ class BoxController extends Controller
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         // Do not unset tracking_step_key so it gets saved to the boxes table
 
-        if ($newStatus && ($box->status instanceof BoxStatus ? $box->status->value : $box->status) !== $newStatus) {
+        $currentStatusValue = $box->status instanceof BoxStatus ? $box->status->value : $box->status;
+        $statusChanged = $newStatus && $currentStatusValue !== $newStatus;
+        $stepChanged = $trackingStepKey && $box->tracking_step_key !== $trackingStepKey;
+
+        if ($statusChanged || $stepChanged) {
             if ($newStatus === BoxStatus::Delivered->value && $this->requiresDeliveryOverride($box) && blank($overrideReason)) {
                 throw ValidationException::withMessages([
                     'admin_delivery_override_reason' => 'An admin override reason is required when marking a box Delivered without proof and signature.',
@@ -134,10 +138,12 @@ class BoxController extends Controller
             unset($validated['status']);
             $box->update($validated);
 
+            $notes = !empty($validated['courier_notes']) ? $validated['courier_notes'] : 'Status updated by Admin';
+
             $boxRepo->updateStatus(
                 $box,
-                $newStatus,
-                'Status updated by Admin',
+                $newStatus ?? $currentStatusValue,
+                $notes,
                 Auth::id(),
                 deliveryOverrideReason: $overrideReason,
                 bypassValidation: true,
@@ -151,7 +157,8 @@ class BoxController extends Controller
             app(\App\Services\TrackingCacheService::class)->forgetBox($box);
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', 'Box updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.boxes.index') ?? session('admin_return_url') ?? route('admin.boxes.index');
+        return redirect($returnUrl)->with('success', 'Box updated successfully.');
     }
 
     public function bulkUpdateStatus(Request $request, BoxRepositoryInterface $boxRepo)
@@ -171,11 +178,6 @@ class BoxController extends Controller
             'eta_date' => 'nullable|date',
             'eta_message' => 'nullable|string|max:255',
         ]);
-
-        if ($request->filled('status') && $validated['status'] === BoxStatus::Delivered->value) {
-            return redirect()->route('admin.boxes.index')
-                ->with('error', 'Bulk Delivered updates require per-box proof/signature review or an admin override reason.');
-        }
 
         $requestForFilters = clone $request;
         if ($request->has('filter_status')) {
@@ -216,6 +218,7 @@ class BoxController extends Controller
                         $validated['status'],
                         ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
                         $userId,
+                        deliveryOverrideReason: $validated['status'] === BoxStatus::Delivered->value ? 'Bulk updated by Admin' : null,
                         bypassValidation: true,
                         trackingStepKey: $trackingStepKey
                     );
@@ -226,7 +229,7 @@ class BoxController extends Controller
             }
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', "{$updated} boxes status updated successfully.");
+        return redirect()->back()->with('success', "{$updated} boxes status updated successfully.");
     }
 
     public function bulkAssignToBatch(Request $request, BoxRepositoryInterface $boxRepo)
@@ -321,10 +324,10 @@ class BoxController extends Controller
 
         if (count($failedBoxes) > 0) {
             $msg .= " The following " . count($failedBoxes) . " box(es) were skipped: " . implode(', ', $failedBoxes);
-            return redirect()->route('admin.boxes.index')->with('warning', $msg);
+            return redirect()->back()->with('warning', $msg);
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', $msg);
+        return redirect()->back()->with('success', $msg);
     }
 
     public function bulkDestroy(Request $request)
@@ -361,10 +364,10 @@ class BoxController extends Controller
         $message = "{$deleted} boxes deleted successfully.";
         if ($skipped > 0) {
             $message .= " {$skipped} boxes skipped because they are not pending or cancelled.";
-            return redirect()->route('admin.boxes.index')->with('warning', $message);
+            return redirect()->back()->with('warning', $message);
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', $message);
+        return redirect()->back()->with('success', $message);
     }
 
     public function updateStatus(Request $request, Box $box, BoxRepositoryInterface $boxRepo)
@@ -452,7 +455,7 @@ class BoxController extends Controller
 
         $box->delete();
 
-        return redirect()->route('admin.boxes.index')->with('success', 'Box archived successfully.');
+        return redirect()->back()->with('success', 'Box archived successfully.');
     }
 
     public function restore($id)

@@ -105,14 +105,16 @@ class PaymentController extends Controller
     {
         $this->paymentService->recordPayment($request->validated());
 
-        return redirect()->route('admin.payments.index')->with('success', 'Payment recorded successfully.');
+        $returnUrl = request()->input('return_to') ?? session('admin_return_url.admin.payments.index') ?? session('admin_return_url') ?? route('admin.payments.index');
+        return redirect($returnUrl)->with('success', 'Payment recorded successfully.');
     }
 
     public function destroy(Payment $payment)
     {
         $payment->delete();
 
-        return redirect()->route('admin.payments.index')->with('success', 'Payment deleted.');
+        $returnUrl = request()->input('return_to') ?? session('admin_return_url.admin.payments.index') ?? session('admin_return_url') ?? route('admin.payments.index');
+        return redirect($returnUrl)->with('success', 'Payment deleted.');
     }
 
     public function confirm(Payment $payment)

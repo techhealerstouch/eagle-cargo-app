@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import Heading from '@/components/common/heading';
-import Pagination from '@/components/common/pagination';
+import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
 import SortLink from '@/components/common/sort-link';
 import { Button } from '@/components/ui/button';
@@ -39,12 +39,7 @@ interface Payment {
     } | null;
 }
 
-interface PaginationProps {
-    data: Payment[];
-    links: { url: string | null; label: string; active: boolean }[];
-    current_page: number;
-    total: number;
-}
+type PaymentPagination = PaginationData & { data: Payment[] };
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: '/dashboard' },
@@ -53,12 +48,12 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 export default function PaymentsIndex({
     payments,
-    filters = { search: '', method: 'all', sort: 'paid_at', direction: 'desc' },
+    filters = { search: '', payment_method: 'all', sort: 'paid_at', direction: 'desc' },
 }: {
-    payments: PaginationProps;
+    payments: PaymentPagination;
     filters?: {
         search?: string;
-        method?: string;
+        payment_method?: string;
         sort?: string;
         direction?: string;
     };
@@ -66,7 +61,7 @@ export default function PaymentsIndex({
     const handleMethodChange = (method: string) => {
         router.get(
             '/admin/payments',
-            { ...filters, method: method === 'all' ? '' : method },
+            { ...filters, payment_method: method === 'all' ? '' : method },
             { preserveState: true }
         );
     };
@@ -86,7 +81,7 @@ export default function PaymentsIndex({
 
                 <div className="flex flex-col gap-4">
                     <Tabs
-                        value={filters.method || 'all'}
+                        value={filters.payment_method || 'all'}
                         onValueChange={handleMethodChange}
                         className="w-full"
                     >

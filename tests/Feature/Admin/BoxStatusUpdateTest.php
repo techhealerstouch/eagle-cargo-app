@@ -15,10 +15,17 @@ class BoxStatusUpdateTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+    }
+
     public function test_admin_can_update_box_status_without_contradiction_or_future_problem()
     {
         // 1. Arrange: Setup user, booking, and an eligible box.
         // For a box to be eligible, it must be ReceivedByWarehouse or have an active courier.
+        /** @var User $admin */
         $admin = User::factory()->create(['role' => Role::Admin]);
         $booking = Booking::factory()->create();
         
@@ -58,6 +65,7 @@ class BoxStatusUpdateTest extends TestCase
 
     public function test_admin_cannot_update_box_status_with_invalid_transition()
     {
+        /** @var User $admin */
         $admin = User::factory()->create(['role' => Role::Admin]);
         $booking = Booking::factory()->create();
         
@@ -81,5 +89,65 @@ class BoxStatusUpdateTest extends TestCase
         
         $box->refresh();
         $this->assertEquals(BoxStatus::ReceivedByWarehouse, $box->status); // Status should remain unchanged
+    }
+
+    public function test_admin_box_edit_page_loads_with_latest_update_and_tracking_step_key()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'tracking_step_key' => 'received_by_branch',
+        ]);
+
+        \App\Models\BoxUpdate::create([
+            'box_id' => $box->id,
+            'status' => BoxStatus::ReceivedByWarehouse->value,
+            'tracking_step_key' => 'received_by_branch',
+            'description' => 'Received at warehouse',
+            'updated_by' => $admin->id,
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('admin.boxes.edit', $box));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('admin/boxes/edit')
+            ->has('box')
+            ->where('box.id', $box->id)
+            ->where('box.status', BoxStatus::ReceivedByWarehouse->value)
+            ->where('box.tracking_step_key', 'received_by_branch')
+            ->has('box.latest_update')
+        );
+    }
+
+    public function test_admin_can_update_box_via_edit_form_and_save_tracking_step_key()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'tracking_step_key' => 'received_by_branch',
+        ]);
+
+        $response = $this->actingAs($admin)->put(route('admin.boxes.update', $box), [
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'in_transit_sea',
+            'courier_notes' => 'Loaded for ocean transit',
+        ]);
+
+        $response->assertRedirect();
+        $box->refresh();
+
+        $this->assertEquals(BoxStatus::InTransit, $box->status);
+        $this->assertEquals('in_transit_sea', $box->tracking_step_key);
+        $this->assertEquals('Loaded for ocean transit', $box->courier_notes);
     }
 }

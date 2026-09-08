@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import FilterSelect from '@/components/common/filter-select';
 import Heading from '@/components/common/heading';
-import Pagination from '@/components/common/pagination';
+import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
 import SortLink from '@/components/common/sort-link';
 import { Button } from '@/components/ui/button';
@@ -37,10 +37,7 @@ interface Runsheet {
     bookings?: any[];
 }
 
-interface PaginationProps {
-    data: Runsheet[];
-    links: { url: string | null; label: string; active: boolean }[];
-}
+type RunsheetPagination = PaginationData & { data: Runsheet[] };
 
 const STATUS_COLORS: Record<string, string> = {
     draft: 'bg-muted text-muted-foreground border border-border',
@@ -59,7 +56,7 @@ export default function DeliveriesIndex({
     filters = { search: '', status: 'all', sort: 'created_at', direction: 'desc' },
     incomingDeliveriesCount = 0,
 }: {
-    runsheets: PaginationProps;
+    runsheets: RunsheetPagination;
     filters: { search?: string; status?: string; sort?: string; direction?: string };
     incomingDeliveriesCount?: number;
 }) {

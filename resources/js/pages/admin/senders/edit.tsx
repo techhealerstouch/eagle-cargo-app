@@ -1,4 +1,4 @@
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import { Save, ArrowLeft, User, Phone, Mail, MapPin, Globe, ShieldCheck } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,9 @@ interface Sender {
 }
 
 export default function SendersEdit({ sender }: { sender: Sender }) {
-    const { data, setData, put, processing, errors } = useForm({
+    const { return_url } = usePage<any>().props;
+
+    const { data, setData, put, processing, errors, transform } = useForm({
         first_name: sender.first_name,
         last_name: sender.last_name,
         email: sender.email,
@@ -36,12 +38,16 @@ export default function SendersEdit({ sender }: { sender: Sender }) {
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
-        { title: 'Senders', href: '/admin/senders' },
+        { title: 'Senders', href: return_url || '/admin/senders' },
         { title: 'Edit Profile', href: '#' },
     ];
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        transform((data) => ({
+            ...data,
+            ...(return_url ? { return_to: return_url } : {}),
+        }));
         put(`/admin/senders/${sender.id}`);
     };
 
@@ -53,7 +59,7 @@ export default function SendersEdit({ sender }: { sender: Sender }) {
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-brand-warm/20 pb-8">
                     <div className="flex items-center gap-4">
                         <Link
-                            href="/admin/senders"
+                            href={return_url || '/admin/senders'}
                             className="mt-1 rounded-xl p-2.5 bg-card border border-border text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground shadow-sm"
                         >
                             <ArrowLeft className="size-5" />
@@ -257,7 +263,7 @@ export default function SendersEdit({ sender }: { sender: Sender }) {
 
                         <div className="flex justify-end gap-5 pt-10 border-t border-brand-warm/10">
                             <Link
-                                href="/admin/senders"
+                                href={return_url || '/admin/senders'}
                                 className="px-10 h-14 flex items-center justify-center rounded-2xl border-2 border-brand-warm/20 text-[11px] font-black uppercase tracking-[0.2em] hover:bg-brand-warm/5 transition-all active:scale-95 text-muted-foreground"
                             >
                                 Cancel

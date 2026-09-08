@@ -151,7 +151,8 @@ class InvoiceController extends Controller
             }
         }
 
-        return redirect()->route('admin.invoices.index')->with('success', 'Invoice updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.invoices.index') ?? session('admin_return_url') ?? route('admin.invoices.index');
+        return redirect($returnUrl)->with('success', 'Invoice updated successfully.');
     }
 
     public function bulkMarkPaid(Request $request)
@@ -192,7 +193,7 @@ class InvoiceController extends Controller
             }
         }
 
-        return redirect()->route('admin.invoices.index')->with('success', count($invoices) . ' invoices marked as Paid.');
+        return redirect()->back()->with('success', count($invoices) . ' invoices marked as Paid.');
     }
 
     public function bulkDestroy(Request $request)
@@ -229,7 +230,7 @@ class InvoiceController extends Controller
             $msg .= " {$skippedCount} invoices were skipped because they have payments.";
         }
 
-        return redirect()->route('admin.invoices.index')->with('success', $msg);
+        return redirect()->back()->with('success', $msg);
     }
 
     public function destroy(Invoice $invoice)
@@ -240,7 +241,7 @@ class InvoiceController extends Controller
 
         $invoice->delete();
 
-        return redirect()->route('admin.invoices.index')->with('success', 'Invoice archived.');
+        return redirect()->back()->with('success', 'Invoice archived.');
     }
 
     public function restore(string $id)

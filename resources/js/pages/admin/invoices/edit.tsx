@@ -1,4 +1,4 @@
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import {
     Save,
     ArrowLeft,
@@ -77,7 +77,9 @@ const BOOKING_TYPE_SUBJECT_PREFIXES: Record<string, string> = {
 };
 
 export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
-    const { data, setData, post, processing, errors } = useForm({
+    const { return_url } = usePage<any>().props;
+
+    const { data, setData, post, processing, errors, transform } = useForm({
         _method: 'put',
         amount: invoice.amount.toString(),
         status: invoice.status,
@@ -90,13 +92,17 @@ export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
-        { title: 'Invoices', href: '/admin/invoices' },
+        { title: 'Invoices', href: return_url || '/admin/invoices' },
         { title: invoice.invoice_number, href: `/admin/invoices/${invoice.id}` },
         { title: 'Edit', href: '#' },
     ];
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        transform((data) => ({
+            ...data,
+            ...(return_url ? { return_to: return_url } : {}),
+        }));
         post(`/admin/invoices/${invoice.id}`, {
             forceFormData: true,
         });
@@ -145,7 +151,7 @@ export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-border pb-6">
                     <div className="flex items-center gap-4">
                         <Link
-                            href={`/admin/invoices/${invoice.id}`}
+                            href={return_url || `/admin/invoices/${invoice.id}`}
                             className="mt-1 rounded-lg p-2.5 bg-card border border-border text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground shadow-xs"
                             title="Return to Invoice"
                         >
@@ -426,7 +432,7 @@ export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
 
                             <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
                                 <Link
-                                    href={`/admin/invoices/${invoice.id}`}
+                                    href={return_url || `/admin/invoices/${invoice.id}`}
                                     className="px-4 h-10 flex items-center justify-center rounded-lg border border-input text-xs font-medium hover:bg-muted transition-all active:scale-95 text-muted-foreground hover:text-foreground"
                                 >
                                     Cancel

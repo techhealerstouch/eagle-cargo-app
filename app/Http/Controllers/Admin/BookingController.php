@@ -531,7 +531,8 @@ class BookingController extends Controller
             }
         });
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.bookings.index') ?? session('admin_return_url') ?? route('admin.bookings.index');
+        return redirect($returnUrl)->with('success', 'Booking updated successfully.');
     }
 
     public function viewDeclaration(Booking $booking)
@@ -614,7 +615,7 @@ class BookingController extends Controller
             'admin_notes' => $validated['admin_notes'] ?? $booking->admin_notes,
         ]);
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking accepted successfully.');
+        return redirect()->back()->with('success', 'Booking accepted successfully.');
     }
 
     public function assignCourier(Booking $booking, Request $request)
@@ -643,7 +644,7 @@ class BookingController extends Controller
                 $validated['runsheet_id'] ?? null
             );
 
-            return redirect()->route('admin.bookings.index')
+            return redirect()->back()
                 ->with('success', 'Booking assigned successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
@@ -672,7 +673,7 @@ class BookingController extends Controller
                 isset($validated['runsheet_id']) ? (int) $validated['runsheet_id'] : null
             );
 
-            return redirect()->route('admin.bookings.index')
+            return redirect()->back()
                 ->with('success', 'Picker assigned successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
@@ -707,7 +708,7 @@ class BookingController extends Controller
             ]);
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', count($bookings) . ' bookings accepted successfully.');
+        return redirect()->back()->with('success', count($bookings) . ' bookings accepted successfully.');
     }
 
     public function bulkCancel(Request $request)
@@ -736,7 +737,7 @@ class BookingController extends Controller
             }
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Selected bookings cancelled where allowed.');
+        return redirect()->back()->with('success', 'Selected bookings cancelled where allowed.');
     }
 
     public function bulkUpdateStatus(Request $request)
@@ -981,10 +982,10 @@ class BookingController extends Controller
         $message = "{$deleted} bookings archived successfully.";
         if ($skipped > 0) {
             $message .= " {$skipped} bookings skipped because they are not pending, draft, or cancelled.";
-            return redirect()->route('admin.bookings.index')->with('warning', $message);
+            return redirect()->back()->with('warning', $message);
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', $message);
+        return redirect()->back()->with('success', $message);
     }
 
     public function destroy(Booking $booking)
@@ -1002,7 +1003,7 @@ class BookingController extends Controller
 
         $booking->delete();
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking archived successfully.');
+        return redirect()->back()->with('success', 'Booking archived successfully.');
     }
 
     public function restore($id)
@@ -1046,7 +1047,7 @@ class BookingController extends Controller
                 $runsheetService->attachBookings($runsheet, $bookingIds);
             }
 
-            return redirect()->route('admin.bookings.index')->with('success', count($bookingIds) . ' bookings assigned to runsheet successfully.');
+            return redirect()->back()->with('success', count($bookingIds) . ' bookings assigned to runsheet successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
         }

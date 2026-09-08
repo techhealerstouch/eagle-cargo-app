@@ -30,6 +30,14 @@ class HandleInertiaRequests extends Middleware
             return $next($request);
         }
 
+        if ($request->isMethod('GET') && $request->route()) {
+            $routeName = $request->route()->getName();
+            if ($routeName && (str_starts_with($routeName, 'admin.') && (str_ends_with($routeName, '.index') || str_starts_with($routeName, 'admin.runsheets.')))) {
+                $request->session()->put("admin_return_url.{$routeName}", $request->fullUrl());
+                $request->session()->put('admin_return_url', $request->fullUrl());
+            }
+        }
+
         return parent::handle($request, $next);
     }
 
@@ -125,6 +133,22 @@ class HandleInertiaRequests extends Middleware
                 'runsheet' => fn () => $request->session()->get('runsheet'),
                 'payment_override' => fn () => $request->session()->get('payment_override'),
             ],
+            'return_url' => function () use ($request) {
+                if ($request->has('return_to')) {
+                    return $request->input('return_to');
+                }
+
+                $route = $request->route();
+                if ($route) {
+                    $routeName = $route->getName();
+                    if ($routeName && str_ends_with($routeName, '.edit')) {
+                        $indexRoute = preg_replace('/\.edit$/', '.index', $routeName);
+                        return $request->session()->get("admin_return_url.{$indexRoute}") ?? $request->session()->get('admin_return_url');
+                    }
+                }
+
+                return $request->session()->get('admin_return_url');
+            },
         ];
     }
 }

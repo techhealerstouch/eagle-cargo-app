@@ -39,7 +39,6 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
     const trackingSteps = pageTrackingSteps ?? DEFAULT_TRACKING_STEPS;
 
     const dynamicOptions = trackingSteps
-        .filter((step: any) => step.system_status !== 'delivered')
         .map((step: any) => ({
             value: step.key,
             system_status: step.system_status,
@@ -102,6 +101,9 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
                     ? formState.etaMessage 
                     : 'Your box is expected to be delivered on or before this date';
 
+                const isDeliveredSelected = dynamicOptions.find((opt: any) => opt.value === currentStatus)?.system_status === 'delivered' 
+                    || currentStatus === 'delivered';
+
                 return (
                     <div className="space-y-4">
                         {currentStatusesSummary && currentStatusesSummary.length > 0 && !props.isGlobalSelection && (
@@ -139,6 +141,20 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
                                 </optgroup>
                             </select>
                         </div>
+
+                        {isDeliveredSelected && (
+                            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl shadow-2xs">
+                                <div className="flex items-start gap-2">
+                                    <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                                    <div>
+                                        <h4 className="text-xs font-semibold">Warning: Bulk Delivery</h4>
+                                        <p className="text-xs mt-0.5 opacity-90 leading-relaxed">
+                                            Updating boxes to "Delivered" in bulk will bypass the requirement for per-box proof of delivery or signature.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         <div className="space-y-2">
                             <Label htmlFor="bulk-notes" className="text-xs font-semibold text-zinc-700">Courier / Internal Notes (Optional)</Label>
                             <Textarea

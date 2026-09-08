@@ -109,13 +109,14 @@ class RecipientController extends Controller
 
         $recipient->update($validated);
 
-        return redirect()->route('admin.recipients.index')->with('success', 'Recipient updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.recipients.index') ?? session('admin_return_url') ?? route('admin.recipients.index');
+        return redirect($returnUrl)->with('success', 'Recipient updated successfully.');
     }
 
     public function destroy(Recipient $recipient)
     {
         $recipient->delete();
 
-        return redirect()->route('admin.recipients.index')->with('success', 'Recipient deleted.');
+        return redirect()->back()->with('success', 'Recipient deleted.');
     }
 }

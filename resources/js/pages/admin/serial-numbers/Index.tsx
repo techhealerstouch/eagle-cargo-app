@@ -5,7 +5,7 @@ import ActiveFilterChips from '@/components/common/active-filter-chips';
 import ConfirmModal from '@/components/common/confirm-modal';
 import FilterSelect from '@/components/common/filter-select';
 import Heading from '@/components/common/heading';
-import Pagination from '@/components/common/pagination';
+import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
 import SortLink from '@/components/common/sort-link';
 import { Button } from '@/components/ui/button';
@@ -60,13 +60,7 @@ interface SerialNumber {
     };
 }
 
-interface PaginationProps {
-    data: SerialNumber[];
-    links: { url: string | null; label: string; active: boolean }[];
-    total: number;
-    from: number;
-    to: number;
-}
+type SerialNumberPagination = PaginationData & { data: SerialNumber[] };
 
 interface SerialStats {
     total: number;
@@ -143,7 +137,7 @@ export default function Index() {
     };
 
     const { serialNumbers, filters, statuses, stats, pickers = [], couriers = [], errors } = usePage<{
-        serialNumbers: PaginationProps;
+        serialNumbers: SerialNumberPagination;
         filters: { search?: string; status?: string; sort?: string; direction?: string; start_date?: string; end_date?: string; picker_id?: string; courier_id?: string };
         statuses: string[];
         stats: SerialStats;

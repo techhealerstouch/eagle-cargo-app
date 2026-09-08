@@ -151,13 +151,17 @@ export default function UpdateBoxStatusModal({
         label: step.label,
     }));
 
+    const hasPending = dynamicOptions.some((o: any) => o.value === 'pending' || o.system_status === 'pending');
+    const pendingOption = hasPending ? [] : [{ value: 'pending', system_status: 'pending', label: 'Pending / Booked' }];
+
     const exceptionOptions = [
         { value: 'cancelled', system_status: 'cancelled', label: 'Cancelled' },
         { value: 'damaged', system_status: 'damaged', label: 'Damaged' },
         { value: 'held', system_status: 'held', label: 'Held' },
+        { value: 'held_bulging', system_status: 'held_bulging', label: 'Held (Bulging)' },
     ];
 
-    const allOptions = [...dynamicOptions, ...exceptionOptions];
+    const allOptions = [...pendingOption, ...dynamicOptions, ...exceptionOptions];
 
     const getSystemStatusForValue = (val: string) => {
         const opt = allOptions.find(o => o.value === val);
@@ -170,6 +174,18 @@ export default function UpdateBoxStatusModal({
         const allowed = ALLOWED_TRANSITIONS[currentStatus];
         return !allowed || !allowed.includes(optionStatus);
     };
+
+    const currentSavedKey = box ? (() => {
+        if (box.tracking_step_key) {
+            const match = allOptions.find((o: any) => o.value === box.tracking_step_key);
+            if (match) return match.value;
+        }
+        const matchVal = allOptions.find((o: any) => o.value === box.status);
+        if (matchVal) return matchVal.value;
+        const matchSys = allOptions.find((o: any) => o.system_status === box.status);
+        if (matchSys) return matchSys.value;
+        return box.tracking_step_key || box.status || '';
+    })() : '';
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -195,15 +211,19 @@ export default function UpdateBoxStatusModal({
                             value={newStatus}
                             onChange={(e) => setNewStatus(e.target.value)}
                         >
-                            {allOptions.map((opt) => (
-                                <option
-                                    key={opt.value}
-                                    value={opt.value}
-                                    disabled={isStatusDisabled(box?.status, getSystemStatusForValue(opt.value))}
-                                >
-                                    {opt.label}
-                                </option>
-                            ))}
+                            {allOptions.map((opt) => {
+                                const isCurrentSaved = opt.value === currentSavedKey;
+                                const isDisabled = !isCurrentSaved && isStatusDisabled(box?.status, getSystemStatusForValue(opt.value));
+                                return (
+                                    <option
+                                        key={opt.value}
+                                        value={opt.value}
+                                        disabled={isDisabled}
+                                    >
+                                        {isCurrentSaved ? `✓ ${opt.label} (Current)` : opt.label}
+                                    </option>
+                                );
+                            })}
                         </select>
                         <p className="text-[11px] text-zinc-400 italic">
                             * Backward status updates are disabled to maintain chronological tracking integrity.

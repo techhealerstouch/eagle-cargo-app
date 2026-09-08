@@ -384,7 +384,9 @@ class RunsheetController extends Controller
             ? 'admin.runsheets.pickups'
             : 'admin.runsheets.deliveries';
 
-        return redirect()->route($redirectRoute)->with('success', 'Runsheet updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session("admin_return_url.{$redirectRoute}") ?? session('admin_return_url') ?? route($redirectRoute);
+
+        return redirect($returnUrl)->with('success', 'Runsheet updated successfully.');
     }
 
     public function attachBookings(Runsheet $runsheet, Request $request)
