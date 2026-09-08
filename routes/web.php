@@ -272,6 +272,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Admin Pages
     Route::prefix('admin')->name('admin.')->middleware(['role:admin,super_admin'])->group(function () {
         Route::post('bookings/bulk-update-status', [App\Http\Controllers\Admin\BookingController::class, 'bulkUpdateStatus'])->middleware('throttle:admin-mutations')->name('bookings.bulk-update-status');
+        Route::post('bookings/bulk-update-empty-boxes', [App\Http\Controllers\Admin\BookingController::class, 'bulkUpdateEmptyBoxes'])->middleware('throttle:admin-mutations')->name('bookings.bulk-update-empty-boxes');
+        Route::post('bookings/bulk-update-booking-type', [App\Http\Controllers\Admin\BookingController::class, 'bulkUpdateBookingType'])->middleware('throttle:admin-mutations')->name('bookings.bulk-update-booking-type');
         Route::post('bookings/bulk-update-payment-status', [App\Http\Controllers\Admin\BookingController::class, 'bulkUpdatePaymentStatus'])->middleware('throttle:admin-mutations')->name('bookings.bulk-update-payment-status');
         Route::post('bookings/bulk-update-notes', [App\Http\Controllers\Admin\BookingController::class, 'bulkUpdateNotes'])->middleware('throttle:admin-mutations')->name('bookings.bulk-update-notes');
         Route::post('bookings/bulk-assign-to-runsheet', [App\Http\Controllers\Admin\BookingController::class, 'bulkAssignToRunsheet'])->middleware('throttle:admin-mutations')->name('bookings.bulk-assign-to-runsheet');

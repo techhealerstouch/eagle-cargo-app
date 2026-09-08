@@ -79,7 +79,7 @@ export default function UsersEdit({
     areas?: { id: number; name: string }[];
     pickupZones?: PickupZoneItem[];
 }) {
-    const { auth } = usePage<{ auth: any }>().props;
+    const { auth, return_url } = usePage<{ auth: any; return_url?: string }>().props;
     const isSuperAdmin = auth?.user?.role === 'super_admin';
     const isOwnProfile = auth?.user?.id === user.id;
     const [rawJsonMode, setRawJsonMode] = useState(false);
@@ -113,7 +113,7 @@ export default function UsersEdit({
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
-        { title: 'User Management', href: '/admin/users' },
+        { title: 'User Management', href: return_url || '/admin/users' },
         { title: 'Edit User', href: '#' },
     ];
 
@@ -168,6 +168,7 @@ export default function UsersEdit({
             commission_type: data.role === 'picker' ? data.commission_type : null,
             area_id: data.role === 'courier' ? data.area_id : null,
             pickup_zone_id: data.role === 'picker' ? data.pickup_zone_id : null,
+            ...(return_url ? { return_to: return_url } : {}),
         }));
         
         put(`/admin/users/${user.id}`);
@@ -183,7 +184,7 @@ export default function UsersEdit({
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-border pb-8">
                     <div className="flex items-center gap-4">
                         <Link
-                            href="/admin/users"
+                            href={return_url || '/admin/users'}
                             className="mt-1 rounded-xl p-2.5 bg-card border border-border text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground shadow-sm"
                         >
                             <ArrowLeft className="size-5" />
@@ -588,7 +589,7 @@ export default function UsersEdit({
                         {/* Footer Action Buttons */}
                         <div className="flex items-center justify-end gap-5 pt-8 border-t border-border/50">
                             <Link
-                                href="/admin/users"
+                                href={return_url || '/admin/users'}
                                 className="px-6 py-3 rounded-xl text-xs font-extrabold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
                             >
                                 CANCEL

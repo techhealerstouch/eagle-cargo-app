@@ -336,18 +336,20 @@ class UserController extends Controller
             }
         }
 
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.users.index') ?? session('admin_return_url') ?? route('admin.users.index');
+
         if ($changedOwnRole) {
-            return redirect()->route('admin.users.index')->with('warning', 'Your role cannot be changed on your own profile. Your other updates were saved successfully.');
+            return redirect($returnUrl)->with('warning', 'Your role cannot be changed on your own profile. Your other updates were saved successfully.');
         }
 
-        return redirect()->route('admin.users.index')->with('success', 'User updated successfully.');
+        return redirect($returnUrl)->with('success', 'User updated successfully.');
     }
 
     public function destroy(Request $request, User $user)
     {
         // Prevent self-deletion
         if ($user->id === $request->user()?->id) {
-            return redirect()->route('admin.users.index')->with('error', 'You cannot delete your own account.');
+            return redirect()->back()->with('error', 'You cannot delete your own account.');
         }
 
         return \Illuminate\Support\Facades\DB::transaction(function () use ($user) {
@@ -355,17 +357,17 @@ class UserController extends Controller
             $lockedUser = User::lockForUpdate()->find($user->id);
 
             if (! $lockedUser) {
-                return redirect()->route('admin.users.index')->with('error', 'User not found or already deleted.');
+                return redirect()->back()->with('error', 'User not found or already deleted.');
             }
 
             // Prevent deletion if the user has active transactions
             if ($lockedUser->hasActiveTransactions()) {
-                return redirect()->route('admin.users.index')->with('error', 'Cannot archive user with active transactions.');
+                return redirect()->back()->with('error', 'Cannot archive user with active transactions.');
             }
 
             $lockedUser->delete();
 
-            return redirect()->route('admin.users.index')->with('success', 'User archived successfully.');
+            return redirect()->back()->with('success', 'User archived successfully.');
         });
     }
 

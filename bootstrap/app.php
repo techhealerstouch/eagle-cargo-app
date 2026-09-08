@@ -40,4 +40,17 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->reportable(function (\Illuminate\Validation\ValidationException $e) {
             \Illuminate\Support\Facades\Log::error('Validation Failed: ', $e->errors());
         });
+
+        $exceptions->render(function (\RuntimeException $e, \Illuminate\Http\Request $request) {
+            $msg = $e->getMessage();
+            if (
+                str_contains($msg, 'Unauthorized transition') ||
+                str_contains($msg, 'not permitted by workflow') ||
+                str_contains($msg, 'Cannot change box status')
+            ) {
+                if ($request->header('X-Inertia') || $request->expectsJson()) {
+                    return redirect()->back()->with('error', $msg);
+                }
+            }
+        });
     })->create();

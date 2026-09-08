@@ -100,7 +100,8 @@ class SenderController extends Controller
     {
         $sender->update($request->validated());
 
-        return redirect()->route('admin.senders.index')->with('success', 'Sender updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.senders.index') ?? session('admin_return_url') ?? route('admin.senders.index');
+        return redirect($returnUrl)->with('success', 'Sender updated successfully.');
     }
 
     public function bulkExport(Request $request)
@@ -167,14 +168,14 @@ class SenderController extends Controller
             Sender::whereIn('id', $validated['ids'])->delete();
         }
 
-        return redirect()->route('admin.senders.index')->with('success', 'Selected senders deleted successfully.');
+        return redirect()->back()->with('success', 'Selected senders deleted successfully.');
     }
 
     public function destroy(Sender $sender)
     {
         $sender->delete();
 
-        return redirect()->route('admin.senders.index')->with('success', 'Sender deleted successfully.');
+        return redirect()->back()->with('success', 'Sender deleted successfully.');
     }
 
     private function applyFilters(Builder $query, Request $request)

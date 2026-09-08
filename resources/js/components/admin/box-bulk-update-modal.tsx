@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import BulkUpdateModal, { BulkUpdateAction } from '@/components/common/bulk-update-modal';
+import { humanize } from '@/lib/utils';
 
 interface BoxBulkUpdateModalProps {
     isOpen: boolean;
@@ -38,7 +39,6 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
     const trackingSteps = pageTrackingSteps ?? DEFAULT_TRACKING_STEPS;
 
     const dynamicOptions = trackingSteps
-        .filter((step: any) => step.system_status !== 'delivered')
         .map((step: any) => ({
             value: step.key,
             system_status: step.system_status,
@@ -53,18 +53,19 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
 
     const allOptions = [...dynamicOptions, ...exceptionOptions];
 
-    const hasUnreceived = React.useMemo(() => {
-        if (!props.boxesData || props.boxesData.length === 0) return false;
+    const currentStatusesSummary = React.useMemo<[string, number][] | null>(() => {
+        if (!props.boxesData || props.boxesData.length === 0 || props.selectedIds.length === 0) return null;
         
-        // Find boxes that are in selectedIds
-        const selectedBoxes = props.boxesData.filter(box => props.selectedIds.includes(box.id));
+        const selectedBoxes = props.boxesData.filter((box: any) => props.selectedIds.includes(box.id));
+        const statusCounts: Record<string, number> = {};
+        for (const box of selectedBoxes) {
+            const step = trackingSteps.find((s: any) => s.system_status === box.status);
+            const label = step ? step.label : humanize(box.status);
+            statusCounts[label] = (statusCounts[label] || 0) + 1;
+        }
         
-        // Check if any selected box has a status indicating it hasn't reached the warehouse
-        return selectedBoxes.some(box => 
-            box.status === 'pending' || 
-            box.status === 'collected'
-        );
-    }, [props.selectedIds, props.boxesData]);
+        return Object.entries(statusCounts);
+    }, [props.selectedIds, props.boxesData, trackingSteps]);
 
     const actions: BulkUpdateAction[] = [
         {
@@ -74,10 +75,15 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
             description: 'Change the logistical status of the selected boxes.',
             endpoint: '/admin/boxes/bulk-update-status',
             getPayload: (formState) => {
-                const newStatus = formState.status || allOptions[0]?.value || 'collected';
-                const selectedStep = trackingSteps.find((s: any) => s.key === newStatus);
-                const systemStatus = selectedStep ? selectedStep.system_status : newStatus;
-                const trackingStepKey = selectedStep ? selectedStep.key : undefined;
+                const newStatus = formState.status;
+                let systemStatus = undefined;
+                let trackingStepKey = undefined;
+
+                if (newStatus && newStatus !== '') {
+                    const selectedStep = trackingSteps.find((s: any) => s.key === newStatus);
+                    systemStatus = selectedStep ? selectedStep.system_status : newStatus;
+                    trackingStepKey = selectedStep ? selectedStep.key : undefined;
+                }
 
                 return {
                     status: systemStatus,
@@ -90,13 +96,30 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
                 };
             },
             renderForm: (formState, setFormState) => {
-                const currentStatus = formState.status || allOptions[0]?.value || '';
+                const currentStatus = formState.status ?? '';
                 const currentEtaMessage = formState.etaMessage !== undefined 
                     ? formState.etaMessage 
                     : 'Your box is expected to be delivered on or before this date';
 
+                const isDeliveredSelected = dynamicOptions.find((opt: any) => opt.value === currentStatus)?.system_status === 'delivered' 
+                    || currentStatus === 'delivered';
+
                 return (
                     <div className="space-y-4">
+                        {currentStatusesSummary && currentStatusesSummary.length > 0 && !props.isGlobalSelection && (
+                            <div className="p-3 bg-zinc-50 border border-zinc-200/80 rounded-xl space-y-1 shadow-2xs">
+                                <span className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider">Current Statuses in Selection</span>
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                    {currentStatusesSummary.map(([label, count]) => (
+                                        <div key={label} className="inline-flex items-center gap-1.5 px-2 py-1 bg-white border border-zinc-200/80 rounded-md shadow-2xs">
+                                            <span className="text-[11px] font-medium text-zinc-700">{label}</span>
+                                            <span className="text-[10px] font-bold bg-zinc-100 text-zinc-500 px-1.5 py-0.5 rounded-sm">{count}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-2">
                             <Label htmlFor="bulk-status" className="text-xs font-semibold text-zinc-700">New Status</Label>
                             <select
@@ -105,6 +128,7 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
                                 value={currentStatus}
                                 onChange={(e) => setFormState({ ...formState, status: e.target.value })}
                             >
+                                <option value="">— Keep Current Status (Update ETA Only) —</option>
                                 <optgroup label="Tracking Steps">
                                     {dynamicOptions.map((opt: any) => (
                                         <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -117,6 +141,20 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
                                 </optgroup>
                             </select>
                         </div>
+
+                        {isDeliveredSelected && (
+                            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl shadow-2xs">
+                                <div className="flex items-start gap-2">
+                                    <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                                    <div>
+                                        <h4 className="text-xs font-semibold">Warning: Bulk Delivery</h4>
+                                        <p className="text-xs mt-0.5 opacity-90 leading-relaxed">
+                                            Updating boxes to "Delivered" in bulk will bypass the requirement for per-box proof of delivery or signature.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         <div className="space-y-2">
                             <Label htmlFor="bulk-notes" className="text-xs font-semibold text-zinc-700">Courier / Internal Notes (Optional)</Label>
                             <Textarea
@@ -177,53 +215,6 @@ export default function BoxBulkUpdateModal(props: BoxBulkUpdateModalProps) {
         },
     ];
 
-    if (activeBatches && activeBatches.length > 0) {
-        actions.push({
-            id: 'assign_batch',
-            label: 'Assign to Batch',
-            icon: Package,
-            description: 'Bulk assign boxes to a shipment container batch.',
-            endpoint: '/admin/boxes/bulk-assign-to-batch',
-            getPayload: (formState) => ({
-                batch_id: parseInt(formState.batchId, 10),
-            }),
-            renderForm: (formState, setFormState) => (
-                <div className="space-y-4">
-                    {(hasUnreceived || props.isGlobalSelection) && (
-                        <div className="p-3.5 bg-gradient-to-r from-amber-50 to-orange-50/40 rounded-xl border border-amber-200/80 shadow-2xs flex items-start gap-2.5">
-                            <AlertTriangle className="size-4 shrink-0 mt-0.5 text-amber-600" />
-                            <div>
-                                <span className="font-semibold block text-xs text-amber-900">Attention Required</span>
-                                <p className="mt-0.5 text-[11px] leading-relaxed text-amber-700">
-                                    {props.isGlobalSelection 
-                                        ? 'Ensure all selected boxes have already been received at the warehouse. Unreceived boxes will fail assignment.'
-                                        : 'Some selected boxes are not yet marked as Received at Warehouse. Boxes must be received before being assigned to a batch.'
-                                    }
-                                </p>
-                            </div>
-                        </div>
-                    )}
-                    
-                    <div className="space-y-2">
-                        <Label htmlFor="batch-select" className="text-xs font-semibold text-zinc-700">Select Batch Container</Label>
-                        <select
-                            id="batch-select"
-                            className="flex h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 shadow-2xs transition-all"
-                            value={formState.batchId || ''}
-                            onChange={(e) => setFormState({ ...formState, batchId: e.target.value })}
-                        >
-                            <option value="" disabled>-- Select a container batch --</option>
-                            {activeBatches.map((batch: any) => (
-                                <option key={batch.id} value={batch.id}>
-                                    {batch.batch_number} - {batch.name} {batch.departure_date ? `(Departs: ${batch.departure_date})` : ''}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-            )
-        });
-    }
 
     if (isSuperAdmin) {
         actions.push({

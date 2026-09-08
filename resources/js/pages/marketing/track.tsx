@@ -119,6 +119,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
             tracking_number: selectedBox.tracking_number,
             status: selectedBox.status,
             status_label: selectedBox.status_label || selectedBox.status,
+            tracking_step_key: selectedBox.tracking_step_key ?? trackingData.tracking_step_key,
             recipient_name: selectedBox.recipient_name || trackingData.recipient_name,
             destination: selectedBox.destination || trackingData.destination,
             box_type: selectedBox.box_type || trackingData.box_type,
@@ -195,63 +196,93 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
         ];
     }, []);
 
+    const latestJourneyPhase = useMemo(() => {
+        if (!activeTrackingData) return null;
+
+        if (activeTrackingData.tracking_step_key) {
+            return activeTrackingData.tracking_step_key.toLowerCase();
+        }
+        
+        if (activeTrackingData.timeline && activeTrackingData.timeline.length > 0) {
+            const latestEvent = activeTrackingData.timeline[0];
+            if (latestEvent.tracking_step_key) {
+                return latestEvent.tracking_step_key.toLowerCase();
+            }
+            if (latestEvent.tracking_phase) {
+                return latestEvent.tracking_phase.toLowerCase();
+            }
+        }
+        
+        return (activeTrackingData.status_label || activeTrackingData.status || '').toLowerCase();
+    }, [activeTrackingData]);
+
     const simplifiedStepIndex = useMemo(() => {
         if (!activeTrackingData) {
             return 0;
         }
 
-        const rawStatus = (activeTrackingData.status_label || activeTrackingData.status || '').toLowerCase();
-        const s = rawStatus.replace(/_/g, ' ');
+        const phase = (activeTrackingData.tracking_step_key || latestJourneyPhase || '').replace(/_/g, ' ');
 
-        if (s === 'delivered') {
+        if (phase === 'delivered') {
             return 4;
         }
 
-        if (
-            s.includes('manila') ||
-            s.includes('sorting') ||
-            s.includes('hub') ||
-            s.includes('out for delivery') ||
-            s.includes('dispatched') ||
-            s.includes('delivery scheduling')
-        ) {
+        if (phase.includes('out for delivery')) {
             return 3;
         }
 
         if (
-            s.includes('transit') ||
-            s.includes('shipping') ||
-            s.includes('container') ||
-            s.includes('philippines') ||
-            s.includes('boc') ||
-            s.includes('clearance') ||
-            s.includes('arrived') ||
-            s.includes('unloaded') ||
-            s.includes('roro')
+            phase.includes('transit') ||
+            phase.includes('shipping') ||
+            phase.includes('container') ||
+            phase.includes('philippines') ||
+            phase.includes('boc') ||
+            phase.includes('clearance') ||
+            phase.includes('arrived') ||
+            phase.includes('unloaded') ||
+            phase.includes('roro') ||
+            phase.includes('sorting') ||
+            phase.includes('hub') ||
+            phase.includes('dispatched') ||
+            phase.includes('manila')
         ) {
             return 2;
         }
 
         if (
-            s.includes('collected') ||
-            s.includes('picked') ||
-            s.includes('warehouse') ||
-            s.includes('received')
+            phase.includes('collected') ||
+            phase.includes('picked') ||
+            phase.includes('warehouse') ||
+            phase.includes('received') ||
+            phase.includes('processing') ||
+            phase.includes('loading') ||
+            phase.includes('departed') ||
+            phase.includes('manifested')
         ) {
             return 1;
         }
 
         return 0;
-    }, [activeTrackingData]);
+    }, [activeTrackingData, latestJourneyPhase]);
 
     const currentStepIndex = useMemo(() => {
         if (!activeTrackingData) {
             return 0;
         }
 
-        const { status, current_milestone_id, area_milestones, timeline } = activeTrackingData;
+        const { status, current_milestone_id, area_milestones, timeline, tracking_step_key } = activeTrackingData;
         const rawStatus = (status || '').toLowerCase();
         const s = rawStatus.replace(/_/g, ' ');
+
+        // 0. Match by tracking_step_key directly against dynamicSteps
+        if (tracking_step_key) {
+            const stepIndex = dynamicSteps.findIndex((step) =>
+                step.statusKey.toLowerCase() === tracking_step_key.toLowerCase()
+            );
+            if (stepIndex !== -1) {
+                return stepIndex;
+            }
+        }
 
         // 1. Match by milestone ID if available
         if (area_milestones && current_milestone_id) {
@@ -262,8 +293,18 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
             }
         }
 
-        // 2. Match by latest phase in timeline
+        // 2. Match by latest phase/step in timeline
         if (timeline && timeline.length > 0) {
+            const latestStepKey = timeline[0].tracking_step_key?.toLowerCase();
+            if (latestStepKey) {
+                const stepIndex = dynamicSteps.findIndex((step) =>
+                    step.statusKey.toLowerCase() === latestStepKey
+                );
+                if (stepIndex !== -1) {
+                    return stepIndex;
+                }
+            }
+
             const latestPhase = timeline[0].tracking_phase?.toLowerCase();
 
             if (latestPhase) {

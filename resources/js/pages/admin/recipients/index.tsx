@@ -2,7 +2,7 @@ import { Head, Link } from '@inertiajs/react';
 import { Eye, Pencil, Users } from 'lucide-react';
 
 import Heading from '@/components/common/heading';
-import Pagination from '@/components/common/pagination';
+import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
@@ -18,12 +18,7 @@ interface Recipient {
     area?: { name: string } | null;
 }
 
-interface PaginationProps {
-    data: Recipient[];
-    links: { url: string | null; label: string; active: boolean }[];
-    current_page: number;
-    total: number;
-}
+type RecipientPagination = PaginationData & { data: Recipient[] };
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: '/dashboard' },
@@ -34,7 +29,7 @@ export default function RecipientsIndex({
     recipients,
     filters = { search: '' },
 }: {
-    recipients: PaginationProps;
+    recipients: RecipientPagination;
     filters?: { search?: string };
 }) {
     return (

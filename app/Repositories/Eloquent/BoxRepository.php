@@ -154,6 +154,10 @@ class BoxRepository implements BoxRepositoryInterface
                 'signature_path' => $signaturePath ?? $lockedBox->signature_path,
             ];
 
+            if ($trackingStepKey !== null) {
+                $updates['tracking_step_key'] = $trackingStepKey;
+            }
+
             if ($serialNumber !== null) {
                 $updates['serial_number'] = $serialNumber;
             }
@@ -175,11 +179,42 @@ class BoxRepository implements BoxRepositoryInterface
 
             $lockedBox->update($updates);
 
-            // Prevent duplicate adjacent tracking history entries for the same status
+            if (! $trackingPhase && $trackingStepKey) {
+                $phaseEnum = \App\Enums\TrackingPhase::tryFrom($trackingStepKey);
+                if ($phaseEnum) {
+                    $trackingPhase = $phaseEnum->value;
+                }
+            }
+
+            if (! $trackingPhase && $statusEnum) {
+                $trackingPhase = match ($statusEnum) {
+                    BoxStatus::Collected => \App\Enums\TrackingPhase::PICKED_UP->value,
+                    BoxStatus::ReceivedByWarehouse => \App\Enums\TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
+                    BoxStatus::LoadedToContainer => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
+                    BoxStatus::InTransit => \App\Enums\TrackingPhase::IN_TRANSIT_SEA->value,
+                    BoxStatus::Arrived => \App\Enums\TrackingPhase::ARRIVED_MANILA_PORT->value,
+                    BoxStatus::ForCheckingUnloading, BoxStatus::UnloadedManila => \App\Enums\TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+                    BoxStatus::ForDeliveryScheduling, BoxStatus::EnRouteRoRo => \App\Enums\TrackingPhase::DISPATCHED_TO_LOCAL_HUB->value,
+                    BoxStatus::OutForDelivery => \App\Enums\TrackingPhase::OUT_FOR_DELIVERY->value,
+                    BoxStatus::Delivered => \App\Enums\TrackingPhase::DELIVERED->value,
+                    default => null,
+                };
+            }
+
+            // Prevent duplicate adjacent tracking history entries for the exact same status and step
             $lastUpdate = BoxUpdate::where('box_id', $lockedBox->id)->latest('id')->first();
             $newStatusValue = ($statusEnum ? $statusEnum->value : null) ?? $lockedBox->status?->value ?? 'unknown';
+            $lastPhaseValue = $lastUpdate?->tracking_phase instanceof \App\Enums\TrackingPhase
+                ? $lastUpdate->tracking_phase->value
+                : $lastUpdate?->tracking_phase;
 
-            if ($lastUpdate && $lastUpdate->status === $newStatusValue && $lastUpdate->description === $description) {
+            if (
+                $lastUpdate &&
+                $lastUpdate->status === $newStatusValue &&
+                $lastUpdate->tracking_step_key === $trackingStepKey &&
+                $lastPhaseValue === $trackingPhase &&
+                $lastUpdate->description === $description
+            ) {
                 return;
             }
 
@@ -203,20 +238,6 @@ class BoxRepository implements BoxRepositoryInterface
                     $newOrder = (int) $newStep['order'];
                     $stepsBypassed = max(0, $newOrder - $previousOrder - 1);
                 }
-            }
-            if (! $trackingPhase && $statusEnum) {
-                $trackingPhase = match ($statusEnum) {
-                    BoxStatus::Collected => \App\Enums\TrackingPhase::PICKED_UP->value,
-                    BoxStatus::ReceivedByWarehouse => \App\Enums\TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
-                    BoxStatus::LoadedToContainer => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
-                    BoxStatus::InTransit => \App\Enums\TrackingPhase::IN_TRANSIT_SEA->value,
-                    BoxStatus::Arrived => \App\Enums\TrackingPhase::ARRIVED_MANILA_PORT->value,
-                    BoxStatus::ForCheckingUnloading, BoxStatus::UnloadedManila => \App\Enums\TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
-                    BoxStatus::ForDeliveryScheduling, BoxStatus::EnRouteRoRo => \App\Enums\TrackingPhase::DISPATCHED_TO_LOCAL_HUB->value,
-                    BoxStatus::OutForDelivery => \App\Enums\TrackingPhase::OUT_FOR_DELIVERY->value,
-                    BoxStatus::Delivered => \App\Enums\TrackingPhase::DELIVERED->value,
-                    default => null,
-                };
             }
 
             BoxUpdate::create([

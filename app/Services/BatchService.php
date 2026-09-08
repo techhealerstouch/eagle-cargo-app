@@ -172,12 +172,20 @@ class BatchService
                         ));
                     }
 
-                    $box->update(['status' => $targetStatus]);
+                    $box->update([
+                        'status' => $targetStatus,
+                        'tracking_step_key' => $trackingPhase->value,
+                    ]);
+                } else {
+                    $box->update([
+                        'tracking_step_key' => $trackingPhase->value,
+                    ]);
                 }
 
                 $updates[] = [
                     'box_id' => $box->id,
                     'status' => $resolvedStatus->value,
+                    'tracking_step_key' => $trackingPhase->value,
                     'tracking_phase' => $trackingPhase->value,
                     'location' => $trackingPhase->phase(),
                     'description' => $resolvedDescription,

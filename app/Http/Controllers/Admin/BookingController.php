@@ -459,6 +459,8 @@ class BookingController extends Controller
             'declaration_form_status',
             'notes',
             'admin_notes',
+            'empty_box_count',
+            'empty_box_fee',
         ]);
 
         if ($request->hasFile('proof_of_payment')) {
@@ -471,7 +473,16 @@ class BookingController extends Controller
 
         try {
             $booking->bypassStatusValidation = true;
+            $oldEmptyBoxCount = $booking->empty_box_count;
+            $oldEmptyBoxFee = $booking->empty_box_fee;
+            
             $booking->update($bookingData);
+            
+            if ($booking->empty_box_count != $oldEmptyBoxCount || $booking->empty_box_fee != $oldEmptyBoxFee) {
+                if ($booking->invoice) {
+                    $booking->invoice->recalculateAmount();
+                }
+            }
         } catch (\RuntimeException $e) {
             return back()->withErrors(['status' => $e->getMessage()])->withInput();
         }
@@ -520,7 +531,8 @@ class BookingController extends Controller
             }
         });
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.bookings.index') ?? session('admin_return_url') ?? route('admin.bookings.index');
+        return redirect($returnUrl)->with('success', 'Booking updated successfully.');
     }
 
     public function viewDeclaration(Booking $booking)
@@ -603,7 +615,7 @@ class BookingController extends Controller
             'admin_notes' => $validated['admin_notes'] ?? $booking->admin_notes,
         ]);
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking accepted successfully.');
+        return redirect()->back()->with('success', 'Booking accepted successfully.');
     }
 
     public function assignCourier(Booking $booking, Request $request)
@@ -632,7 +644,7 @@ class BookingController extends Controller
                 $validated['runsheet_id'] ?? null
             );
 
-            return redirect()->route('admin.bookings.index')
+            return redirect()->back()
                 ->with('success', 'Booking assigned successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
@@ -661,7 +673,7 @@ class BookingController extends Controller
                 isset($validated['runsheet_id']) ? (int) $validated['runsheet_id'] : null
             );
 
-            return redirect()->route('admin.bookings.index')
+            return redirect()->back()
                 ->with('success', 'Picker assigned successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
@@ -696,7 +708,7 @@ class BookingController extends Controller
             ]);
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', count($bookings) . ' bookings accepted successfully.');
+        return redirect()->back()->with('success', count($bookings) . ' bookings accepted successfully.');
     }
 
     public function bulkCancel(Request $request)
@@ -725,7 +737,7 @@ class BookingController extends Controller
             }
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Selected bookings cancelled where allowed.');
+        return redirect()->back()->with('success', 'Selected bookings cancelled where allowed.');
     }
 
     public function bulkUpdateStatus(Request $request)
@@ -830,6 +842,77 @@ class BookingController extends Controller
         return redirect()->back()->with('success', $updatedCount . ' bookings payment status updated.');
     }
 
+    public function bulkUpdateEmptyBoxes(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'empty_box_count' => 'required|integer|min:0',
+            'empty_box_fee' => 'required|numeric|min:0',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Booking::query();
+            $requestForFilters = $request->duplicate();
+            $requestForFilters->merge(['status' => $request->filter_status]);
+            $query = $this->applyFilters($query, $requestForFilters);
+            $bookings = $query->get();
+        } else {
+            $bookings = Booking::whereIn('id', $validated['ids'])->get();
+        }
+
+        $updatedCount = 0;
+        foreach ($bookings as $booking) {
+            $oldEmptyBoxCount = $booking->empty_box_count;
+            $oldEmptyBoxFee = $booking->empty_box_fee;
+
+            $booking->empty_box_count = $validated['empty_box_count'];
+            $booking->empty_box_fee = $validated['empty_box_fee'];
+            $booking->save();
+            
+            if ($booking->empty_box_count != $oldEmptyBoxCount || $booking->empty_box_fee != $oldEmptyBoxFee) {
+                if ($booking->invoice) {
+                    $booking->invoice->recalculateAmount();
+                }
+            }
+            $updatedCount++;
+        }
+
+        return redirect()->back()->with('success', $updatedCount . ' bookings empty boxes updated.');
+    }
+
+    public function bulkUpdateBookingType(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'booking_type' => 'required|string|max:50',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Booking::query();
+            $requestForFilters = $request->duplicate();
+            $requestForFilters->merge(['status' => $request->filter_status]);
+            $query = $this->applyFilters($query, $requestForFilters);
+            $bookings = $query->get();
+        } else {
+            $bookings = Booking::whereIn('id', $validated['ids'])->get();
+        }
+
+        $updatedCount = 0;
+        foreach ($bookings as $booking) {
+            $booking->booking_type = $validated['booking_type'];
+            $booking->save();
+            $updatedCount++;
+        }
+
+        return redirect()->back()->with('success', $updatedCount . ' bookings type updated.');
+    }
+
     public function bulkUpdateNotes(Request $request)
     {
         $validated = $request->validate([
@@ -899,10 +982,10 @@ class BookingController extends Controller
         $message = "{$deleted} bookings archived successfully.";
         if ($skipped > 0) {
             $message .= " {$skipped} bookings skipped because they are not pending, draft, or cancelled.";
-            return redirect()->route('admin.bookings.index')->with('warning', $message);
+            return redirect()->back()->with('warning', $message);
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', $message);
+        return redirect()->back()->with('success', $message);
     }
 
     public function destroy(Booking $booking)
@@ -920,7 +1003,7 @@ class BookingController extends Controller
 
         $booking->delete();
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking archived successfully.');
+        return redirect()->back()->with('success', 'Booking archived successfully.');
     }
 
     public function restore($id)
@@ -964,7 +1047,7 @@ class BookingController extends Controller
                 $runsheetService->attachBookings($runsheet, $bookingIds);
             }
 
-            return redirect()->route('admin.bookings.index')->with('success', count($bookingIds) . ' bookings assigned to runsheet successfully.');
+            return redirect()->back()->with('success', count($bookingIds) . ' bookings assigned to runsheet successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
         }

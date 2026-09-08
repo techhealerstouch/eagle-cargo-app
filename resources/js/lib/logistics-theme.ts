@@ -27,8 +27,9 @@ export interface StatusTheme {
 
 export function getStatusTheme(status: string, customLabel?: string): StatusTheme {
     const s = (status || '').toLowerCase().replace(/_/g, ' ');
+    const c = (customLabel || '').toLowerCase().replace(/_/g, ' ');
 
-    if (s === 'delivered') {
+    if (s === 'delivered' || c.includes('delivered')) {
         return {
             label: customLabel || 'Delivered',
             bgLight: 'bg-emerald-50 dark:bg-emerald-950/30',
@@ -42,7 +43,7 @@ export function getStatusTheme(status: string, customLabel?: string): StatusThem
         };
     }
 
-    if (s.includes('out for delivery') || s.includes('dispatched')) {
+    if (s.includes('out for delivery') || s.includes('dispatched') || c.includes('out for delivery') || c.includes('dispatched')) {
         return {
             label: customLabel || 'Out for Delivery',
             bgLight: 'bg-amber-50 dark:bg-amber-950/30',
@@ -53,6 +54,26 @@ export function getStatusTheme(status: string, customLabel?: string): StatusThem
             gradient: 'from-amber-500 to-orange-600',
             badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
             icon: Bike,
+        };
+    }
+
+    if (
+        s.includes('sorting') ||
+        c.includes('sorting') ||
+        c.includes('sorting facility') ||
+        s.includes('hub') ||
+        c.includes('hub')
+    ) {
+        return {
+            label: customLabel || 'At Sorting Facility',
+            bgLight: 'bg-purple-50 dark:bg-purple-950/30',
+            textLight: 'text-purple-600 dark:text-purple-400',
+            borderLight: 'border-purple-200/60 dark:border-purple-800/50',
+            ringColor: 'ring-purple-400/40',
+            dotBg: 'bg-purple-500',
+            gradient: 'from-purple-500 to-indigo-600',
+            badge: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20',
+            icon: ArrowDownUp,
         };
     }
 
@@ -140,10 +161,21 @@ export function groupTimelineByPhase(timeline: any[]): TimelinePhaseGroup[] {
     const destinationItems: any[] = [];
 
     timeline.forEach((item) => {
-        const rawPhase = (item.tracking_phase || '').toLowerCase();
+        const rawPhase = (item.tracking_phase || item.tracking_step_key || '').toLowerCase();
         const rawStatus = (item.status_label || item.status || '').toLowerCase().replace(/_/g, ' ');
 
         if (
+            rawPhase === 'sorting' ||
+            rawPhase === 'received_at_sorting_hub' ||
+            rawPhase === 'out_for_delivery' ||
+            rawPhase === 'delivered' ||
+            rawStatus.includes('sorting') ||
+            rawStatus.includes('hub') ||
+            rawStatus.includes('out for delivery') ||
+            rawStatus.includes('delivered')
+        ) {
+            destinationItems.push(item);
+        } else if (
             rawPhase === 'picked_up' ||
             rawPhase === 'received_by_branch' ||
             rawPhase === 'loading_container' ||
@@ -246,6 +278,10 @@ export function getFriendlyStepDescription(
 
     if (key.includes('loaded') || key.includes('container')) {
         return 'Box safely loaded into sea freight container and prepped for port departure.';
+    }
+
+    if (key.includes('sorting') || key.includes('facility') || key.includes('hub')) {
+        return 'Box is being processed and sorted at the regional distribution facility.';
     }
 
     if (key.includes('shipping to philippines') || key.includes('transit') || key.includes('sea')) {

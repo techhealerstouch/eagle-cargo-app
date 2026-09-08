@@ -4,7 +4,7 @@ import ActiveFilterChips from '@/components/common/active-filter-chips';
 import ClearFiltersButton from '@/components/common/clear-filters-button';
 import FilterSelect from '@/components/common/filter-select';
 import Heading from '@/components/common/heading';
-import Pagination from '@/components/common/pagination';
+import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
@@ -19,10 +19,7 @@ interface Enquiry {
     created_at: string;
 }
 
-interface PaginationProps {
-    data: Enquiry[];
-    links: { url: string | null; label: string; active: boolean }[];
-}
+type EnquiryPagination = PaginationData & { data: Enquiry[] };
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: '/dashboard' },
@@ -33,7 +30,7 @@ export default function EnquiriesIndex({
     enquiries,
     filters = {},
 }: {
-    enquiries: PaginationProps;
+    enquiries: EnquiryPagination;
     filters?: {
         search?: string;
         is_read?: string;

@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 export interface TrackingTimelineItem {
     status: string;
     status_label?: string;
+    tracking_step_key?: string | null;
     description: string;
     location?: string;
     date: string;
@@ -14,6 +15,7 @@ export interface TrackingBox {
     tracking_number: string;
     status: string;
     status_label?: string;
+    tracking_step_key?: string | null;
     destination: string;
     recipient_name?: string;
     box_type?: { name: string };
@@ -42,6 +44,7 @@ export interface TrackingData {
     tracking_number: string;
     status: string;
     status_label?: string;
+    tracking_step_key?: string | null;
     booking_id: number;
     booking_reference?: string;
     recipient_name?: string;

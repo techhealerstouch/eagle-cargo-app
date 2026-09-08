@@ -1,4 +1,4 @@
-import { Head, useForm, Link } from '@inertiajs/react';
+import { Head, useForm, Link, usePage } from '@inertiajs/react';
 import {
     Save, ArrowLeft, Ship, MapPin, CalendarClock, RefreshCw, RotateCcw,
     Container, AlertTriangle, ShieldCheck, CheckCircle2,
@@ -37,11 +37,7 @@ interface BatchPayload {
     warnings?: string[];
 }
 
-const breadcrumbs: BreadcrumbItem[] = [
-    { title: 'Dashboard', href: '/dashboard' },
-    { title: 'Batches', href: '/admin/batches' },
-    { title: 'Edit Batch', href: '#' },
-];
+
 
 const STEPS = [
     { id: 'lifecycle', title: 'Status & Lifecycle', icon: Activity, description: 'Shipment operational stage' },
@@ -69,9 +65,10 @@ function toDateTimeLocal(value: string | null): string {
 }
 
 export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
+    const { return_url } = usePage<any>().props;
     const [currentStep, setCurrentStep] = useState(0);
 
-    const { data, setData, put, processing, errors } = useForm({
+    const { data, setData, put, processing, errors, transform } = useForm({
         batch_number: batch.batch_number,
         branch_name: batch.branch_name || '',
         container_number: batch.container_number || '',
@@ -138,8 +135,18 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
         return Math.max(0, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
     };
 
+    const breadcrumbs: BreadcrumbItem[] = [
+        { title: 'Dashboard', href: '/dashboard' },
+        { title: 'Batches', href: return_url || '/admin/batches' },
+        { title: 'Edit Batch', href: '#' },
+    ];
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        transform((data) => ({
+            ...data,
+            ...(return_url ? { return_to: return_url } : {}),
+        }));
         put(`/admin/batches/${batch.id}`);
     };
 
@@ -213,7 +220,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-zinc-100 pb-8">
                     <div className="flex items-center gap-4">
                         <Link
-                            href="/admin/batches"
+                            href={return_url || '/admin/batches'}
                             className="rounded-xl p-2.5 bg-white border border-zinc-200 text-zinc-500 transition-all hover:bg-zinc-50 hover:text-zinc-900 shadow-sm"
                         >
                             <ArrowLeft className="size-5" />
@@ -231,6 +238,12 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        <Link
+                            href={return_url || '/admin/batches'}
+                            className="h-11 px-5 flex items-center justify-center rounded-xl border border-zinc-200 text-xs font-semibold uppercase tracking-wide transition-all hover:bg-zinc-50 active:scale-[0.98] text-zinc-600"
+                        >
+                            Cancel
+                        </Link>
                         <Button
                             type="button"
                             onClick={handleSubmit}

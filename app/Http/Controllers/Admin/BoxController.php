@@ -8,6 +8,7 @@ use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
+use App\Enums\TrackingPhase;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreBoxRequest;
 use App\Http\Requests\Admin\UpdateBoxRequest;
@@ -15,7 +16,9 @@ use App\Models\Area;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Repositories\Contracts\BoxRepositoryInterface;
+use App\Services\TrackingCacheService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
@@ -54,12 +57,15 @@ class BoxController extends Controller
             BatchStatus::Loading,
         ])->latest()->get();
 
+        $filterBatches = Batch::latest()->get(['id', 'batch_number']);
+
         $areas = Area::where('is_active', true)->orderBy('name')->get(['id', 'name']);
 
         return Inertia::render('admin/boxes/index', [
             'boxes' => $boxes,
-            'filters' => $request->only(['search', 'status', 'area_id', 'sort', 'direction', 'trashed']),
+            'filters' => $request->only(['search', 'status', 'area_id', 'batch_id', 'payment_status', 'declaration_form_status', 'sort', 'direction', 'trashed']),
             'activeBatches' => $activeBatches,
+            'filterBatches' => $filterBatches,
             'areas' => $areas,
         ]);
     }
@@ -92,7 +98,7 @@ class BoxController extends Controller
         $bookings = Booking::with('sender')->latest()->get();
 
         return Inertia::render('admin/boxes/edit', [
-            'box' => $box->load('booking.sender'),
+            'box' => $box->load(['booking.sender', 'latestUpdate']),
             'bookings' => $bookings,
         ]);
     }
@@ -118,7 +124,11 @@ class BoxController extends Controller
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         // Do not unset tracking_step_key so it gets saved to the boxes table
 
-        if ($newStatus && ($box->status instanceof BoxStatus ? $box->status->value : $box->status) !== $newStatus) {
+        $currentStatusValue = $box->status instanceof BoxStatus ? $box->status->value : $box->status;
+        $statusChanged = $newStatus && $currentStatusValue !== $newStatus;
+        $stepChanged = $trackingStepKey && $box->tracking_step_key !== $trackingStepKey;
+
+        if ($statusChanged || $stepChanged) {
             if ($newStatus === BoxStatus::Delivered->value && $this->requiresDeliveryOverride($box) && blank($overrideReason)) {
                 throw ValidationException::withMessages([
                     'admin_delivery_override_reason' => 'An admin override reason is required when marking a box Delivered without proof and signature.',
@@ -128,10 +138,12 @@ class BoxController extends Controller
             unset($validated['status']);
             $box->update($validated);
 
+            $notes = !empty($validated['courier_notes']) ? $validated['courier_notes'] : 'Status updated by Admin';
+
             $boxRepo->updateStatus(
                 $box,
-                $newStatus,
-                'Status updated by Admin',
+                $newStatus ?? $currentStatusValue,
+                $notes,
                 Auth::id(),
                 deliveryOverrideReason: $overrideReason,
                 bypassValidation: true,
@@ -145,7 +157,8 @@ class BoxController extends Controller
             app(\App\Services\TrackingCacheService::class)->forgetBox($box);
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', 'Box updated successfully.');
+        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.boxes.index') ?? session('admin_return_url') ?? route('admin.boxes.index');
+        return redirect($returnUrl)->with('success', 'Box updated successfully.');
     }
 
     public function bulkUpdateStatus(Request $request, BoxRepositoryInterface $boxRepo)
@@ -155,20 +168,16 @@ class BoxController extends Controller
             'ids.*' => 'integer|exists:boxes,id',
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
-            'status' => 'required|string', // The new status to set
+            'status' => 'nullable|string', // The new status to set
             'tracking_step_key' => 'nullable|string',
             'filter_status' => 'nullable|string', // The status filter applied to the view
             'area_id' => 'nullable|exists:areas,id',
+            'batch_id' => 'nullable|string',
             'courier_notes' => 'nullable|string|max:2000',
             'update_eta' => 'nullable|boolean',
             'eta_date' => 'nullable|date',
             'eta_message' => 'nullable|string|max:255',
         ]);
-
-        if ($validated['status'] === BoxStatus::Delivered->value) {
-            return redirect()->route('admin.boxes.index')
-                ->with('error', 'Bulk Delivered updates require per-box proof/signature review or an admin override reason.');
-        }
 
         $requestForFilters = clone $request;
         if ($request->has('filter_status')) {
@@ -203,21 +212,24 @@ class BoxController extends Controller
                     app(\App\Services\TrackingCacheService::class)->forgetBox($box);
                 }
 
-                $boxRepo->updateStatus(
-                    $box,
-                    $validated['status'],
-                    ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
-                    $userId,
-                    bypassValidation: true,
-                    trackingStepKey: $trackingStepKey
-                );
+                if ($request->filled('status')) {
+                    $boxRepo->updateStatus(
+                        $box,
+                        $validated['status'],
+                        ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
+                        $userId,
+                        deliveryOverrideReason: $validated['status'] === BoxStatus::Delivered->value ? 'Bulk updated by Admin' : null,
+                        bypassValidation: true,
+                        trackingStepKey: $trackingStepKey
+                    );
+                }
                 $updated++;
             } catch (\Exception $e) {
                 // skip invalid transitions if any
             }
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', "{$updated} boxes status updated successfully.");
+        return redirect()->back()->with('success', "{$updated} boxes status updated successfully.");
     }
 
     public function bulkAssignToBatch(Request $request, BoxRepositoryInterface $boxRepo)
@@ -239,17 +251,29 @@ class BoxController extends Controller
             $boxes = Box::whereIn('id', $validated['ids'])->get();
         }
 
+        $targetBatchId = (int) $validated['batch_id'];
+        $batch = Batch::findOrFail($targetBatchId);
+
         $failedBoxes = [];
         $eligibleBoxes = [];
+
+        $statusesBelowLoaded = [
+            BoxStatus::Pending->value,
+            BoxStatus::Collected->value,
+            BoxStatus::ReceivedByWarehouse->value,
+        ];
+
         foreach ($boxes as $box) {
-            if ($box->booking->status === BookingStatus::Cancelled) {
+            $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+
+            if ($box->booking?->status === BookingStatus::Cancelled) {
                 $failedBoxes[] = "{$box->tracking_number} (Cancelled)";
-            } elseif (!in_array($box->booking->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)) {
+            } elseif (!in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)) {
                 $failedBoxes[] = "{$box->tracking_number} (Not Paid)";
-            } elseif ($box->booking->needsDeclaration()) {
+            } elseif ($box->booking?->needsDeclaration()) {
                 $failedBoxes[] = "{$box->tracking_number} (Missing Declaration)";
-            } elseif ($box->batch_id !== null) {
-                $failedBoxes[] = "{$box->tracking_number} (Already in a Batch)";
+            } elseif ($box->batch_id === $targetBatchId && !in_array($statusVal, $statusesBelowLoaded, true)) {
+                $failedBoxes[] = "{$box->tracking_number} (Already loaded in this Batch)";
             } else {
                 $eligibleBoxes[] = $box;
             }
@@ -260,28 +284,60 @@ class BoxController extends Controller
             return redirect()->back()->with('error', $msg);
         }
 
-        $count = 0;
+        $freshCount = 0;
+        $preservedCount = 0;
         $userId = Auth::id();
-        $batch = Batch::find($validated['batch_id']);
 
         foreach ($eligibleBoxes as $box) {
-            $box->update(['batch_id' => $validated['batch_id']]);
-            $boxRepo->updateStatus(
-                $box,
-                BoxStatus::InTransit->value,
-                "Assigned to batch: {$batch->batch_number}",
-                $userId
-            );
-            $count++;
+            try {
+                $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+                $box->update(['batch_id' => $targetBatchId]);
+
+                if (in_array($statusVal, $statusesBelowLoaded, true)) {
+                    $boxRepo->updateStatus(
+                        $box,
+                        BoxStatus::LoadedToContainer->value,
+                        "Assigned to batch: {$batch->batch_number}",
+                        $userId,
+                        bypassValidation: true,
+                        trackingStepKey: 'loading_container'
+                    );
+                    $freshCount++;
+                } else {
+                    // Preserved progress for boxes already at or beyond LoadedToContainer (transfers/reassignments)
+                    $latestUpdate = $box->updates()->latest('id')->first();
+                    $latestPhase = $latestUpdate?->tracking_phase?->value;
+
+                    BoxUpdate::create([
+                        'box_id' => $box->id,
+                        'status' => $statusVal,
+                        'tracking_step_key' => $box->tracking_step_key,
+                        'description' => "Transferred to batch: {$batch->batch_number}",
+                        'location' => 'In-Transit',
+                        'tracking_phase' => $latestPhase,
+                        'updated_by' => $userId,
+                    ]);
+
+                    app(TrackingCacheService::class)->forgetBox($box->refresh());
+                    $preservedCount++;
+                }
+            } catch (\Exception $e) {
+                $failedBoxes[] = "{$box->tracking_number} (" . $e->getMessage() . ")";
+            }
         }
 
-        $msg = "{$count} boxes assigned to batch successfully.";
+        $totalAssigned = $freshCount + $preservedCount;
+        $msg = "{$totalAssigned} " . ($totalAssigned === 1 ? 'box' : 'boxes') . " assigned to batch successfully.";
+        if ($preservedCount > 0) {
+            $msg .= " ({$preservedCount} with preserved shipping progress)";
+        }
+
         if (count($failedBoxes) > 0) {
-            $msg .= " The following boxes were skipped: " . implode(', ', $failedBoxes);
-            return redirect()->route('admin.boxes.index')->with('warning', $msg);
+            $msg .= " The following " . count($failedBoxes) . " box(es) were skipped: " . implode(', ', $failedBoxes);
+            return redirect()->back()->with('warning', $msg);
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', $msg);
+        return redirect()->back()->with('success', $msg);
     }
 
     public function bulkDestroy(Request $request)
@@ -318,10 +374,10 @@ class BoxController extends Controller
         $message = "{$deleted} boxes deleted successfully.";
         if ($skipped > 0) {
             $message .= " {$skipped} boxes skipped because they are not pending or cancelled.";
-            return redirect()->route('admin.boxes.index')->with('warning', $message);
+            return redirect()->back()->with('warning', $message);
         }
 
-        return redirect()->route('admin.boxes.index')->with('success', $message);
+        return redirect()->back()->with('success', $message);
     }
 
     public function updateStatus(Request $request, Box $box, BoxRepositoryInterface $boxRepo)
@@ -409,7 +465,7 @@ class BoxController extends Controller
 
         $box->delete();
 
-        return redirect()->route('admin.boxes.index')->with('success', 'Box archived successfully.');
+        return redirect()->back()->with('success', 'Box archived successfully.');
     }
 
     public function restore($id)
@@ -447,6 +503,14 @@ class BoxController extends Controller
 
         if ($request->filled('status')) {
             $query->where('status', $request->status);
+        }
+
+        if ($request->filled('batch_id')) {
+            if ($request->batch_id === 'unassigned') {
+                $query->whereNull('batch_id');
+            } else {
+                $query->where('batch_id', $request->batch_id);
+            }
         }
 
         if ($request->filled('area_id')) {

@@ -31,8 +31,13 @@ class UpdateAdminBookingRequest extends FormRequest
 
     public function rules(): array
     {
+        $booking = $this->route('booking');
         $isPaid = $this->payment_status === 'paid' || $this->payment_status === PaymentStatus::Paid->value;
+        $currentPaymentStatus = $booking ? ($booking->payment_status instanceof PaymentStatus ? $booking->payment_status->value : $booking->payment_status) : null;
+        $isTransitioningToPaid = $isPaid && $currentPaymentStatus !== 'paid';
+
         $isCash = in_array($this->payment_method, ['cash', 'cash_on_pickup'], true);
+        $isOnlinePayment = in_array($this->payment_method, ['stripe', 'afterpay', 'square'], true);
 
         return [
             'sender_id'               => 'required|exists:senders,id',
@@ -48,12 +53,12 @@ class UpdateAdminBookingRequest extends FormRequest
             'pickup_zone_id'           => 'nullable|exists:pickup_zones,id',
             'payment_status'           => ['required', Rule::enum(PaymentStatus::class)],
             'payment_method'           => [$isPaid ? 'required' : 'nullable', 'string', Rule::in(['cash', 'stripe', 'cash_on_pickup', 'bank_transfer', 'pay_id', 'afterpay', 'square', 'cheque'])],
-            'payment_reference'        => [$isPaid && ! $isCash ? 'required' : 'nullable', 'string', 'max:255'],
+            'payment_reference'        => [$isTransitioningToPaid && ! $isCash ? 'required' : 'nullable', 'string', 'max:255'],
             'proof_of_payment'         => [
-                $isPaid && ! $isCash && empty($this->route('booking')?->proof_of_payment) ? 'required' : 'nullable',
+                $isTransitioningToPaid && ! $isCash && ! $isOnlinePayment && empty($booking?->proof_of_payment) ? 'required' : 'nullable',
                 'file',
                 'mimes:jpeg,png,jpg,pdf',
-                'max:5120',
+                'max:10240',
             ],
             'declaration_form_status'  => 'required|in:missing,submitted_online,physical_copy_received',
             'declaration_form'         => [
@@ -65,6 +70,8 @@ class UpdateAdminBookingRequest extends FormRequest
             'notes'                    => 'nullable|string',
             'admin_notes'              => 'nullable|string',
             'declaration_data'         => 'nullable|array',
+            'empty_box_count'          => 'nullable|integer|min:0',
+            'empty_box_fee'            => 'nullable|numeric|min:0',
         ];
     }
 

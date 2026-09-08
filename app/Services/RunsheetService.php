@@ -14,6 +14,7 @@ use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Models\Runsheet;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 class RunsheetService
@@ -363,7 +364,7 @@ class RunsheetService
             $serial->update([
                 'status' => \App\Enums\SerialNumberStatus::Allocated->value,
                 'box_id' => $box->id,
-                'assigned_by' => $assignedBy ?? auth()->id(),
+                'assigned_by' => $assignedBy ?? Auth::id(),
                 'allocated_at' => now(),
             ]);
 
@@ -456,7 +457,7 @@ class RunsheetService
                 'status' => $boxStatus,
                 'tracking_phase' => $trackingPhase,
                 'description' => $description,
-                'updated_by' => auth()->id(),
+                'updated_by' => Auth::id(),
             ]);
         }
     }
@@ -923,7 +924,7 @@ class RunsheetService
             'status' => $boxStatus,
             'tracking_phase' => $trackingPhase,
             'description' => $description,
-            'updated_by' => auth()->id(),
+            'updated_by' => Auth::id(),
         ]);
     }
 

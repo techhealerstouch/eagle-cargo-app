@@ -98,16 +98,18 @@ class BatchController extends Controller
         try {
             $updatedBatch = $batchService->update($batch, $request->validated());
 
+            $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.batches.index') ?? session('admin_return_url') ?? route('admin.batches.index');
+
             $requestedStatus = $request->validated('status');
             if ($requestedStatus === BatchStatus::ReadyToClose->value && $updatedBatch->status === BatchStatus::Loading) {
-                return redirect()->route('admin.batches.index')->with('warning', 'Batch updated, but status reverted to Loading because manifest thresholds (capacity/cutoff) were not met.');
+                return redirect($returnUrl)->with('warning', 'Batch updated, but status reverted to Loading because manifest thresholds (capacity/cutoff) were not met.');
             }
 
         } catch (\InvalidArgumentException $exception) {
             return back()->withErrors(['status' => $exception->getMessage()]);
         }
 
-        return redirect()->route('admin.batches.index')->with('success', 'Batch updated successfully.');
+        return redirect($returnUrl)->with('success', 'Batch updated successfully.');
     }
 
     public function confirmManifest(Batch $batch, BatchService $batchService): RedirectResponse
@@ -473,10 +475,10 @@ class BatchController extends Controller
         if ($reverted > 0) {
             $message .= " {$reverted} batch(es) reverted to Loading because manifest thresholds were not met.";
 
-            return redirect()->route('admin.batches.index')->with('warning', $message);
+            return redirect()->back()->with('warning', $message);
         }
 
-        return redirect()->route('admin.batches.index')->with('success', $message);
+        return redirect()->back()->with('success', $message);
     }
 
     public function bulkDestroy(Request $request)
@@ -496,7 +498,7 @@ class BatchController extends Controller
             }
         }
 
-        return redirect()->route('admin.batches.index')->with('success', "{$deleted} batches deleted (only empty batches can be deleted).");
+        return redirect()->back()->with('success', "{$deleted} batches deleted (only empty batches can be deleted).");
     }
 
     public function destroy(Batch $batch): RedirectResponse
@@ -507,7 +509,7 @@ class BatchController extends Controller
 
         $batch->delete();
 
-        return redirect()->route('admin.batches.index')->with('success', 'Batch deleted successfully.');
+        return redirect()->back()->with('success', 'Batch deleted successfully.');
     }
 
     private function trackingPhaseOptionsForUser(\Illuminate\Support\Collection $trackingSteps, mixed $user): \Illuminate\Support\Collection

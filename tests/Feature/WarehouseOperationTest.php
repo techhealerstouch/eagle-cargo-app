@@ -116,7 +116,46 @@ class WarehouseOperationTest extends TestCase
 
         $this->assertEquals($batch->id, $box1->fresh()->batch_id);
         $this->assertEquals($batch->id, $box2->fresh()->batch_id);
+        $this->assertEquals(BoxStatus::LoadedToContainer, $box1->fresh()->status);
+        $this->assertEquals(BoxStatus::LoadedToContainer, $box2->fresh()->status);
         $this->assertSame(2, $batch->fresh()->current_box_count);
+    }
+
+    public function test_bulk_assign_preserves_status_for_transferred_in_transit_boxes(): void
+    {
+        $warehouse = $this->createWarehouseUser();
+        $this->actingAs($warehouse);
+
+        $oldBatch = app(BatchService::class)->create([
+            'branch_name' => 'Sydney Hub',
+            'capacity_boxes' => 10,
+            'status' => BatchStatus::Open,
+        ]);
+
+        $newBatch = app(BatchService::class)->create([
+            'branch_name' => 'Melbourne Hub',
+            'capacity_boxes' => 10,
+            'status' => BatchStatus::Open,
+        ]);
+
+        $box = $this->createBoxWithBooking(BoxStatus::InTransit);
+        $box->update(['batch_id' => $oldBatch->id]);
+
+        $response = $this->post(route('admin.boxes.bulk-assign-to-batch'), [
+            'ids' => [$box->id],
+            'batch_id' => $newBatch->id,
+        ]);
+
+        $response->assertSessionHasNoErrors();
+        $response->assertSessionHas('success');
+
+        $this->assertEquals($newBatch->id, $box->fresh()->batch_id);
+        $this->assertEquals(BoxStatus::InTransit, $box->fresh()->status);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $box->id,
+            'status' => BoxStatus::InTransit->value,
+            'description' => "Transferred to batch: {$newBatch->batch_number}",
+        ]);
     }
 
     public function test_bulk_assign_skips_ineligible_boxes(): void

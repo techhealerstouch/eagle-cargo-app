@@ -6,12 +6,14 @@ use App\Models\Booking;
 use App\Models\Box;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
 use App\Services\TrackingCacheService;
+use App\Services\TrackingStepService;
 use Illuminate\Http\UploadedFile;
 
 class TrackingRepository implements TrackingRepositoryInterface
 {
     public function __construct(
         private readonly TrackingCacheService $trackingCache,
+        private readonly TrackingStepService $trackingStepService,
     ) {}
 
     public function getTrackingData(string $trackingNumber): ?array
@@ -26,7 +28,7 @@ class TrackingRepository implements TrackingRepositoryInterface
     {
         $boxWithRelations = [
             'updates' => function ($q) {
-                $q->orderBy('created_at', 'desc');
+                $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
             'batch',
             'boxType',
@@ -38,7 +40,7 @@ class TrackingRepository implements TrackingRepositoryInterface
         // 1. Try finding by Box tracking_number first
         $box = Box::with(array_merge($boxWithRelations, [
             'booking.boxes.updates' => function ($q) {
-                $q->orderBy('created_at', 'desc');
+                $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
             'booking.boxes.batch',
             'booking.boxes.boxType',
@@ -56,7 +58,7 @@ class TrackingRepository implements TrackingRepositoryInterface
         // 2. Check if it's a booking reference number instead of Box tracking number
         $booking = Booking::with([
             'boxes.updates' => function ($q) {
-                $q->orderBy('created_at', 'desc');
+                $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
             'boxes.batch',
             'boxes.boxType',
@@ -75,11 +77,15 @@ class TrackingRepository implements TrackingRepositoryInterface
 
     private function formatSingleBoxData(Box $b): array
     {
+        $latestUpdate = $b->updates ? $b->updates->first() : null;
+        $trackingStepKey = $b->tracking_step_key ?? $latestUpdate?->tracking_step_key;
+
         return [
             'id' => $b->id,
             'tracking_number' => $b->tracking_number,
             'status' => $b->status,
-            'status_label' => $this->resolveStatusLabel($b->updates->first(), $b->status),
+            'tracking_step_key' => $trackingStepKey,
+            'status_label' => $this->resolveStatusLabel($latestUpdate, $b->status, $trackingStepKey),
             'current_milestone_id' => $b->updates->whereNotNull('area_milestone_id')->first()?->area_milestone_id,
             'area_milestones' => $b->recipient?->area?->milestones->map(function ($m) {
                 return [
@@ -115,8 +121,9 @@ class TrackingRepository implements TrackingRepositoryInterface
             'timeline' => $b->updates ? $b->updates->map(function ($update) {
                 return [
                     'status' => $update->status,
-                    'status_label' => $this->resolveStatusLabel($update, $update->status),
+                    'status_label' => $this->resolveStatusLabel($update, $update->status, $update->tracking_step_key),
                     'tracking_phase' => $update->tracking_phase?->value,
+                    'tracking_step_key' => $update->tracking_step_key,
                     'location' => $update->location,
                     'description' => $update->description,
                     'date' => $update->created_at->format('M d, Y h:i A'),
@@ -140,13 +147,17 @@ class TrackingRepository implements TrackingRepositoryInterface
             }
         }
 
+        $latestUpdate = $primaryBox->updates ? $primaryBox->updates->first() : null;
+        $trackingStepKey = $primaryBox->tracking_step_key ?? $latestUpdate?->tracking_step_key;
+
         return [
             'booking_id' => $booking->id,
             'booking_reference' => $booking->reference_number,
             'tracking_number' => $primaryBox->tracking_number,
+            'tracking_step_key' => $trackingStepKey,
             'recipient_name' => $primaryBox->recipient?->name,
             'status' => $primaryBox->status,
-            'status_label' => $this->resolveStatusLabel($primaryBox->updates->first(), $primaryBox->status),
+            'status_label' => $this->resolveStatusLabel($latestUpdate, $primaryBox->status, $trackingStepKey),
             'current_milestone_id' => $primaryBox->updates->whereNotNull('area_milestone_id')->first()?->area_milestone_id,
             'area_milestones' => $primaryBox->recipient?->area?->milestones->map(function ($m) {
                 return [
@@ -184,8 +195,9 @@ class TrackingRepository implements TrackingRepositoryInterface
             'timeline' => $primaryBox->updates ? $primaryBox->updates->map(function ($update) {
                 return [
                     'status' => $update->status,
-                    'status_label' => $this->resolveStatusLabel($update, $update->status),
+                    'status_label' => $this->resolveStatusLabel($update, $update->status, $update->tracking_step_key),
                     'tracking_phase' => $update->tracking_phase?->value,
+                    'tracking_step_key' => $update->tracking_step_key,
                     'location' => $update->location,
                     'description' => $update->description,
                     'date' => $update->created_at->format('M d, Y h:i A'),
@@ -199,8 +211,23 @@ class TrackingRepository implements TrackingRepositoryInterface
         ];
     }
 
-    private function resolveStatusLabel(?\App\Models\BoxUpdate $update, mixed $boxStatus): ?string
+    private function resolveStatusLabel(?\App\Models\BoxUpdate $update, mixed $boxStatus, ?string $trackingStepKey = null): ?string
     {
+        $stepKey = $trackingStepKey ?? $update?->tracking_step_key;
+        if (! $stepKey && $update?->tracking_phase) {
+            $stepKey = $update->tracking_phase instanceof \App\Enums\TrackingPhase
+                ? $update->tracking_phase->value
+                : (string) $update->tracking_phase;
+        }
+
+        if ($stepKey) {
+            $steps = $this->trackingStepService->getSteps();
+            $step = collect($steps)->firstWhere('key', $stepKey);
+            if ($step && ! empty($step['label'])) {
+                return $step['label'];
+            }
+        }
+
         if ($update?->tracking_phase) {
             return $update->tracking_phase->label();
         }
