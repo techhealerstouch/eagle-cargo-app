@@ -69,6 +69,7 @@ export function NotificationDropdown() {
         isLoading,
         markAsRead,
         markAllAsRead,
+        refetch,
     } = useNotifications({ pollInterval: 60000 });
 
     const handleNotificationClick = (notification: Notification) => {
@@ -83,7 +84,7 @@ export function NotificationDropdown() {
     };
 
     return (
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={(open) => { if (open) refetch(); }}>
             <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="group relative h-9 w-9 cursor-pointer">
                     <Bell className="size-5 opacity-80 group-hover:opacity-100" />

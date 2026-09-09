@@ -408,6 +408,7 @@ export default function BatchesIndex({
                     selectedIds={selectedIds}
                     isGlobalSelection={isGlobalSelection}
                     filters={filters}
+                    batchesData={batches.data}
                     onSuccessCallback={() => {
                         setSelectedIds([]);
                         setIsGlobalSelection(false);

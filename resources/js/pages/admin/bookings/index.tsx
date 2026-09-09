@@ -387,7 +387,11 @@ export default function BookingsIndex({
                 }}
                 onConfirm={handleSingleCancelConfirm}
                 title="Cancel Booking"
-                description={`Are you sure you want to cancel booking ${selectedBooking?.reference_number || ''}?`}
+                description={
+                    selectedBooking
+                        ? `Are you sure you want to cancel booking ${selectedBooking.reference_number}? It is currently ${humanize(selectedBooking.status)} with payment status ${humanize(selectedBooking.payment_status)}.`
+                        : 'Are you sure you want to cancel this booking?'
+                }
                 confirmText="Cancel Booking"
                 variant="destructive"
                 loading={isProcessing}
@@ -805,6 +809,7 @@ export default function BookingsIndex({
                 selectedIds={selectedIds}
                 isGlobalSelection={isGlobalSelection}
                 filters={filters}
+                bookingsData={bookings.data}
                 onSuccessCallback={() => {
                     setSelectedIds([]);
                     setIsGlobalSelection(false);
