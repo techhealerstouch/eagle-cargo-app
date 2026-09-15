@@ -387,8 +387,8 @@ export default function PickupRunsheetsCreate({
                                             <span className="text-sm font-black text-brand-text">{totalNeededBoxes}</span>
                                         </div>
                                         <p className="text-[10px] text-muted-foreground font-medium">
-                                            {totalNeededBoxes > 0 
-                                                ? `You selected ${data.booking_ids.length} booking(s) requiring a total of ${totalNeededBoxes} serial numbers.` 
+                                            {totalNeededBoxes > 0
+                                                ? `You selected ${data.booking_ids.length} booking(s) requiring a total of ${totalNeededBoxes} serial numbers.`
                                                 : `No serial numbers will be allocated yet (select bookings).`}
                                         </p>
                                     </div>
@@ -528,8 +528,8 @@ export default function PickupRunsheetsCreate({
                                                                     setIsPickerModalOpen(false);
                                                                 }}
                                                                 className={`group relative p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-4 ${isSelected
-                                                                        ? 'border-brand-rust bg-brand-rust/5 ring-4 ring-brand-rust/5'
-                                                                        : 'border-brand-sand/50 bg-white hover:border-brand-rust/30 hover:bg-brand-rust/5'
+                                                                    ? 'border-brand-rust bg-brand-rust/5 ring-4 ring-brand-rust/5'
+                                                                    : 'border-brand-sand/50 bg-white hover:border-brand-rust/30 hover:bg-brand-rust/5'
                                                                     }`}
                                                             >
                                                                 <div className={`size-12 rounded-xl flex items-center justify-center text-xs font-black transition-all ${isSelected ? 'bg-brand-rust text-white' : 'bg-brand-warm/50 text-brand-rust'
@@ -561,8 +561,8 @@ export default function PickupRunsheetsCreate({
                                                 ) : (
                                                     <div className="p-8 text-center border-2 border-dashed border-brand-sand/30 rounded-2xl flex flex-col items-center gap-3">
                                                         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">No pickers found</p>
-                                                        <Link 
-                                                            href="/admin/users/create" 
+                                                        <Link
+                                                            href="/admin/users/create"
                                                             className="text-[10px] font-bold text-brand-rust uppercase tracking-widest hover:underline flex items-center gap-1"
                                                         >
                                                             <Plus className="size-3" />
@@ -594,11 +594,10 @@ export default function PickupRunsheetsCreate({
                                 <button
                                     type="button"
                                     onClick={() => setSelectedAreaFilter('all')}
-                                    className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-                                        selectedAreaFilter === 'all'
+                                    className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${selectedAreaFilter === 'all'
                                             ? 'bg-brand-rust text-white shadow-md'
                                             : 'bg-white border border-brand-sand/60 text-brand-text hover:bg-brand-warm/40'
-                                    }`}
+                                        }`}
                                 >
                                     All ({pickupEligibleBookings.length})
                                 </button>
@@ -607,11 +606,10 @@ export default function PickupRunsheetsCreate({
                                         key={areaName}
                                         type="button"
                                         onClick={() => setSelectedAreaFilter(areaName)}
-                                        className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${
-                                            selectedAreaFilter.toLowerCase() === areaName.toLowerCase()
+                                        className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${selectedAreaFilter.toLowerCase() === areaName.toLowerCase()
                                                 ? 'bg-brand-rust text-white shadow-md'
                                                 : 'bg-white border border-brand-sand/60 text-brand-text hover:bg-brand-warm/40'
-                                        }`}
+                                            }`}
                                     >
                                         📍 {areaName} ({count})
                                     </button>
@@ -635,8 +633,8 @@ export default function PickupRunsheetsCreate({
                                 type="button"
                                 onClick={handleSelectAll}
                                 className={`flex items-center justify-center gap-3 px-8 h-12 rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest transition-all ${isAllFilteredSelected
-                                        ? 'bg-brand-rust text-white shadow-lg'
-                                        : 'bg-white border border-brand-sand text-brand-rust hover:border-brand-rust hover:bg-brand-rust/5'
+                                    ? 'bg-brand-rust text-white shadow-lg'
+                                    : 'bg-white border border-brand-sand text-brand-rust hover:border-brand-rust hover:bg-brand-rust/5'
                                     }`}
                             >
                                 {isAllFilteredSelected ? <CheckSquare className="size-4" /> : <Square className="size-4" />}
@@ -679,8 +677,8 @@ export default function PickupRunsheetsCreate({
                                                     setData(current => ({ ...current, ...newData }));
                                                 }}
                                                 className={`group flex flex-col p-6 rounded-[2.5rem] border-2 transition-all cursor-pointer relative overflow-hidden ${isSelected
-                                                        ? 'border-brand-rust bg-white ring-8 ring-brand-rust/5'
-                                                        : 'border-brand-sand/30 bg-white/60 hover:bg-white hover:border-brand-rust/40'
+                                                    ? 'border-brand-rust bg-white ring-8 ring-brand-rust/5'
+                                                    : 'border-brand-sand/30 bg-white/60 hover:bg-white hover:border-brand-rust/40'
                                                     }`}
                                             >
                                                 {/* Stop Sequence Badge */}

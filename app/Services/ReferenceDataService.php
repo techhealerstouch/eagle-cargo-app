@@ -254,10 +254,11 @@ class ReferenceDataService
 
         // Primary lookup: exact match on all three dimensions
         if ($pickupZoneId !== null && $pickupZoneId !== '') {
-            $matched = $prices->first(fn (BoxPrice $price): bool =>
+            $matched = $prices->first(
+                fn(BoxPrice $price): bool =>
                 (int) $price->area_id === (int) $areaId
-                && (int) $price->box_type_id === (int) $boxTypeId
-                && (int) $price->pickup_zone_id === (int) $pickupZoneId
+                    && (int) $price->box_type_id === (int) $boxTypeId
+                    && (int) $price->pickup_zone_id === (int) $pickupZoneId
             );
 
             if ($matched) {
@@ -266,9 +267,10 @@ class ReferenceDataService
         }
 
         // Fallback: match on area × box_type only (for backwards compatibility)
-        return $prices->first(fn (BoxPrice $price): bool =>
+        return $prices->first(
+            fn(BoxPrice $price): bool =>
             (int) $price->area_id === (int) $areaId
-            && (int) $price->box_type_id === (int) $boxTypeId
+                && (int) $price->box_type_id === (int) $boxTypeId
         );
     }
 
@@ -292,7 +294,7 @@ class ReferenceDataService
     public function cbmRateFor(int|string $areaId, int|string|null $pickupZoneId = null): ?float
     {
         $boxTypes = $this->activeBoxTypes();
-        $customCbmType = $boxTypes->first(fn ($bt): bool => strtolower($bt->name) === 'custom box (cbm)' || str_contains(strtolower($bt->name), 'cbm'));
+        $customCbmType = $boxTypes->first(fn($bt): bool => strtolower($bt->name) === 'custom box (cbm)' || str_contains(strtolower($bt->name), 'cbm'));
 
         if ($customCbmType && $pickupZoneId !== null) {
             $priceRecord = $this->priceFor($areaId, $customCbmType->id, $pickupZoneId);
@@ -310,7 +312,7 @@ class ReferenceDataService
      */
     public function doorToDoorFeeFor(int|string $areaId): float
     {
-        $area = $this->activeAreas()->first(fn (Area $a): bool => (int) $a->id === (int) $areaId);
+        $area = $this->activeAreas()->first(fn(Area $a): bool => (int) $a->id === (int) $areaId);
 
         return $area && $area->door_to_door_fee !== null ? (float) $area->door_to_door_fee : 0.00;
     }

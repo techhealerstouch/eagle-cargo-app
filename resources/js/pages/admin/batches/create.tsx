@@ -1,6 +1,6 @@
 import { Head, useForm, Link } from '@inertiajs/react';
-import { Save, ArrowLeft, Layers, Ship, MapPin, CalendarClock, Package, Scale, Route, Anchor, Box, Container, Sparkles, Copy, ChevronRight, ChevronLeft, CheckCircle2, Info } from 'lucide-react';
-import { useEffect, useState, useMemo } from 'react';
+import { Save, ArrowLeft, Layers, Ship, MapPin, CalendarClock, Package, Scale, Route, Anchor, Box, Container, Sparkles, Copy, ChevronRight, ChevronLeft, CheckCircle2, AlertCircle, Loader2, Info } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import Heading from '@/components/common/heading';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import AppLayout from '@/layouts/app-layout';
 import { ORIGIN_PORTS, DESTINATION_PORTS } from '@/lib/ports';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import type { BreadcrumbItem } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -32,6 +33,43 @@ const STEPS = [
 
 export default function BatchesCreate({ templateBatch }: { templateBatch?: any }) {
     const [currentStep, setCurrentStep] = useState(0);
+    const [visitedSteps, setVisitedSteps] = useState<number[]>([0]);
+    const [uniqueWarnings, setUniqueWarnings] = useState<Record<string, string>>({});
+    const [checkingUnique, setCheckingUnique] = useState<Record<string, boolean>>({});
+    const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+    const checkUnique = useCallback((field: string, value: string) => {
+        if (debounceTimers.current[field]) {
+            clearTimeout(debounceTimers.current[field]);
+        }
+        if (!value || value.trim() === '') {
+            setUniqueWarnings(prev => { const next = { ...prev }; delete next[field]; return next; });
+            setCheckingUnique(prev => ({ ...prev, [field]: false }));
+            return;
+        }
+        setCheckingUnique(prev => ({ ...prev, [field]: true }));
+        debounceTimers.current[field] = setTimeout(async () => {
+            try {
+                const params = new URLSearchParams({ field, value });
+                const res = await fetch(`/admin/batches/check-unique?${params}`);
+                if (!res.ok) return;
+                const result = await res.json();
+                setUniqueWarnings(prev => {
+                    if (!result.available) {
+                        const label = field.replace(/_/g, ' ');
+                        return { ...prev, [field]: `This ${label} is already assigned to another batch.` };
+                    }
+                    const next = { ...prev };
+                    delete next[field];
+                    return next;
+                });
+            } catch {
+                // Server-side validation will catch it on submit
+            } finally {
+                setCheckingUnique(prev => ({ ...prev, [field]: false }));
+            }
+        }, 500);
+    }, []);
 
     const getDefaultDates = () => {
         const cutoff = new Date();
@@ -70,7 +108,7 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
 
     const transitDays = getInitialTransitDays();
 
-    const { data, setData, post, processing, errors } = useForm({
+    const { data, setData, post, processing, errors, clearErrors } = useForm({
         batch_number: '',
         branch_name: templateBatch?.branch_name ?? '',
         container_number: '',
@@ -114,12 +152,82 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
         return Math.max(0, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
     };
 
-    const isStep0Complete = () => data.container_size !== '' && data.status !== '';
-    const isStep1Complete = () => data.vessel_name !== '' && data.shipping_line !== '' && data.voyage_number !== '' && data.origin_port !== '' && data.destination_port !== '';
-    const isStep2Complete = () => data.cutoff_at !== '' && data.eta_at !== '';
-    const isStep3Complete = () => data.capacity_boxes !== '' || data.capacity_cbm !== '';
+    const getStepUnsatisfiedReason = useCallback((step: number): string | null => {
+        if (step === 0) {
+            if (checkingUnique.container_number || checkingUnique.seal_number || checkingUnique.batch_number) {
+                return 'Verifying uniqueness of reference numbers...';
+            }
+            if (uniqueWarnings.container_number) return uniqueWarnings.container_number;
+            if (uniqueWarnings.seal_number) return uniqueWarnings.seal_number;
+            if (uniqueWarnings.batch_number) return uniqueWarnings.batch_number;
+            if (!data.container_size) return 'Please select a container size.';
+            if (data.batch_number && !/^(?:.*-[a-zA-Z0-9]{1,4}|[a-zA-Z0-9]{1,4})$/.test(data.batch_number)) {
+                return 'Batch number sequence segment cannot exceed 4 digits (e.g. LBB-2609-0001).';
+            }
+            if (errors.container_number) return errors.container_number;
+            if (errors.seal_number) return errors.seal_number;
+            if (errors.batch_number) return errors.batch_number;
+            if (errors.container_size) return errors.container_size;
+            return null;
+        }
+        if (step === 1) {
+            if (!data.shipping_line?.trim()) return 'Shipping line is required.';
+            if (!data.origin_port) return 'Origin port is required.';
+            if (!data.destination_port) return 'Destination port is required.';
+            if (data.origin_port === data.destination_port) return 'Origin and destination ports cannot be the same.';
+            if (errors.shipping_line) return errors.shipping_line;
+            if (errors.origin_port) return errors.origin_port;
+            if (errors.destination_port) return errors.destination_port;
+            if (errors.vessel_name) return errors.vessel_name;
+            if (errors.voyage_number) return errors.voyage_number;
+            return null;
+        }
+        if (step === 2) {
+            if (!data.cutoff_at) return 'Cut-off date is required.';
+            if (!data.eta_at) return 'Estimated arrival date (ETA) is required.';
+            if (new Date(data.eta_at) < new Date(data.cutoff_at)) {
+                return 'Estimated arrival date cannot be earlier than cut-off date.';
+            }
+            if (errors.cutoff_at) return errors.cutoff_at;
+            if (errors.eta_at) return errors.eta_at;
+            return null;
+        }
+        if (step === 3) {
+            if (!data.capacity_boxes || Number(data.capacity_boxes) < 1) {
+                return 'Total box capacity must be at least 1 box.';
+            }
+            if (errors.capacity_boxes) return errors.capacity_boxes;
+            if (errors.capacity_cbm) return errors.capacity_cbm;
+            return null;
+        }
+        return null;
+    }, [data, uniqueWarnings, checkingUnique, errors]);
 
-    const stepStatus = [isStep0Complete(), isStep1Complete(), isStep2Complete(), isStep3Complete()];
+    const isStepSatisfied = useCallback((step: number): boolean => {
+        return getStepUnsatisfiedReason(step) === null;
+    }, [getStepUnsatisfiedReason]);
+
+    const canProceedCurrentStep = isStepSatisfied(currentStep);
+
+    const canNavigateToStep = useCallback((targetIdx: number): boolean => {
+        if (targetIdx <= currentStep) return true;
+        for (let i = 0; i < targetIdx; i++) {
+            if (!isStepSatisfied(i)) return false;
+        }
+        return true;
+    }, [currentStep, isStepSatisfied]);
+
+    const isStepDone = useCallback((idx: number): boolean => {
+        if (!isStepSatisfied(idx)) return false;
+        for (let i = 0; i <= idx; i++) {
+            if (!isStepSatisfied(i)) return false;
+        }
+        return idx < currentStep || visitedSteps.includes(idx);
+    }, [isStepSatisfied, currentStep, visitedSteps]);
+
+    const allStepsSatisfied = useMemo(() => {
+        return [0, 1, 2, 3].every(idx => isStepSatisfied(idx));
+    }, [isStepSatisfied]);
 
     useEffect(() => {
         if (!templateBatch) {
@@ -153,8 +261,17 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
     };
 
     const nextStep = () => {
+        if (!canProceedCurrentStep) {
+            const reason = getStepUnsatisfiedReason(currentStep);
+            toast.error('Cannot proceed', {
+                description: reason || 'Please satisfy all required fields on this step before continuing.',
+            });
+            return;
+        }
         if (currentStep < STEPS.length - 1) {
-            setCurrentStep(currentStep + 1);
+            const next = currentStep + 1;
+            setCurrentStep(next);
+            setVisitedSteps(prev => prev.includes(next) ? prev : [...prev, next]);
         }
     };
 
@@ -166,7 +283,46 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        post('/admin/batches');
+
+        for (let i = 0; i < STEPS.length; i++) {
+            if (!isStepSatisfied(i)) {
+                setCurrentStep(i);
+                const reason = getStepUnsatisfiedReason(i);
+                toast.error(`Cannot submit: Step ${i + 1} (${STEPS[i].title}) is incomplete`, {
+                    description: reason || 'Please resolve all required fields and warnings.',
+                });
+                return;
+            }
+        }
+
+        if (Object.keys(uniqueWarnings).length > 0) {
+            toast.error('Cannot submit', { description: 'Please resolve uniqueness warnings before initializing the batch.' });
+            return;
+        }
+
+        if (Object.values(checkingUnique).some(Boolean)) {
+            toast.error('Please wait', { description: 'Reference numbers are still being validated.' });
+            return;
+        }
+
+        post('/admin/batches', {
+            onError: (formErrors) => {
+                const firstError = Object.values(formErrors)[0];
+                if (firstError) {
+                    toast.error('Validation failed', { description: firstError as string });
+                }
+                // Auto-navigate to the step containing the first error
+                if (formErrors.batch_number || formErrors.container_number || formErrors.seal_number || formErrors.container_size || formErrors.branch_name) {
+                    setCurrentStep(0);
+                } else if (formErrors.vessel_name || formErrors.shipping_line || formErrors.voyage_number || formErrors.origin_port || formErrors.destination_port) {
+                    setCurrentStep(1);
+                } else if (formErrors.cutoff_at || formErrors.eta_at) {
+                    setCurrentStep(2);
+                } else if (formErrors.capacity_boxes || formErrors.capacity_cbm) {
+                    setCurrentStep(3);
+                }
+            },
+        });
     };
 
     return (
@@ -195,44 +351,69 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                         <div className="bg-white rounded-2xl border border-zinc-200/80 p-5 shadow-sm">
                             <h3 className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-400 mb-5 px-1.5">Setup Progress</h3>
                             <nav className="flex flex-col gap-1.5">
-                                {STEPS.map((step, idx) => (
-                                    <button
-                                        key={step.id}
-                                        onClick={() => setCurrentStep(idx)}
-                                        className={cn(
-                                            "group flex items-center gap-3.5 p-3 rounded-xl transition-all text-left border",
-                                            currentStep === idx
-                                                ? "bg-sky-50/70 border-sky-100/80 shadow-sm"
-                                                : "hover:bg-zinc-50/80 border-transparent"
-                                        )}
-                                    >
-                                        <div className={cn(
-                                            "flex size-9 shrink-0 items-center justify-center rounded-lg transition-all",
-                                            currentStep === idx
-                                                ? "bg-sky-600 text-white shadow-md shadow-sky-600/10"
-                                                : stepStatus[idx]
-                                                    ? "bg-emerald-50 text-emerald-600 border border-emerald-100/40"
-                                                    : "bg-zinc-100 text-zinc-400 group-hover:bg-zinc-200"
-                                        )}>
-                                            {stepStatus[idx] && currentStep !== idx ? (
-                                                <CheckCircle2 className="size-4.5" />
-                                            ) : (
-                                                <step.icon className="size-4.5" />
+                                {STEPS.map((step, idx) => {
+                                    const isClickable = canNavigateToStep(idx);
+                                    const isCurrent = currentStep === idx;
+                                    const isComplete = isStepDone(idx);
+                                    const hasError = !isStepSatisfied(idx) && visitedSteps.includes(idx);
+
+                                    return (
+                                        <button
+                                            key={step.id}
+                                            type="button"
+                                            disabled={!isClickable}
+                                            onClick={() => {
+                                                if (isClickable) {
+                                                    setCurrentStep(idx);
+                                                    setVisitedSteps(prev => prev.includes(idx) ? prev : [...prev, idx]);
+                                                } else {
+                                                    const reason = getStepUnsatisfiedReason(currentStep);
+                                                    toast.error('Cannot navigate forward', {
+                                                        description: reason || `Please complete the current step (${STEPS[currentStep].title}) before moving ahead.`,
+                                                    });
+                                                }
+                                            }}
+                                            className={cn(
+                                                "group flex items-center gap-3.5 p-3 rounded-xl transition-all text-left border w-full",
+                                                isCurrent
+                                                    ? "bg-sky-50/70 border-sky-100/80 shadow-sm"
+                                                    : isClickable
+                                                        ? "hover:bg-zinc-50/80 border-transparent cursor-pointer"
+                                                        : "border-transparent opacity-50 cursor-not-allowed"
                                             )}
-                                        </div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className={cn(
-                                                "text-xs font-semibold transition-colors",
-                                                currentStep === idx ? "text-sky-900 font-bold" : "text-zinc-600"
+                                        >
+                                            <div className={cn(
+                                                "flex size-9 shrink-0 items-center justify-center rounded-lg transition-all",
+                                                isCurrent
+                                                    ? "bg-sky-600 text-white shadow-md shadow-sky-600/10"
+                                                    : isComplete
+                                                        ? "bg-emerald-50 text-emerald-600 border border-emerald-100/40"
+                                                        : hasError
+                                                            ? "bg-amber-50 text-amber-600 border border-amber-200/60"
+                                                            : "bg-zinc-100 text-zinc-400 group-hover:bg-zinc-200"
                                             )}>
-                                                {step.title}
-                                            </span>
-                                            <span className="text-[10px] text-zinc-400 truncate">
-                                                {step.description}
-                                            </span>
-                                        </div>
-                                    </button>
-                                ))}
+                                                {isComplete && !isCurrent ? (
+                                                    <CheckCircle2 className="size-4.5" />
+                                                ) : hasError && !isCurrent ? (
+                                                    <AlertCircle className="size-4.5 text-amber-600" />
+                                                ) : (
+                                                    <step.icon className="size-4.5" />
+                                                )}
+                                            </div>
+                                            <div className="flex flex-col min-w-0">
+                                                <span className={cn(
+                                                    "text-xs font-semibold transition-colors",
+                                                    isCurrent ? "text-sky-900 font-bold" : "text-zinc-600"
+                                                )}>
+                                                    {step.title}
+                                                </span>
+                                                <span className="text-[10px] text-zinc-400 truncate">
+                                                    {step.description}
+                                                </span>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
                             </nav>
                         </div>
 
@@ -275,7 +456,9 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="batch_number" className="text-xs font-semibold text-zinc-700 ml-0.5">Batch ID Preview</Label>
+                                                    <Label htmlFor="batch_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Batch ID Preview <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                    </Label>
                                                     <div className="relative group">
                                                         <div className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none">
                                                             <span className="text-xs font-bold text-zinc-400">#</span>
@@ -292,24 +475,43 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                                                     val = parts.join('-');
                                                                 }
                                                                 setData('batch_number', val);
+                                                                clearErrors('batch_number');
+                                                                checkUnique('batch_number', val);
                                                             }}
-                                                            className="h-11 rounded-xl border-zinc-200 pl-8 font-mono text-sm font-medium focus:ring-sky-100/50"
+                                                            className={cn("h-11 rounded-xl border-zinc-200 pl-8 pr-10 font-mono text-sm font-medium focus:ring-sky-100/50", uniqueWarnings.batch_number && "border-amber-400 focus:ring-amber-100/50")}
                                                             placeholder={getPreviewBatchNumber()}
                                                         />
+                                                        {checkingUnique.batch_number && (
+                                                            <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400 animate-spin" />
+                                                        )}
+                                                        {!checkingUnique.batch_number && data.batch_number && !uniqueWarnings.batch_number && (
+                                                            <CheckCircle2 className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-500" />
+                                                        )}
+                                                        {!checkingUnique.batch_number && uniqueWarnings.batch_number && (
+                                                            <AlertCircle className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-amber-500" />
+                                                        )}
                                                     </div>
                                                     <p className="text-[10px] text-zinc-400 ml-0.5 flex items-center gap-1.5 font-normal">
                                                         <Info className="size-3 text-zinc-400" /> Leave blank to auto-generate, or enter custom ID (max 4 digits on sequence).
                                                     </p>
                                                     {errors.batch_number && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.batch_number}</p>}
+                                                    {uniqueWarnings.batch_number && !errors.batch_number && (
+                                                        <p className="text-[11px] font-semibold text-amber-600 ml-0.5 mt-1 flex items-center gap-1">
+                                                            <AlertCircle className="size-3 shrink-0" />
+                                                            {uniqueWarnings.batch_number}
+                                                        </p>
+                                                    )}
                                                 </div>
 
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="branch_name" className="text-xs font-semibold text-zinc-700 ml-0.5">Branch Name (Optional)</Label>
+                                                    <Label htmlFor="branch_name" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Branch Name <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                    </Label>
                                                     <Input
                                                         disabled={processing}
                                                         id="branch_name"
                                                         value={data.branch_name}
-                                                        onChange={(e) => setData('branch_name', e.target.value)}
+                                                        onChange={(e) => { setData('branch_name', e.target.value); clearErrors('branch_name'); }}
                                                         className="h-11 rounded-xl border-zinc-200 text-sm font-medium"
                                                         placeholder="e.g. Sydney North"
                                                     />
@@ -318,27 +520,63 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
 
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="space-y-2">
-                                                        <Label htmlFor="container_number" className="text-xs font-semibold text-zinc-700 ml-0.5">Container Referrence</Label>
+                                                        <Label htmlFor="container_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                            Container Reference <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                        </Label>
                                                         <div className="relative">
                                                             <Container className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
-                                                            <Input disabled={processing} id="container_number" value={data.container_number} onChange={(e) => setData('container_number', e.target.value)} className="h-11 rounded-xl border-zinc-200 pl-10" placeholder="e.g. MSCU1234567" />
+                                                            <Input disabled={processing} id="container_number" value={data.container_number} onChange={(e) => { setData('container_number', e.target.value); clearErrors('container_number'); checkUnique('container_number', e.target.value); }} className={cn("h-11 rounded-xl border-zinc-200 pl-10 pr-10", uniqueWarnings.container_number && "border-amber-400 focus:ring-amber-100/50")} placeholder="e.g. MSCU1234567" />
+                                                            {checkingUnique.container_number && (
+                                                                <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400 animate-spin" />
+                                                            )}
+                                                            {!checkingUnique.container_number && data.container_number && !uniqueWarnings.container_number && (
+                                                                <CheckCircle2 className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-500" />
+                                                            )}
+                                                            {!checkingUnique.container_number && uniqueWarnings.container_number && (
+                                                                <AlertCircle className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-amber-500" />
+                                                            )}
                                                         </div>
                                                         {errors.container_number && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.container_number}</p>}
+                                                        {uniqueWarnings.container_number && !errors.container_number && (
+                                                            <p className="text-[11px] font-semibold text-amber-600 ml-0.5 mt-1 flex items-center gap-1">
+                                                                <AlertCircle className="size-3 shrink-0" />
+                                                                {uniqueWarnings.container_number}
+                                                            </p>
+                                                        )}
                                                     </div>
 
                                                     <div className="space-y-2">
-                                                        <Label htmlFor="seal_number" className="text-xs font-semibold text-zinc-700 ml-0.5">Seal Number</Label>
+                                                        <Label htmlFor="seal_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                            Seal Number <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                        </Label>
                                                         <div className="relative">
                                                             <Anchor className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
-                                                            <Input disabled={processing} id="seal_number" value={data.seal_number} onChange={(e) => setData('seal_number', e.target.value)} className="h-11 rounded-xl border-zinc-200 pl-10" placeholder="Shipping line seal #" />
+                                                            <Input disabled={processing} id="seal_number" value={data.seal_number} onChange={(e) => { setData('seal_number', e.target.value); clearErrors('seal_number'); checkUnique('seal_number', e.target.value); }} className={cn("h-11 rounded-xl border-zinc-200 pl-10 pr-10", uniqueWarnings.seal_number && "border-amber-400 focus:ring-amber-100/50")} placeholder="Shipping line seal #" />
+                                                            {checkingUnique.seal_number && (
+                                                                <Loader2 className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400 animate-spin" />
+                                                            )}
+                                                            {!checkingUnique.seal_number && data.seal_number && !uniqueWarnings.seal_number && (
+                                                                <CheckCircle2 className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-500" />
+                                                            )}
+                                                            {!checkingUnique.seal_number && uniqueWarnings.seal_number && (
+                                                                <AlertCircle className="absolute right-3.5 top-1/2 -translate-y-1/2 size-4 text-amber-500" />
+                                                            )}
                                                         </div>
                                                         {errors.seal_number && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.seal_number}</p>}
+                                                        {uniqueWarnings.seal_number && !errors.seal_number && (
+                                                            <p className="text-[11px] font-semibold text-amber-600 ml-0.5 mt-1 flex items-center gap-1">
+                                                                <AlertCircle className="size-3 shrink-0" />
+                                                                {uniqueWarnings.seal_number}
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 </div>
 
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="container_size" className="text-xs font-semibold text-zinc-700 ml-0.5">Container Size</Label>
-                                                    <Select disabled={processing} value={data.container_size} onValueChange={(value) => setData('container_size', value)}>
+                                                    <Label htmlFor="container_size" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Container Size <span className="text-red-500 ml-0.5">*</span>
+                                                    </Label>
+                                                    <Select disabled={processing} value={data.container_size} onValueChange={(value) => { setData('container_size', value); clearErrors('container_size'); }}>
                                                         <SelectTrigger className="w-full h-11 rounded-xl border-zinc-200 text-sm font-medium text-zinc-900 px-4">
                                                             <SelectValue placeholder="Select size" />
                                                         </SelectTrigger>
@@ -359,34 +597,42 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="space-y-2">
-                                                        <Label htmlFor="vessel_name" className="text-xs font-semibold text-zinc-700 ml-0.5">Vessel Name</Label>
+                                                        <Label htmlFor="vessel_name" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                            Vessel Name <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                        </Label>
                                                         <div className="relative">
                                                             <Ship className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
-                                                            <Input disabled={processing} id="vessel_name" value={data.vessel_name} onChange={(e) => setData('vessel_name', e.target.value)} className="h-11 rounded-xl border-zinc-200 pl-10 font-medium" placeholder="Enter vessel name" />
+                                                            <Input disabled={processing} id="vessel_name" value={data.vessel_name} onChange={(e) => { setData('vessel_name', e.target.value); clearErrors('vessel_name'); }} className="h-11 rounded-xl border-zinc-200 pl-10 font-medium" placeholder="Enter vessel name" />
                                                         </div>
                                                         {errors.vessel_name && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.vessel_name}</p>}
                                                     </div>
 
                                                     <div className="space-y-2">
-                                                        <Label htmlFor="shipping_line" className="text-xs font-semibold text-zinc-700 ml-0.5">Shipping Line</Label>
+                                                        <Label htmlFor="shipping_line" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                            Shipping Line <span className="text-red-500 ml-0.5">*</span>
+                                                        </Label>
                                                         <div className="relative">
                                                             <Anchor className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
-                                                            <Input disabled={processing} id="shipping_line" value={data.shipping_line} onChange={(e) => setData('shipping_line', e.target.value)} className="h-11 rounded-xl border-zinc-200 pl-10 font-medium" placeholder="Carrier name" />
+                                                            <Input required disabled={processing} id="shipping_line" value={data.shipping_line} onChange={(e) => { setData('shipping_line', e.target.value); clearErrors('shipping_line'); }} className="h-11 rounded-xl border-zinc-200 pl-10 font-medium" placeholder="Carrier name" />
                                                         </div>
                                                         {errors.shipping_line && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.shipping_line}</p>}
                                                     </div>
                                                 </div>
 
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="voyage_number" className="text-xs font-semibold text-zinc-700 ml-0.5">Voyage Number</Label>
-                                                    <Input disabled={processing} id="voyage_number" value={data.voyage_number} onChange={(e) => setData('voyage_number', e.target.value)} className="h-11 rounded-xl border-zinc-200 font-mono text-sm font-medium" placeholder="Voyage ID" />
+                                                    <Label htmlFor="voyage_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Voyage Number <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                    </Label>
+                                                    <Input disabled={processing} id="voyage_number" value={data.voyage_number} onChange={(e) => { setData('voyage_number', e.target.value); clearErrors('voyage_number'); }} className="h-11 rounded-xl border-zinc-200 font-mono text-sm font-medium" placeholder="Voyage ID" />
                                                     {errors.voyage_number && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.voyage_number}</p>}
                                                 </div>
 
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="space-y-2">
-                                                        <Label htmlFor="origin_port" className="text-xs font-semibold text-zinc-700 ml-0.5">Origin Port</Label>
-                                                        <Select disabled={processing} value={data.origin_port} onValueChange={(value) => setData('origin_port', value)}>
+                                                        <Label htmlFor="origin_port" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                            Origin Port <span className="text-red-500 ml-0.5">*</span>
+                                                        </Label>
+                                                        <Select disabled={processing} value={data.origin_port} onValueChange={(value) => { setData('origin_port', value); clearErrors('origin_port'); }}>
                                                             <SelectTrigger className="h-11 w-full rounded-xl border-zinc-200 text-sm font-medium text-zinc-900 px-4">
                                                                 <div className="flex items-center gap-2">
                                                                     <MapPin className="size-4 text-emerald-500" />
@@ -405,8 +651,10 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                                     </div>
 
                                                     <div className="space-y-2">
-                                                        <Label htmlFor="destination_port" className="text-xs font-semibold text-zinc-700 ml-0.5">Destination Port</Label>
-                                                        <Select disabled={processing} value={data.destination_port} onValueChange={(value) => setData('destination_port', value)}>
+                                                        <Label htmlFor="destination_port" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                            Destination Port <span className="text-red-500 ml-0.5">*</span>
+                                                        </Label>
+                                                        <Select disabled={processing} value={data.destination_port} onValueChange={(value) => { setData('destination_port', value); clearErrors('destination_port'); }}>
                                                             <SelectTrigger className="h-11 w-full rounded-xl border-zinc-200 text-sm font-medium text-zinc-900 px-4">
                                                                 <div className="flex items-center gap-2">
                                                                     <MapPin className="size-4 text-amber-500" />
@@ -422,6 +670,12 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                                             </SelectContent>
                                                         </Select>
                                                         {errors.destination_port && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.destination_port}</p>}
+                                                        {data.origin_port && data.destination_port && data.origin_port === data.destination_port && (
+                                                            <p className="text-[11px] font-semibold text-amber-600 ml-0.5 mt-1 flex items-center gap-1">
+                                                                <AlertCircle className="size-3 shrink-0" />
+                                                                Destination port cannot be the same as origin port.
+                                                            </p>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -443,15 +697,18 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                             )}
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="cutoff_at" className="text-xs font-semibold text-zinc-700 ml-0.5">Cut-off Date & Time</Label>
+                                                    <Label htmlFor="cutoff_at" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Cut-off Date & Time <span className="text-red-500 ml-0.5">*</span>
+                                                    </Label>
                                                     <div className="relative">
                                                         <CalendarClock className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-sky-500" />
                                                         <Input
+                                                            required
                                                             disabled={processing}
                                                             id="cutoff_at"
                                                             type="datetime-local"
                                                             value={data.cutoff_at}
-                                                            onChange={(e) => handleCutoffChange(e.target.value)}
+                                                            onChange={(e) => { handleCutoffChange(e.target.value); clearErrors('cutoff_at'); }}
                                                             className="h-11 rounded-xl border-zinc-200 pl-10 font-medium text-sm"
                                                         />
                                                     </div>
@@ -461,7 +718,9 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
 
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-between ml-0.5">
-                                                        <Label htmlFor="eta_at" className="text-xs font-semibold text-zinc-700">Estimated Arrival (ETA)</Label>
+                                                        <Label htmlFor="eta_at" className="text-xs font-semibold text-zinc-700">
+                                                            Estimated Arrival (ETA) <span className="text-red-500 ml-0.5">*</span>
+                                                        </Label>
                                                         <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100/60 shadow-sm">
                                                             {getTransitDuration()} Day Transit
                                                         </span>
@@ -469,17 +728,24 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                                     <div className="relative">
                                                         <CalendarClock className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-500" />
                                                         <Input
+                                                            required
                                                             disabled={processing}
                                                             id="eta_at"
                                                             type="datetime-local"
                                                             min={data.cutoff_at}
                                                             value={data.eta_at}
-                                                            onChange={(e) => setData('eta_at', e.target.value)}
+                                                            onChange={(e) => { setData('eta_at', e.target.value); clearErrors('eta_at'); }}
                                                             className="h-11 rounded-xl border-zinc-200 pl-10 font-medium text-sm"
                                                         />
                                                     </div>
                                                     <p className="text-[10px] text-zinc-400 ml-0.5 font-normal italic">Auto-calculated based on {transitDays}-day standard transit duration.</p>
                                                     {errors.eta_at && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.eta_at}</p>}
+                                                    {data.cutoff_at && data.eta_at && new Date(data.eta_at) < new Date(data.cutoff_at) && (
+                                                        <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 flex items-center gap-1">
+                                                            <AlertCircle className="size-3 shrink-0" />
+                                                            Estimated arrival date cannot be earlier than cut-off date.
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -489,20 +755,24 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="capacity_boxes" className="text-xs font-semibold text-zinc-700 ml-0.5">Total Box Capacity</Label>
+                                                    <Label htmlFor="capacity_boxes" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Total Box Capacity <span className="text-red-500 ml-0.5">*</span>
+                                                    </Label>
                                                     <div className="relative">
                                                         <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-sky-500" />
-                                                        <Input disabled={processing} id="capacity_boxes" type="number" min="1" value={data.capacity_boxes} onChange={(e) => setData('capacity_boxes', e.target.value)} className="h-11 rounded-xl border-zinc-200 pl-10 text-sm font-medium" placeholder="340" />
+                                                        <Input required disabled={processing} id="capacity_boxes" type="number" min="1" value={data.capacity_boxes} onChange={(e) => { setData('capacity_boxes', e.target.value); clearErrors('capacity_boxes'); }} className="h-11 rounded-xl border-zinc-200 pl-10 text-sm font-medium" placeholder="340" />
                                                         <div className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-zinc-400">Boxes</div>
                                                     </div>
                                                     <p className="text-[10px] text-zinc-400 ml-0.5 font-normal italic">Approx. capacity for a {data.container_size.replace('_', ' ')} container.</p>
                                                     {errors.capacity_boxes && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.capacity_boxes}</p>}
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <Label htmlFor="capacity_cbm" className="text-xs font-semibold text-zinc-700 ml-0.5">Volume (CBM)</Label>
+                                                    <Label htmlFor="capacity_cbm" className="text-xs font-semibold text-zinc-700 ml-0.5">
+                                                        Volume (CBM) <span className="text-zinc-400 font-normal">(Optional)</span>
+                                                    </Label>
                                                     <div className="relative">
                                                         <Box className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
-                                                        <Input disabled={processing} id="capacity_cbm" type="number" min="0" step="0.001" value={data.capacity_cbm} onChange={(e) => setData('capacity_cbm', e.target.value)} className="h-11 rounded-xl border-zinc-200 pl-10 font-medium text-sm" />
+                                                        <Input disabled={processing} id="capacity_cbm" type="number" min="0" step="0.001" value={data.capacity_cbm} onChange={(e) => { setData('capacity_cbm', e.target.value); clearErrors('capacity_cbm'); }} className="h-11 rounded-xl border-zinc-200 pl-10 font-medium text-sm" />
                                                     </div>
                                                     {errors.capacity_cbm && <p className="text-[11px] font-semibold text-red-500 ml-0.5 mt-1 uppercase tracking-wider">{errors.capacity_cbm}</p>}
                                                 </div>
@@ -511,37 +781,60 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                     )}
                                 </div>
 
-                                <div className="flex justify-between gap-4 pt-6 border-t border-zinc-100 mt-6">
-                                    <button
-                                        type="button"
-                                        onClick={prevStep}
-                                        disabled={currentStep === 0}
-                                        className={cn(
-                                            "h-11 px-6 flex items-center justify-center rounded-xl border border-zinc-200 text-xs font-semibold uppercase tracking-wide transition-all",
-                                            currentStep === 0 ? "opacity-0 pointer-events-none" : "hover:bg-zinc-50 active:scale-[0.98]"
-                                        )}
-                                    >
-                                        <ChevronLeft className="size-4 mr-1.5" /> Back
-                                    </button>
+                                <div className="pt-6 border-t border-zinc-100 mt-6 space-y-3">
+                                    {!canProceedCurrentStep && (
+                                        <div className="p-3 bg-amber-50/90 border border-amber-200/70 rounded-xl flex items-center gap-2.5 text-amber-800 text-xs font-medium animate-in fade-in slide-in-from-bottom-1 duration-200 shadow-sm">
+                                            <AlertCircle className="size-4 shrink-0 text-amber-600" />
+                                            <div className="flex-1">
+                                                <span className="font-semibold text-amber-900 mr-1">Cannot proceed:</span>
+                                                <span>{getStepUnsatisfiedReason(currentStep)}</span>
+                                            </div>
+                                        </div>
+                                    )}
 
-                                    {currentStep < STEPS.length - 1 ? (
+                                    <div className="flex justify-between gap-4">
                                         <button
                                             type="button"
-                                            onClick={nextStep}
-                                            className="h-11 px-8 flex items-center justify-center rounded-xl bg-zinc-950 text-white text-xs font-semibold uppercase tracking-wide transition-all hover:bg-zinc-800 active:scale-[0.98]"
+                                            onClick={prevStep}
+                                            disabled={currentStep === 0}
+                                            className={cn(
+                                                "h-11 px-6 flex items-center justify-center rounded-xl border border-zinc-200 text-xs font-semibold uppercase tracking-wide transition-all",
+                                                currentStep === 0 ? "opacity-0 pointer-events-none" : "hover:bg-zinc-50 active:scale-[0.98]"
+                                            )}
                                         >
-                                            Continue <ChevronRight className="size-4 ml-1.5" />
+                                            <ChevronLeft className="size-4 mr-1.5" /> Back
                                         </button>
-                                    ) : (
-                                        <button
-                                            type="submit"
-                                            disabled={processing}
-                                            className="h-11 px-10 flex items-center justify-center rounded-xl bg-sky-600 text-white text-xs font-semibold uppercase tracking-wide shadow-md shadow-sky-600/10 transition-all hover:bg-sky-700 active:scale-[0.98]"
-                                        >
-                                            {processing ? 'Processing...' : 'Initialize Batch'}
-                                            <Save className="size-4 ml-1.5" />
-                                        </button>
-                                    )}
+
+                                        {currentStep < STEPS.length - 1 ? (
+                                            <button
+                                                type="button"
+                                                onClick={nextStep}
+                                                disabled={!canProceedCurrentStep}
+                                                className={cn(
+                                                    "h-11 px-8 flex items-center justify-center rounded-xl text-xs font-semibold uppercase tracking-wide transition-all",
+                                                    canProceedCurrentStep
+                                                        ? "bg-zinc-950 text-white hover:bg-zinc-800 active:scale-[0.98] shadow-sm cursor-pointer"
+                                                        : "bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-60 pointer-events-none"
+                                                )}
+                                            >
+                                                Continue <ChevronRight className="size-4 ml-1.5" />
+                                            </button>
+                                        ) : (
+                                            <button
+                                                type="submit"
+                                                disabled={processing || !allStepsSatisfied}
+                                                className={cn(
+                                                    "h-11 px-10 flex items-center justify-center rounded-xl text-xs font-semibold uppercase tracking-wide transition-all",
+                                                    !processing && allStepsSatisfied
+                                                        ? "bg-sky-600 text-white shadow-md shadow-sky-600/10 hover:bg-sky-700 active:scale-[0.98] cursor-pointer"
+                                                        : "bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-60"
+                                                )}
+                                            >
+                                                {processing ? 'Processing...' : 'Initialize Batch'}
+                                                <Save className="size-4 ml-1.5" />
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             </form>
                         </div>

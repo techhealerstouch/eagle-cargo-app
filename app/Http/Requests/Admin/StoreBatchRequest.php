@@ -44,7 +44,12 @@ class StoreBatchRequest extends FormRequest
                 'max:20',
                 Rule::unique('batches', 'container_number')->ignore($batchId),
             ],
-            'seal_number' => ['nullable', 'string', 'max:50'],
+            'seal_number' => [
+                'nullable',
+                'string',
+                'max:50',
+                Rule::unique('batches', 'seal_number')->ignore($batchId),
+            ],
             'container_size' => ['required', 'string', 'in:20ft,40ft,40ft_hc'],
             'vessel_name' => ['nullable', 'string', 'max:255'],
             'shipping_line' => ['required', 'string', 'max:255'],

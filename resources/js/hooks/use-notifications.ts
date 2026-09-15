@@ -58,6 +58,10 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
     }, []);
 
     const fetchNotifications = useCallback(async () => {
+        if (!userId) {
+            return;
+        }
+
         const now = Date.now();
 
         if (!globalFetchPromise && cachedData && now - lastFetchTime < 5000) {
@@ -81,13 +85,17 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
                         credentials: 'same-origin',
                     });
 
+                    if (response.status === 401) {
+                        return null as unknown as NotificationsResponse;
+                    }
+
                     if (!response.ok) {
                         throw new Error('Failed to fetch notifications');
                     }
 
                     const data: NotificationsResponse = await response.json();
 
-                    if (data.success) {
+                    if (data?.success) {
                         cachedData = data;
                         lastFetchTime = Date.now();
                     }
@@ -115,9 +123,13 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
                 setIsLoading(false);
             }
         }
-    }, []);
+    }, [userId]);
 
     const fetchUnreadCount = useCallback(async () => {
+        if (!userId) {
+            return;
+        }
+
         try {
             const response = await fetch('/api/notifications/unread-count', {
                 headers: {
@@ -126,6 +138,10 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
                 },
                 credentials: 'same-origin',
             });
+
+            if (response.status === 401) {
+                return;
+            }
 
             if (response.ok) {
                 const data: UnreadCountResponse = await response.json();
@@ -137,7 +153,7 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
         } catch {
             // Polling is a fallback; keep the UI quiet if a single poll fails.
         }
-    }, []);
+    }, [userId]);
 
     const markAsRead = useCallback(async (id: string) => {
         try {
@@ -186,20 +202,20 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
     }, []);
 
     useEffect(() => {
-        if (autoFetch) {
+        if (autoFetch && userId) {
             fetchNotifications();
         }
-    }, [autoFetch, fetchNotifications]);
+    }, [autoFetch, fetchNotifications, userId]);
 
     useEffect(() => {
-        if (!pollInterval || pollInterval <= 0) {
+        if (!pollInterval || pollInterval <= 0 || !userId) {
             return;
         }
 
         const interval = window.setInterval(fetchUnreadCount, pollInterval);
 
         return () => window.clearInterval(interval);
-    }, [fetchUnreadCount, pollInterval]);
+    }, [fetchUnreadCount, pollInterval, userId]);
 
     useEchoNotification(userId ? `App.Models.User.${userId}` : '', (notification) => {
         setNotifications((prev) => [notification as unknown as Notification, ...prev]);

@@ -258,6 +258,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         Route::post('batches/bulk-update-status', [BatchController::class, 'bulkUpdateStatus'])->middleware('throttle:admin-mutations')->name('batches.bulk-update-status');
         Route::delete('batches/bulk-destroy', [BatchController::class, 'bulkDestroy'])->middleware('throttle:admin-mutations')->name('batches.bulk-destroy');
+        Route::get('batches/check-unique', [BatchController::class, 'checkUnique'])->name('batches.check-unique');
         Route::resource('batches', BatchController::class);
         Route::post('batches/{batch}/confirm-manifest', [BatchController::class, 'confirmManifest'])->middleware('throttle:admin-mutations')->name('batches.confirmManifest');
         Route::post('batches/{batch}/confirm-arrival', [BatchController::class, 'confirmArrival'])->middleware('throttle:admin-mutations')->name('batches.confirmArrival');

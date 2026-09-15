@@ -382,15 +382,15 @@ export default function InvoiceShow({ invoice, invoiceSettings }: InvoiceShowPro
                                     <td className="py-3 text-right text-zinc-900 font-black pr-1">{currencySymbol}{totalAmount.toFixed(2)}</td>
                                 </tr>
                                 {settledPayments.map((payment) => (
-                                     <tr key={payment.id} className="text-red-600 font-medium">
-                                         <td className="py-2 text-right pr-4 text-xs">
-                                             Payment Made ({payment.paid_at ? new Date(payment.paid_at).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }) : ''})
-                                         </td>
-                                         <td className="py-2 text-right pr-1 text-xs">
-                                             (-) {currencySymbol}{Number(payment.amount).toFixed(2)}
-                                         </td>
-                                     </tr>
-                                 ))}
+                                    <tr key={payment.id} className="text-red-600 font-medium">
+                                        <td className="py-2 text-right pr-4 text-xs">
+                                            Payment Made ({payment.paid_at ? new Date(payment.paid_at).toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' }) : ''})
+                                        </td>
+                                        <td className="py-2 text-right pr-1 text-xs">
+                                            (-) {currencySymbol}{Number(payment.amount).toFixed(2)}
+                                        </td>
+                                    </tr>
+                                ))}
                                 <tr className="bg-zinc-50 border-t-2 border-zinc-200">
                                     <td className="py-3 text-right text-zinc-900 font-black pr-4">Balance Due</td>
                                     <td className="py-3 text-right text-zinc-900 font-black pr-1">{currencySymbol}{balanceDue.toFixed(2)}</td>
@@ -424,7 +424,8 @@ export default function InvoiceShow({ invoice, invoiceSettings }: InvoiceShowPro
                     </div>
                 </div>
 
-                <style dangerouslySetInnerHTML={{__html: `
+                <style dangerouslySetInnerHTML={{
+                    __html: `
                     @media print {
                         body { background: white !important; padding: 0 !important; }
                         nav, header, footer, .print\\:hidden { display: none !important; }

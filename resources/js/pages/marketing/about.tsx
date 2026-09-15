@@ -23,10 +23,10 @@ export default function About() {
                         Our History
                     </span>
                     <h1 className="text-display-md mb-8">
-About LOVE Box Tracker
+                        About LOVE Box Tracker
                     </h1>
                     <p className="text-lg text-brand-text-mid">
-LOVE Box Tracker was built to
+                        LOVE Box Tracker was built to
                         connect Filipino families across the world.
                     </p>
                 </div>
@@ -34,7 +34,7 @@ LOVE Box Tracker was built to
                     <HeartHandshake className="mb-6 size-16 text-brand-rust" />
                     <h2 className="text-display-sm mb-4">A legacy of care</h2>
                     <p className="mx-auto max-w-2xl text-brand-text-mid">
-A box is not just a corrugated box
+                        A box is not just a corrugated box
                         filled with love, hard work, and longing for home. We
                         exist to ensure that these precious items are treated
                         with the highest level of care, respect, and security.

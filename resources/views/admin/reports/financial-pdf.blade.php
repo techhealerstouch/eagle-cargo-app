@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="utf-8">
     <title>{{ $reportTitle ?? 'Financial Report' }}</title>
     <style>
-        @page { margin: 40px; }
+        @page {
+            margin: 40px;
+        }
+
         body {
             font-family: 'DejaVu Sans', 'Helvetica', 'Arial', sans-serif;
             font-size: 11px;
@@ -15,30 +19,85 @@
         }
 
         /* Typography & Colors */
-        .text-navy { color: #002D5B; }
-        .text-amber { color: #F5A623; }
-        .text-muted { color: #64748b; }
-        .font-bold { font-weight: bold; }
+        .text-navy {
+            color: #002D5B;
+        }
+
+        .text-amber {
+            color: #F5A623;
+        }
+
+        .text-muted {
+            color: #64748b;
+        }
+
+        .font-bold {
+            font-weight: bold;
+        }
 
         /* Header */
-        .header { width: 100%; margin-bottom: 25px; }
-        .report-title { font-size: 22px; font-weight: bold; color: #002D5B; margin: 0; }
-        .accent-line { height: 3px; background-color: #F5A623; width: 100%; margin-top: 5px; margin-bottom: 20px; }
+        .header {
+            width: 100%;
+            margin-bottom: 25px;
+        }
+
+        .report-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #002D5B;
+            margin: 0;
+        }
+
+        .accent-line {
+            height: 3px;
+            background-color: #F5A623;
+            width: 100%;
+            margin-top: 5px;
+            margin-bottom: 20px;
+        }
 
         /* Stat Cards */
-        .stats-grid { width: 100%; border-collapse: separate; border-spacing: 10px 0; margin: 0 -10px 30px -10px; }
+        .stats-grid {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 10px 0;
+            margin: 0 -10px 30px -10px;
+        }
+
         .stat-card {
             background: #ffffff;
             padding: 20px 10px;
             text-align: center;
             border: 1px solid #e2e8f0;
-            border-top: 5px solid #002D5B; /* Navy top border */
+            border-top: 5px solid #002D5B;
+            /* Navy top border */
         }
-        .stat-card-alt { border-top: 5px solid #F5A623; } /* Gold top border */
 
-        .stat-value { font-size: 20px; font-weight: bold; color: #002D5B; margin-bottom: 5px; }
-        .stat-label { font-size: 10px; font-weight: bold; text-transform: uppercase; color: #64748b; }
-        .stat-sub { font-size: 9px; color: #94a3b8; margin-top: 4px; }
+        .stat-card-alt {
+            border-top: 5px solid #F5A623;
+        }
+
+        /* Gold top border */
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #002D5B;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            color: #64748b;
+        }
+
+        .stat-sub {
+            font-size: 9px;
+            color: #94a3b8;
+            margin-top: 4px;
+        }
 
         /* Sections */
         .section-header {
@@ -47,10 +106,21 @@
             margin-bottom: 15px;
             margin-top: 25px;
         }
-        .section-title { font-size: 14px; font-weight: bold; color: #002D5B; text-transform: none; }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #002D5B;
+            text-transform: none;
+        }
 
         /* Tables */
-        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
         th {
             background-color: #002D5B;
             color: #ffffff;
@@ -61,14 +131,35 @@
             font-size: 10px;
             letter-spacing: 0.5px;
         }
-        td { padding: 10px; border-bottom: 1px solid #e2e8f0; }
-        tr:nth-child(even) { background-color: #f1f5f9; } /* Zebra striping */
 
-        .table-total { background-color: #002D5B !important; color: #ffffff; font-weight: bold; }
-        .table-total td { border: none; }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #e2e8f0;
+        }
 
-        .text-right { text-align: right; }
-        .font-mono { font-family: 'Courier', monospace; }
+        tr:nth-child(even) {
+            background-color: #f1f5f9;
+        }
+
+        /* Zebra striping */
+
+        .table-total {
+            background-color: #002D5B !important;
+            color: #ffffff;
+            font-weight: bold;
+        }
+
+        .table-total td {
+            border: none;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .font-mono {
+            font-family: 'Courier', monospace;
+        }
 
         .footer {
             position: fixed;
@@ -82,7 +173,10 @@
             border-top: 1px solid #e2e8f0;
             padding-top: 5px;
         }
-        .page-number:before { content: "Page " counter(page); }
+
+        .page-number:before {
+            content: "Page " counter(page);
+        }
 
         .note-box {
             background: #fefce8;
@@ -93,6 +187,7 @@
             color: #92400e;
             margin-bottom: 15px;
         }
+
         .info-box {
             background: #f0f9ff;
             border: 1px solid #bae6fd;
@@ -104,11 +199,12 @@
         }
     </style>
 </head>
+
 <body>
     @php
-        $reportType = $reportType ?? 'full';
-        $reportTitle = $reportTitle ?? 'Financial Audit Report';
-        $showSection = fn (string $section) => $reportType === 'full' || $reportType === $section;
+    $reportType = $reportType ?? 'full';
+    $reportTitle = $reportTitle ?? 'Financial Audit Report';
+    $showSection = fn (string $section) => $reportType === 'full' || $reportType === $section;
     @endphp
 
     <div class="footer">
@@ -154,9 +250,9 @@
                     <div class="stat-value">{{ $currencySymbol }}{{ number_format($stats['total_invoiced'], 2) }}</div>
                     <div class="stat-label">Total Invoiced</div>
                     @php
-                        $invoicedTrend = $stats['prev_total_invoiced'] > 0
-                            ? (($stats['total_invoiced'] - $stats['prev_total_invoiced']) / $stats['prev_total_invoiced']) * 100
-                            : 0;
+                    $invoicedTrend = $stats['prev_total_invoiced'] > 0
+                    ? (($stats['total_invoiced'] - $stats['prev_total_invoiced']) / $stats['prev_total_invoiced']) * 100
+                    : 0;
                     @endphp
                     <div class="stat-sub" style="color: {{ $invoicedTrend >= 0 ? '#16a34a' : '#dc2626' }};">
                         {{ $invoicedTrend >= 0 ? '▲' : '▼' }} {{ number_format(abs($invoicedTrend), 1) }}% vs Prev. Period
@@ -168,9 +264,9 @@
                     <div class="stat-value" style="color: #9333ea;">{{ $currencySymbol }}{{ number_format($stats['total_commissions'], 2) }}</div>
                     <div class="stat-label">Total Commissions</div>
                     @php
-                        $commissionsTrend = $stats['prev_total_commissions'] > 0
-                            ? (($stats['total_commissions'] - $stats['prev_total_commissions']) / $stats['prev_total_commissions']) * 100
-                            : 0;
+                    $commissionsTrend = $stats['prev_total_commissions'] > 0
+                    ? (($stats['total_commissions'] - $stats['prev_total_commissions']) / $stats['prev_total_commissions']) * 100
+                    : 0;
                     @endphp
                     <div class="stat-sub" style="color: {{ $commissionsTrend >= 0 ? '#16a34a' : '#dc2626' }};">
                         {{ $commissionsTrend >= 0 ? '▲' : '▼' }} {{ number_format(abs($commissionsTrend), 1) }}% vs Prev. Period
@@ -182,9 +278,9 @@
                     <div class="stat-value" style="color: #2563eb;">{{ $currencySymbol }}{{ number_format($stats['net_revenue'], 2) }}</div>
                     <div class="stat-label">Net Revenue</div>
                     @php
-                        $netRevenueTrend = $stats['prev_net_revenue'] > 0
-                            ? (($stats['net_revenue'] - $stats['prev_net_revenue']) / $stats['prev_net_revenue']) * 100
-                            : 0;
+                    $netRevenueTrend = $stats['prev_net_revenue'] > 0
+                    ? (($stats['net_revenue'] - $stats['prev_net_revenue']) / $stats['prev_net_revenue']) * 100
+                    : 0;
                     @endphp
                     <div class="stat-sub" style="color: {{ $netRevenueTrend >= 0 ? '#16a34a' : '#dc2626' }};">
                         {{ $netRevenueTrend >= 0 ? '▲' : '▼' }} {{ number_format(abs($netRevenueTrend), 1) }}% vs Prev. Period
@@ -292,10 +388,10 @@
     @if($showSection('tax'))
     {{-- VAT & Tax Summary — only show detailed cards when VAT data is present --}}
     @php
-        $taxLabel = $taxLabel ?? 'GST';
-        $hasVatData = ($stats['vat_stats']->vatable_sales ?? 0) > 0
-            || ($stats['vat_stats']->vat_amount ?? 0) > 0
-            || ($stats['vat_stats']->vat_exempt_sales ?? 0) > 0;
+    $taxLabel = $taxLabel ?? 'GST';
+    $hasVatData = ($stats['vat_stats']->vatable_sales ?? 0) > 0
+    || ($stats['vat_stats']->vat_amount ?? 0) > 0
+    || ($stats['vat_stats']->vat_exempt_sales ?? 0) > 0;
     @endphp
 
     <div class="section-header">
@@ -427,7 +523,7 @@
                     </thead>
                     <tbody>
                         @php
-                            $totalAging = array_sum($stats['aging_buckets']);
+                        $totalAging = array_sum($stats['aging_buckets']);
                         @endphp
                         <tr>
                             <td>Current (Not yet due)</td>
@@ -492,8 +588,8 @@
         <tbody>
             @foreach($stats['outstanding_report'] as $inv)
             @php
-                $paid = $inv->payments->sum('amount');
-                $balance = $inv->amount - $paid;
+            $paid = $inv->payments->sum('amount');
+            $balance = $inv->amount - $paid;
             @endphp
             <tr>
                 <td>{{ $inv->due_date ? \Carbon\Carbon::parse($inv->due_date)->format('M d, Y') : 'N/A' }}</td>
@@ -562,4 +658,5 @@
     @endif
 
 </body>
+
 </html>

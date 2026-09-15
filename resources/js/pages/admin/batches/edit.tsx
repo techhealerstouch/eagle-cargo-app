@@ -544,7 +544,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="space-y-2">
                                                         <Label htmlFor="container_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                            Container Reference
+                                                            Container Reference <span className="text-zinc-400 font-normal">(Optional)</span>
                                                         </Label>
                                                         <div className="relative">
                                                             <Container className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
@@ -566,7 +566,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
                                                     <div className="space-y-2">
                                                         <Label htmlFor="seal_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                            Seal Number
+                                                            Seal Number <span className="text-zinc-400 font-normal">(Optional)</span>
                                                         </Label>
                                                         <div className="relative">
                                                             <Anchor className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
@@ -589,7 +589,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
                                                 <div className="space-y-2">
                                                     <Label htmlFor="container_size" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                        Container Size
+                                                        Container Size <span className="text-red-500 ml-0.5">*</span>
                                                     </Label>
                                                     <Select
                                                         disabled={processing}
@@ -622,7 +622,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="space-y-2">
                                                         <Label htmlFor="vessel_name" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                            Vessel Name
+                                                            Vessel Name <span className="text-zinc-400 font-normal">(Optional)</span>
                                                         </Label>
                                                         <div className="relative">
                                                             <Ship className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
@@ -644,11 +644,12 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
                                                     <div className="space-y-2">
                                                         <Label htmlFor="shipping_line" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                            Shipping Line
+                                                            Shipping Line <span className="text-red-500 ml-0.5">*</span>
                                                         </Label>
                                                         <div className="relative">
                                                             <Anchor className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
                                                             <Input
+                                                                required
                                                                 disabled={processing}
                                                                 id="shipping_line"
                                                                 value={data.shipping_line}
@@ -667,7 +668,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
                                                 <div className="space-y-2">
                                                     <Label htmlFor="voyage_number" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                        Voyage Number
+                                                        Voyage Number <span className="text-zinc-400 font-normal">(Optional)</span>
                                                     </Label>
                                                     <Input
                                                         disabled={processing}
@@ -687,7 +688,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                                     <div className="space-y-2">
                                                         <Label htmlFor="origin_port" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                            Origin Port
+                                                            Origin Port <span className="text-red-500 ml-0.5">*</span>
                                                         </Label>
                                                         <Select
                                                             disabled={processing}
@@ -717,7 +718,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
                                                     <div className="space-y-2">
                                                         <Label htmlFor="destination_port" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                            Destination Port
+                                                            Destination Port <span className="text-red-500 ml-0.5">*</span>
                                                         </Label>
                                                         <Select
                                                             disabled={processing}
@@ -755,11 +756,12 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="space-y-2">
                                                     <Label htmlFor="cutoff_at" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                        Cut-off Date & Time
+                                                        Cut-off Date & Time <span className="text-red-500 ml-0.5">*</span>
                                                     </Label>
                                                     <div className="relative">
                                                         <CalendarClock className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-sky-500" />
                                                         <Input
+                                                            required
                                                             disabled={processing}
                                                             id="cutoff_at"
                                                             type="datetime-local"
@@ -781,7 +783,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                 <div className="space-y-2">
                                                     <div className="flex items-center justify-between ml-0.5">
                                                         <Label htmlFor="eta_at" className="text-xs font-semibold text-zinc-700">
-                                                            Estimated Arrival (ETA)
+                                                            Estimated Arrival (ETA) <span className="text-red-500 ml-0.5">*</span>
                                                         </Label>
                                                         <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-100/60 shadow-sm">
                                                             {getTransitDuration()} Day Transit
@@ -790,6 +792,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                     <div className="relative">
                                                         <CalendarClock className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-500" />
                                                         <Input
+                                                            required
                                                             disabled={processing}
                                                             id="eta_at"
                                                             type="datetime-local"
@@ -818,11 +821,12 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                             <div className="grid grid-cols-1 gap-6">
                                                 <div className="space-y-2">
                                                     <Label htmlFor="capacity_boxes" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                        Total Box Capacity
+                                                        Total Box Capacity <span className="text-red-500 ml-0.5">*</span>
                                                     </Label>
                                                     <div className="relative">
                                                         <Package className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-sky-500" />
                                                         <Input
+                                                            required
                                                             disabled={processing}
                                                             id="capacity_boxes"
                                                             type="number"
@@ -848,7 +852,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
 
                                                 <div className="space-y-2">
                                                     <Label htmlFor="capacity_cbm" className="text-xs font-semibold text-zinc-700 ml-0.5">
-                                                        Volume (CBM)
+                                                        Volume (CBM) <span className="text-zinc-400 font-normal">(Optional)</span>
                                                     </Label>
                                                     <div className="relative">
                                                         <Box className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />

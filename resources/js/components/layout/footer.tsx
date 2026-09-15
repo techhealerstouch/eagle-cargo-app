@@ -21,7 +21,7 @@ export function Footer() {
                         </Link>
                         <p className="text-sm leading-relaxed text-zinc-400">
                             Delivering love inside every box. The most reliable
-box cargo service connecting families with
+                            box cargo service connecting families with
                             care since 2026.
                         </p>
                         <div className="flex gap-4">
@@ -56,7 +56,7 @@ box cargo service connecting families with
                                     href="/services"
                                     className="transition hover:text-brand-primary"
                                 >
-Box Tracker
+                                    Box Tracker
                                 </Link>
                             </li>
                             <li>

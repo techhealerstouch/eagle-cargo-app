@@ -37,32 +37,32 @@ function DeclarationDocument({ booking, box, boxIndex, sender, cert, declaration
 
     const recipientName = (r: any) => {
         if (r.name) {
-return r.name;
-}
+            return r.name;
+        }
 
         return `${r.first_name || ''} ${r.last_name || ''}`.trim() || '';
     };
 
     const formatDate = (date: any) => {
         if (!date) {
-return '';
-}
+            return '';
+        }
 
         try {
             return new Date(date).toLocaleDateString('en-AU', { day: '2-digit', month: 'long', year: 'numeric' });
         } catch {
- return String(date); 
-}
+            return String(date);
+        }
     };
 
     const getMonthBatch = () => {
         if (box.batch?.batch_number) {
-return box.batch.batch_number;
-}
+            return box.batch.batch_number;
+        }
 
         if (box.batch_number) {
-return box.batch_number;
-}
+            return box.batch_number;
+        }
 
         if (booking.preferred_date) {
             return new Date(booking.preferred_date)
@@ -546,7 +546,7 @@ export default function PrintDeclaration({ booking, declarationSettings }: Props
                                         <p className="text-xs text-zinc-400 mt-0.5">{box.items.length} item(s) declared</p>
                                     </div>
                                     <div className="text-zinc-300 group-hover:text-zinc-900 transition-colors">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>
                                     </div>
                                 </div>
                             </button>
@@ -561,7 +561,8 @@ export default function PrintDeclaration({ booking, declarationSettings }: Props
         <div className="min-h-screen bg-white p-8 font-sans text-zinc-900 print:p-0">
             <Head title={`${declarationSettings.headerText} — ${booking.reference_number}`} />
 
-            <style dangerouslySetInnerHTML={{ __html: `
+            <style dangerouslySetInnerHTML={{
+                __html: `
                 @media print {
                     @page { margin: 1.2cm; }
                     .no-print { display: none !important; }
