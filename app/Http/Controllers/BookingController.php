@@ -232,7 +232,7 @@ class BookingController extends Controller
                 $response['stripeKey'] = config('services.stripe.key');
             } catch (\Exception $e) {
                 return response()->json([
-                    'error' => 'Could not initialize Stripe: '.$e->getMessage(),
+                    'error' => 'Could not initialize Stripe: ' . $e->getMessage(),
                     'booking_id' => $booking->id,
                 ], 500);
             }
@@ -263,7 +263,7 @@ class BookingController extends Controller
         $pdf = Pdf::loadView('admin.invoices.pdf', compact('invoice', 'invoiceSettings', 'senderSnapshot', 'bookingSnapshot', 'lineItemsSnapshot', 'adminTeamSnapshot'))
             ->setPaper('a4', 'portrait');
 
-        return $pdf->stream($invoice->invoice_number.'.pdf');
+        return $pdf->stream($invoice->invoice_number . '.pdf');
     }
 
     public function pay(Booking $booking, SettingsService $settingsService)
@@ -281,9 +281,10 @@ class BookingController extends Controller
         $booking->load('boxes');
         $totalAmount = $booking->boxes->sum('price_charged');
         if ($totalAmount <= 0) {
-            return redirect()->route('sender.bookings')->with('error',
-                'Cannot proceed to payment: booking total amount is $0. '.
-                'Please contact support to check price configuration for your boxes.'
+            return redirect()->route('sender.bookings')->with(
+                'error',
+                'Cannot proceed to payment: booking total amount is $0. ' .
+                    'Please contact support to check price configuration for your boxes.'
             );
         }
 
@@ -330,14 +331,14 @@ class BookingController extends Controller
 
         if ($request->hasFile('proof_of_payment')) {
             if ($booking->proof_of_payment) {
-                Log::info('Proof of payment file overwritten/updated. booking_id='.$booking->id.' old_file_path='.$booking->proof_of_payment.' user_id='.$user->getAuthIdentifier().' ip='.request()->ip());
+                Log::info('Proof of payment file overwritten/updated. booking_id=' . $booking->id . ' old_file_path=' . $booking->proof_of_payment . ' user_id=' . $user->getAuthIdentifier() . ' ip=' . request()->ip());
                 Storage::disk('public')->delete($booking->proof_of_payment);
             }
 
             $path = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
             $booking->update(['proof_of_payment' => $path]);
 
-            Log::info('Proof of payment file uploaded successfully. booking_id='.$booking->id.' new_file_path='.$path.' user_id='.$user->getAuthIdentifier().' ip='.request()->ip());
+            Log::info('Proof of payment file uploaded successfully. booking_id=' . $booking->id . ' new_file_path=' . $path . ' user_id=' . $user->getAuthIdentifier() . ' ip=' . request()->ip());
 
             return redirect()->back()->with('success', 'Proof of payment uploaded successfully. Our team will review it shortly.');
         }
@@ -349,8 +350,10 @@ class BookingController extends Controller
     {
         // Check Ownership & Status — allow editing Pending and Draft bookings
         $user = Auth::user();
-        if (! $user->sender || $booking->sender_id !== $user->sender->id
-            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
+        if (
+            ! $user->sender || $booking->sender_id !== $user->sender->id
+            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])
+        ) {
             return redirect()->route('sender.bookings')->with('error', 'Booking cannot be edited at this stage or you do not have permission.');
         }
 
@@ -377,8 +380,10 @@ class BookingController extends Controller
     public function update(StoreBookingRequest $request, Booking $booking)
     {
         $user = Auth::user();
-        if (! $user->sender || $booking->sender_id !== $user->sender->id
-            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
+        if (
+            ! $user->sender || $booking->sender_id !== $user->sender->id
+            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])
+        ) {
             abort(403, 'Unauthorized amendment attempt.');
         }
 
@@ -560,10 +565,10 @@ class BookingController extends Controller
     private function hasUnpaidCancellationFees(?Sender $sender): bool
     {
         if (! $sender) return false;
-        
-        return $sender->bookings()->whereHas('invoice', function($q) {
+
+        return $sender->bookings()->whereHas('invoice', function ($q) {
             $q->where('status', \App\Enums\InvoiceStatus::Unpaid)
-              ->where('is_cancellation_fee', true);
+                ->where('is_cancellation_fee', true);
         })->exists();
     }
 }

@@ -46,8 +46,8 @@ class TrackingStepService
     {
         $validated = collect($steps)->map(function ($step, $index) {
             return [
-                'key' => $step['key'] ?? 'step_'.($index + 1),
-                'label' => $step['label'] ?? 'Step '.($index + 1),
+                'key' => $step['key'] ?? 'step_' . ($index + 1),
+                'label' => $step['label'] ?? 'Step ' . ($index + 1),
                 'phase' => $step['phase'] ?? 'Origin',
                 'order' => $index + 1,
                 'icon' => $step['icon'] ?? 'circle',

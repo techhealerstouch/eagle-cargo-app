@@ -632,6 +632,7 @@
     $appSubtitle = $cleanCopy($declarationSettings['appSubtitle'] ?? null, 'Door to Door Sea Cargo');
     $termsColumns = $splitTermsColumns($loadTermsData());
     $certification = isset($booking) ? ($booking->declaration_data['certification'] ?? []) : [];
+    /** @var string|null $signature */
     $signature = $certification['signature'] ?? null;
     $dateSigned = $certification['date_signed'] ?? ($certification['date'] ?? ($certification['signed_at'] ?? null));
     $printedName = $certification['signed_by'] ?? '';
@@ -676,6 +677,12 @@
             : trim(($savedRecipient['city'] ?? '') . ', ' . ($savedRecipient['province'] ?? '') . ' ' . ($savedRecipient['country'] ?? 'Philippines') . ' ' . ($savedRecipient['postcode'] ?? ''), ' ,');
         $recipientPhone = $recipient->phone_number ?? ($savedRecipient['mobile'] ?? '');
         $recipientEmail = $recipient->email ?? ($savedRecipient['email'] ?? '');
+
+        $certification = isset($booking) ? ($booking->declaration_data['certification'] ?? []) : [];
+        /** @var string|null $signature */
+        $signature = $certification['signature'] ?? null;
+        $dateSigned = $certification['date_signed'] ?? ($certification['date'] ?? ($certification['signed_at'] ?? null));
+        $printedName = $certification['signed_by'] ?? '';
     @endphp
 
     <div class="page page-break">
@@ -941,7 +948,7 @@
                         <td style="width: 36%; padding: 0 1.5%;">
                             <span class="field-label">Consignor / Sender Signature</span>
                             <div class="signature-box">
-                                @if($signature)
+                                @if(!empty($signature))
                                     <img src="{{ $signature }}">
                                 @else
                                     <span class="placeholder">Physical Signature Required</span>
@@ -995,7 +1002,7 @@
         </div>
     </div>
 
-    <div class="page" style="{{ $pageIndex < $boxCount - 1 ? 'page-break-after: always;' : '' }}">
+    <div class="page {{ $pageIndex < $boxCount - 1 ? 'page-break' : '' }}">
         <table class="masthead">
             <tr>
                 <td style="width: 23%;">

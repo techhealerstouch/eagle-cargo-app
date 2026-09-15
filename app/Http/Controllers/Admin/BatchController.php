@@ -63,6 +63,28 @@ class BatchController extends Controller
         ]);
     }
 
+    /**
+     * Real-time uniqueness check for batch fields (container number, seal number, batch number).
+     */
+    public function checkUnique(Request $request)
+    {
+        $validated = $request->validate([
+            'field' => 'required|string|in:container_number,batch_number,seal_number',
+            'value' => 'required|string|max:255',
+            'exclude_id' => 'nullable|integer|exists:batches,id',
+        ]);
+
+        $query = Batch::where($validated['field'], $validated['value']);
+
+        if (! empty($validated['exclude_id'])) {
+            $query->where('id', '!=', $validated['exclude_id']);
+        }
+
+        return response()->json([
+            'available' => ! $query->exists(),
+        ]);
+    }
+
     public function store(StoreBatchRequest $request, BatchService $batchService): RedirectResponse
     {
         $batchService->create($request->validated());

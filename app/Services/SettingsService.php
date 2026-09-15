@@ -35,7 +35,7 @@ class SettingsService
      */
     public function get(string $key, $default = null)
     {
-        $setting = Cache::rememberForever(self::SETTING_CACHE_PREFIX.$key, function () use ($key) {
+        $setting = Cache::rememberForever(self::SETTING_CACHE_PREFIX . $key, function () use ($key) {
             return Setting::where('key', $key)->first();
         });
 
@@ -52,7 +52,7 @@ class SettingsService
      */
     public function getGroup(string $group)
     {
-        return Cache::rememberForever(self::GROUP_CACHE_PREFIX.$group, function () use ($group) {
+        return Cache::rememberForever(self::GROUP_CACHE_PREFIX . $group, function () use ($group) {
             return Setting::where('group', $group)->get()->pluck('value', 'key');
         });
     }
@@ -66,7 +66,7 @@ class SettingsService
 
         return [
             'logo' => $settings->get('invoice_logo') ?: null,
-            'companyName' => $settings->get('invoice_company_name', 'Love Balikbayan Box Cargo'),
+            'companyName' => $settings->get('invoice_company_name', 'Eagle Cargo'),
             'address' => $settings->get('invoice_address', "6 Ivan St\nArundel Queensland 4214\nAustralia"),
             'phone' => $settings->get('invoice_phone', '+61 406 828 471'),
             'abn' => $settings->get('invoice_abn', '57237419483'),
@@ -75,8 +75,8 @@ class SettingsService
             'bankAccount' => $settings->get('invoice_bank_account', '1097 5991'),
             'taxRate' => (float) $settings->get('invoice_tax_rate', '0.10'),
             'taxLabel' => $settings->get('invoice_tax_label', 'GST'),
-            'terms' => $settings->get('invoice_terms', 'Thank you for your business. Orient Freight\'s Terms and Conditions can be found at https://love.balikbayan.box.com.au/terms-and-conditions/'),
-            'footer' => $settings->get('invoice_footer', 'Love Balikbayan Box Cargo'),
+            'terms' => $settings->get('invoice_terms', 'Thank you for your business. Orient Freight\'s Terms and Conditions can be found at https://eaglecargo.com.au/terms-and-conditions/'),
+            'footer' => $settings->get('invoice_footer', 'Eagle Cargo'),
             'currencySymbol' => $this->get('app_currency_symbol', '$'),
         ];
     }
@@ -89,10 +89,10 @@ class SettingsService
         $settings = $this->getGroup('general');
 
         return [
-            'appName' => $settings->get('app_name', 'Love Balikbayan Box'),
+            'appName' => $settings->get('app_name', 'Eagle Cargo'),
             'appSubtitle' => $settings->get('app_subtitle', 'SEA CARGO'),
             'appLogo' => $this->assetUrl($settings->get('app_logo') ?: '/images/eagle_logo.png'),
-            'supportEmail' => $settings->get('app_support_email', 'support@love-balikbayan.com.au'),
+            'supportEmail' => $settings->get('app_support_email', 'support@eaglecargo.com.au'),
             'contactPhone' => $settings->get('app_contact_phone', '+61 406 828 471'),
             'currency' => $settings->get('app_default_currency', 'AUD'),
             'currencySymbol' => $this->get('app_currency_symbol', '$'),
@@ -144,7 +144,7 @@ class SettingsService
 
         return [
             'logo' => $invoiceSettings->get('invoice_logo') ?: null,
-            'appName' => $generalSettings->get('app_name', 'Love Balikbayan Box'),
+            'appName' => $generalSettings->get('app_name', 'Eagle Cargo'),
             'appSubtitle' => $generalSettings->get('app_subtitle', 'SEA CARGO'),
             'headerText' => $settings->get('declaration_header_text', "Shipper's Export Declaration"),
             'subtitle' => $settings->get('declaration_subtitle', "Shipper's Packing List - Balikbayan Box"),
@@ -153,7 +153,7 @@ class SettingsService
             'formInfo' => $settings->get('declaration_form_info', 'Form 291-B Revised 2026'),
             'prohibitedTitle' => $settings->get('declaration_prohibited_title', 'Prohibited Items Notice:'),
             'prohibitedNotice' => $settings->get('declaration_prohibited_notice', 'Firearms, ammunition, illegal drugs, explosives, flammable materials, live animals, counterfeit goods, and other hazardous materials are strictly prohibited. This document is a legally binding declaration under the Customs Modernization and Tariff Act (CMTA) of the Philippines.'),
-            'brandName' => $settings->get('declaration_brand_name', 'Love Balikbayan Logistics System'),
+            'brandName' => $settings->get('declaration_brand_name', 'Eagle Cargo Logistics System'),
             'originLocation' => $settings->get('declaration_origin_location', 'Victoria, Australia'),
             'instructions' => $settings->get('declaration_instructions', 'Please declare all items in your Balikbayan box.'),
             'footerText' => $settings->get('declaration_footer_text', 'I declare that the information provided is true and accurate.'),
@@ -186,10 +186,10 @@ class SettingsService
      */
     public function forget(string $key, ?string $group = null): void
     {
-        Cache::forget(self::SETTING_CACHE_PREFIX.$key);
+        Cache::forget(self::SETTING_CACHE_PREFIX . $key);
 
         if ($group !== null && $group !== '') {
-            Cache::forget(self::GROUP_CACHE_PREFIX.$group);
+            Cache::forget(self::GROUP_CACHE_PREFIX . $group);
         }
     }
 
@@ -198,7 +198,7 @@ class SettingsService
      */
     public function forgetGroup(string $group): void
     {
-        Cache::forget(self::GROUP_CACHE_PREFIX.$group);
+        Cache::forget(self::GROUP_CACHE_PREFIX . $group);
     }
 
     /**
@@ -232,7 +232,7 @@ class SettingsService
         $path = preg_replace('#^/?public/#', '', $path);
 
         if (! str_starts_with($path, '/')) {
-            $path = str_starts_with($path, 'storage/') ? '/'.$path : '/'.$path;
+            $path = str_starts_with($path, 'storage/') ? '/' . $path : '/' . $path;
         }
 
         return asset(implode('/', array_map('rawurlencode', explode('/', ltrim($path, '/')))));

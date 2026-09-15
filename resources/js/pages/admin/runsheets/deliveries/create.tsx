@@ -126,7 +126,7 @@ export default function DeliveryRunsheetsCreate({
             const matchesSearch = u.name.toLowerCase().includes(assigneeSearchTerm.toLowerCase()) ||
                 u.email?.toLowerCase().includes(assigneeSearchTerm.toLowerCase()) ||
                 u.courier?.mobile?.includes(assigneeSearchTerm);
-                
+
             const matchesArea = selectedArea === 'all' || !u.courier?.area?.name || u.courier?.area?.name === selectedArea;
 
             return matchesSearch && matchesArea;
@@ -420,8 +420,8 @@ export default function DeliveryRunsheetsCreate({
                                                                     setIsCourierModalOpen(false);
                                                                 }}
                                                                 className={`group relative p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-4 ${isSelected
-                                                                        ? 'border-brand-secondary bg-brand-warm/50 ring-4 ring-brand-secondary/5'
-                                                                        : 'border-brand-sand/50 bg-white hover:border-brand-secondary/30 hover:bg-brand-warm/10'
+                                                                    ? 'border-brand-secondary bg-brand-warm/50 ring-4 ring-brand-secondary/5'
+                                                                    : 'border-brand-sand/50 bg-white hover:border-brand-secondary/30 hover:bg-brand-warm/10'
                                                                     }`}
                                                             >
                                                                 <div className={`size-12 rounded-xl flex items-center justify-center text-xs font-black transition-all ${isSelected ? 'bg-brand-secondary text-white' : 'bg-brand-warm/50 text-brand-secondary'
@@ -527,8 +527,8 @@ export default function DeliveryRunsheetsCreate({
                                 type="button"
                                 onClick={handleSelectAll}
                                 className={`flex items-center justify-center gap-3 px-8 h-12 rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest transition-all ${isAllFilteredSelected
-                                        ? 'bg-brand-secondary text-white shadow-lg'
-                                        : 'bg-white border border-brand-sand text-brand-secondary hover:border-brand-secondary hover:bg-brand-warm/10'
+                                    ? 'bg-brand-secondary text-white shadow-lg'
+                                    : 'bg-white border border-brand-sand text-brand-secondary hover:border-brand-secondary hover:bg-brand-warm/10'
                                     }`}
                             >
                                 {isAllFilteredSelected ? <CheckSquare className="size-4" /> : <Square className="size-4" />}
@@ -553,8 +553,8 @@ export default function DeliveryRunsheetsCreate({
                                                     setData('box_ids', ids.includes(box.id) ? ids.filter(id => id !== box.id) : [...ids, box.id]);
                                                 }}
                                                 className={`group flex flex-col p-6 rounded-[2.5rem] border-2 transition-all cursor-pointer relative overflow-hidden ${isSelected
-                                                        ? 'border-brand-secondary bg-white ring-8 ring-brand-secondary/5'
-                                                        : 'border-brand-sand/30 bg-white/60 hover:bg-white hover:border-brand-secondary/40'
+                                                    ? 'border-brand-secondary bg-white ring-8 ring-brand-secondary/5'
+                                                    : 'border-brand-sand/30 bg-white/60 hover:bg-white hover:border-brand-secondary/40'
                                                     }`}
                                             >
                                                 {/* Selection Badge */}
@@ -617,7 +617,7 @@ export default function DeliveryRunsheetsCreate({
                                         </div>
                                         <h3 className="text-sm font-black text-brand-text uppercase tracking-[0.3em]">No Match Found</h3>
                                         <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest mt-3 text-center max-w-sm px-8">
-                                            {data.courier_id 
+                                            {data.courier_id
                                                 ? "No boxes found for this courier's hub area. Try clearing the courier selection to view other areas."
                                                 : "We couldn't find any boxes matching your criteria. Try adjusting your filters or checking the warehouse status."}
                                         </p>

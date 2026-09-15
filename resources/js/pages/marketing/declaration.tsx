@@ -195,23 +195,21 @@ function StepIndicator({ step }: { step: number }) {
                 return (
                     <div
                         key={item.id}
-                        className={`rounded-2xl border p-4 transition-all ${
-                            isActive
+                        className={`rounded-2xl border p-4 transition-all ${isActive
                                 ? 'border-sky-500 bg-sky-50'
                                 : isDone
                                     ? 'border-emerald-300 bg-emerald-50'
                                     : 'border-zinc-200 bg-white'
-                        }`}
+                            }`}
                     >
                         <div className="flex items-center gap-3">
                             <div
-                                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
-                                    isDone
+                                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isDone
                                         ? 'bg-emerald-500 text-white'
                                         : isActive
                                             ? 'bg-sky-500 text-white'
                                             : 'bg-zinc-200 text-zinc-600'
-                                }`}
+                                    }`}
                             >
                                 {isDone ? <CheckCircle2 className="size-4" /> : item.id}
                             </div>
@@ -1134,7 +1132,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
                                                 className={baseInputClass}
                                                 value={shipment.office_date}
                                                 disabled
-                                                onChange={() => {}}
+                                                onChange={() => { }}
                                                 title="Date Processed"
                                             />
                                         </Field>
