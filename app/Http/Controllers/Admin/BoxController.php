@@ -19,8 +19,10 @@ use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Repositories\Contracts\BoxRepositoryInterface;
 use App\Services\TrackingCacheService;
+use App\Services\TrackingStepService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
@@ -109,20 +111,27 @@ class BoxController extends Controller
         $overrideReason = $validated['admin_delivery_override_reason'] ?? null;
         unset($validated['admin_delivery_override_reason']);
 
-        if (!$request->boolean('update_eta')) {
-            unset($validated['eta_date']);
-            unset($validated['eta_message']);
-        }
-        if (!$request->boolean('update_estimate_delivery')) {
-            unset($validated['estimate_delivery_date']);
-            unset($validated['estimate_delivery_message']);
-        }
-        unset($validated['update_eta']);
-        unset($validated['update_estimate_delivery']);
-
         $newStatus = $validated['status'] ?? null;
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         // Do not unset tracking_step_key so it gets saved to the boxes table
+
+        $stepService = app(TrackingStepService::class);
+        if ($trackingStepKey) {
+            if (! $stepService->isValidStepKey($trackingStepKey)) {
+                throw ValidationException::withMessages([
+                    'tracking_step_key' => "The selected tracking step key [{$trackingStepKey}] is invalid.",
+                ]);
+            }
+
+            $newOrder = $stepService->getStepOrder($trackingStepKey);
+            $currentOrder = $this->resolveBoxJourneyOrder($box, $stepService);
+
+            if ($currentOrder !== null && $newOrder !== null && $newOrder < $currentOrder && blank($overrideReason)) {
+                throw ValidationException::withMessages([
+                    'tracking_step_key' => "Cannot select a tracking step that regresses journey progression (from step order {$currentOrder} to {$newOrder}).",
+                ]);
+            }
+        }
 
         $currentStatusValue = $box->status instanceof BoxStatus ? $box->status->value : $box->status;
         $statusChanged = $newStatus && $currentStatusValue !== $newStatus;
@@ -136,25 +145,29 @@ class BoxController extends Controller
             }
 
             unset($validated['status']);
-            $box->update($validated);
-
             $notes = !empty($validated['courier_notes']) ? $validated['courier_notes'] : 'Status updated by Admin';
 
-            $boxRepo->updateStatus(
-                $box,
-                $newStatus ?? $currentStatusValue,
-                $notes,
-                Auth::id(),
-                deliveryOverrideReason: $overrideReason,
-                bypassValidation: true,
-                trackingStepKey: $trackingStepKey
-            );
+            try {
+                DB::transaction(function () use ($box, $boxRepo, $validated, $newStatus, $currentStatusValue, $notes, $overrideReason, $trackingStepKey) {
+                    $box->update($validated);
+
+                    $boxRepo->updateStatus(
+                        $box,
+                        $newStatus ?? $currentStatusValue,
+                        $notes,
+                        Auth::id(),
+                        deliveryOverrideReason: $overrideReason,
+                        bypassValidation: !blank($overrideReason),
+                        trackingStepKey: $trackingStepKey
+                    );
+                });
+            } catch (\RuntimeException $e) {
+                return redirect()->back()->withInput()->with('error', $e->getMessage());
+            } catch (\InvalidArgumentException $e) {
+                return redirect()->back()->withInput()->with('error', $e->getMessage());
+            }
         } else {
             $box->update($validated);
-        }
-
-        if (array_key_exists('eta_date', $validated) || array_key_exists('eta_message', $validated) || array_key_exists('estimate_delivery_date', $validated) || array_key_exists('estimate_delivery_message', $validated)) {
-            app(\App\Services\TrackingCacheService::class)->forgetBox($box);
         }
 
         $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.boxes.index') ?? session('admin_return_url') ?? route('admin.boxes.index');
@@ -169,7 +182,18 @@ class BoxController extends Controller
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'status' => 'nullable|string', // The new status to set
-            'tracking_step_key' => 'nullable|string',
+            'tracking_step_key' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        $stepService = app(TrackingStepService::class);
+                        if (! $stepService->isValidStepKey($value)) {
+                            $fail("The selected tracking step key [{$value}] is invalid.");
+                        }
+                    }
+                },
+            ],
             'filter_status' => 'nullable|string', // The status filter applied to the view
             'area_id' => 'nullable|exists:areas,id',
             'batch_id' => 'nullable|string',
@@ -198,6 +222,8 @@ class BoxController extends Controller
         $updated = 0;
         $userId = Auth::id();
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
+        $stepService = app(TrackingStepService::class);
+        $newOrder = $trackingStepKey ? $stepService->getStepOrder($trackingStepKey) : null;
 
         $updates = [];
         if ($request->boolean('update_eta')) {
@@ -207,19 +233,27 @@ class BoxController extends Controller
 
         foreach ($boxes as $box) {
             try {
+                if ($newOrder !== null) {
+                    $currentOrder = $this->resolveBoxJourneyOrder($box, $stepService);
+                    if ($currentOrder !== null && $newOrder < $currentOrder) {
+                        continue;
+                    }
+                }
+
                 if (!empty($updates)) {
                     $box->update($updates);
                     app(\App\Services\TrackingCacheService::class)->forgetBox($box);
                 }
 
                 if ($request->filled('status')) {
+                    $isDelivered = $validated['status'] === BoxStatus::Delivered->value;
                     $boxRepo->updateStatus(
                         $box,
                         $validated['status'],
                         ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
                         $userId,
-                        deliveryOverrideReason: $validated['status'] === BoxStatus::Delivered->value ? 'Bulk updated by Admin' : null,
-                        bypassValidation: true,
+                        deliveryOverrideReason: $isDelivered ? 'Bulk updated by Admin' : null,
+                        bypassValidation: $isDelivered,
                         trackingStepKey: $trackingStepKey
                     );
                 }
@@ -392,7 +426,18 @@ class BoxController extends Controller
                     $fail("Invalid box status: {$value}");
                 }
             }],
-            'tracking_step_key' => 'nullable|string',
+            'tracking_step_key' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        $stepService = app(TrackingStepService::class);
+                        if (! $stepService->isValidStepKey($value)) {
+                            $fail("The selected tracking step key [{$value}] is invalid.");
+                        }
+                    }
+                },
+            ],
             'courier_notes' => 'nullable|string|max:2000',
             'admin_delivery_override_reason' => 'nullable|string|min:10|max:1000',
             'delivery_proof' => ['nullable', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:5120'],
@@ -407,6 +452,16 @@ class BoxController extends Controller
         $newStatus = $validated['status'];
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         $overrideReason = $validated['admin_delivery_override_reason'] ?? null;
+
+        $stepService = app(TrackingStepService::class);
+        if ($trackingStepKey) {
+            $newOrder = $stepService->getStepOrder($trackingStepKey);
+            $currentOrder = $this->resolveBoxJourneyOrder($box, $stepService);
+
+            if ($currentOrder !== null && $newOrder !== null && $newOrder < $currentOrder && blank($overrideReason)) {
+                return redirect()->back()->withInput()->with('error', "Cannot select a tracking step that regresses journey progression (from step order {$currentOrder} to {$newOrder}).");
+            }
+        }
 
         // Proof is required only for delivered and collected statuses
         $proofRequiredStatuses = [BoxStatus::Delivered->value, BoxStatus::Collected->value];
@@ -439,6 +494,7 @@ class BoxController extends Controller
                 Auth::id(),
                 deliveryProof: $request->file('delivery_proof'),
                 deliveryOverrideReason: $overrideReason,
+                bypassValidation: !blank($overrideReason),
                 trackingStepKey: $trackingStepKey
             );
         } catch (\RuntimeException $e) {
@@ -545,5 +601,35 @@ class BoxController extends Controller
     private function requiresDeliveryOverride(Box $box): bool
     {
         return blank($box->delivery_proof_path);
+    }
+
+    /**
+     * Resolve the current journey step order of a box.
+     */
+    protected function resolveBoxJourneyOrder(Box $box, TrackingStepService $stepService): ?int
+    {
+        // 1. From current tracking_step_key
+        if ($box->tracking_step_key) {
+            $order = $stepService->getStepOrder($box->tracking_step_key);
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        // 2. From latest update's tracking_step_key
+        $latestUpdate = $box->updates()->latest('id')->first();
+        if ($latestUpdate?->tracking_step_key) {
+            $order = $stepService->getStepOrder($latestUpdate->tracking_step_key);
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        // 3. From current lifecycle status
+        $statusValue = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+        $allSteps = $stepService->getSteps();
+        $matchingStep = collect($allSteps)->first(fn ($s) => ($s['system_status'] ?? '') === $statusValue);
+
+        return $matchingStep ? (int) $matchingStep['order'] : null;
     }
 }

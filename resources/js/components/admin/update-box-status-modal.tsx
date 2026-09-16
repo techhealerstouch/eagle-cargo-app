@@ -82,23 +82,15 @@ export default function UpdateBoxStatusModal({
     const [statusNotes, setStatusNotes] = useState('');
     const [overrideReason, setOverrideReason] = useState('');
     const [proofFile, setProofFile] = useState<File | null>(null);
-    const [updateEtaDate, setUpdateEtaDate] = useState(false);
-    const [updateEtaMessage, setUpdateEtaMessage] = useState(false);
-    const [etaDate, setEtaDate] = useState('');
-    const [etaMessage, setEtaMessage] = useState('Your box is expected to be delivered on or before this date');
     const [isUpdating, setIsUpdating] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (box) {
             setNewStatus(box.tracking_step_key || getValueForSystemStatus(box.status));
-            setEtaDate(box.eta_date || '');
-            setEtaMessage(box.eta_message || 'Your box is expected to be delivered on or before this date');
             setStatusNotes('');
             setOverrideReason('');
             setProofFile(null);
-            setUpdateEtaDate(false);
-            setUpdateEtaMessage(false);
         }
     }, [box, isOpen]);
 
@@ -124,10 +116,6 @@ export default function UpdateBoxStatusModal({
             courier_notes: statusNotes || undefined,
             admin_delivery_override_reason: overrideReason || undefined,
             delivery_proof: proofFile,
-            update_eta_date: updateEtaDate,
-            update_eta_message: updateEtaMessage,
-            eta_date: etaDate || undefined,
-            eta_message: etaMessage || undefined,
         }, {
             onSuccess: () => {
                 onClose();
@@ -312,54 +300,7 @@ export default function UpdateBoxStatusModal({
                         </div>
                     </div>
 
-                    {['admin', 'super_admin'].includes(userRole) && (
-                        <div className="space-y-3 rounded-lg border border-zinc-200/80 bg-zinc-50/50 p-3.5">
-                            <div className="space-y-2">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="modal-update-eta-date"
-                                        checked={updateEtaDate}
-                                        onCheckedChange={(checked) => setUpdateEtaDate(!!checked)}
-                                    />
-                                    <Label htmlFor="modal-update-eta-date" className="text-xs font-medium text-zinc-800 cursor-pointer">
-                                        Update Delivery Estimate Date (Visible to Customer)
-                                    </Label>
-                                </div>
-                                {updateEtaDate && (
-                                    <div className="pl-6 pt-1 space-y-1">
-                                        <input
-                                            type="date"
-                                            className="flex h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-                                            value={etaDate}
-                                            onChange={(e) => setEtaDate(e.target.value)}
-                                        />
-                                    </div>
-                                )}
-                            </div>
 
-                            <div className="space-y-2 pt-2 border-t border-zinc-200/60">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="modal-update-eta-message"
-                                        checked={updateEtaMessage}
-                                        onCheckedChange={(checked) => setUpdateEtaMessage(!!checked)}
-                                    />
-                                    <Label htmlFor="modal-update-eta-message" className="text-xs font-medium text-zinc-800 cursor-pointer">
-                                        Update Delivery Estimate Message (Visible to Customer)
-                                    </Label>
-                                </div>
-                                {updateEtaMessage && (
-                                    <div className="pl-6 pt-1 space-y-1">
-                                        <textarea
-                                            className="min-h-14 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-                                            value={etaMessage}
-                                            onChange={(e) => setEtaMessage(e.target.value)}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    )}
 
                     <div className="space-y-1.5">
                         <Label htmlFor="modal-notes" className="text-xs font-semibold text-zinc-700">

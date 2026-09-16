@@ -4,11 +4,13 @@ import { formatDate } from '@/lib/logistics-utils';
 import { cn, humanize } from '@/lib/utils';
 import { getFriendlyStepDescription } from '@/lib/logistics-theme';
 import type { TrackingTimelineItem, NormalizedStep } from '@/types/logistics';
+import { classifyStepState, type TimelineStepState } from './TrackingTimeline.helpers';
 
 interface TrackingTimelineProps {
     timeline: TrackingTimelineItem[];
     steps: NormalizedStep[];
     currentIndex: number;
+    currentStatus?: string | null;
 }
 
 /**
@@ -47,7 +49,7 @@ function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]):
     return -1;
 }
 
-export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, steps, currentIndex }) => {
+export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, steps, currentIndex, currentStatus }) => {
     // Build a map: step index → timeline events that belong to it
     const stepEvents = new Map<number, TrackingTimelineItem[]>();
     const unmatchedEvents: TrackingTimelineItem[] = [];
@@ -95,14 +97,28 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                     />
 
                     {steps.map((step, originalIndex) => ({ step, originalIndex })).reverse().map(({ step, originalIndex }, displayIdx) => {
-                        const isCompleted = originalIndex < currentIndex;
-                        const isCurrent = originalIndex === currentIndex;
-                        const isFuture = originalIndex > currentIndex;
+                        const state: TimelineStepState = classifyStepState({
+                            stepIndex: originalIndex,
+                            currentIndex,
+                            step,
+                            currentStatus,
+                            totalSteps: steps.length,
+                        });
+
+                        const isCompleted = state === 'completed';
+                        const isCompletedCurrent = state === 'completed_current';
+                        const isInProgress = state === 'in_progress';
+                        const isDelivered = state === 'delivered';
+                        const isNext = state === 'next';
+                        const isUpcoming = state === 'upcoming';
+                        const isFuture = isNext || isUpcoming;
+                        const isCurrentActive = isCompletedCurrent || isInProgress || isDelivered;
+
                         const events = stepEvents.get(originalIndex) || [];
                         const StepIcon = step.icon;
 
                         // Green line overlay connecting current & completed steps downward
-                        const hasGreenLineDown = originalIndex <= currentIndex && originalIndex > 0;
+                        const hasGreenLineDown = currentIndex >= 0 && originalIndex <= currentIndex && originalIndex > 0;
 
                         return (
                             <div key={originalIndex} className="relative pb-8 last:pb-0">
@@ -117,16 +133,17 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                 {/* Node Icon */}
                                 <div className={cn(
                                     "absolute -left-6 md:-left-8 size-6 rounded-xl border-2 border-white dark:border-zinc-900 shadow-sm flex items-center justify-center z-10 transition-all duration-500",
-                                    isCurrent && "bg-zinc-900 dark:bg-zinc-100 ring-4 ring-zinc-900/10 dark:ring-zinc-100/20 scale-110",
-                                    isCompleted && "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+                                    isInProgress && "bg-zinc-900 dark:bg-zinc-100 ring-4 ring-zinc-900/10 dark:ring-zinc-100/20 scale-110",
+                                    (isCompleted || isCompletedCurrent || isDelivered) && "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+                                    isCompletedCurrent && "ring-4 ring-emerald-500/10 dark:ring-emerald-400/20 scale-105",
                                     isFuture && "bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700",
                                 )}>
-                                    {isCompleted ? (
+                                    {(isCompleted || isCompletedCurrent || isDelivered) ? (
                                         <CheckCircle2 className="size-3.5 text-emerald-500" />
-                                    ) : isCurrent ? (
+                                    ) : isInProgress ? (
                                         <div className="size-2 rounded-full bg-emerald-400 animate-pulse" />
                                     ) : (
-                                        <StepIcon className="size-3 text-zinc-300 dark:text-zinc-600" />
+                                        <StepIcon className={cn("size-3", isNext ? "text-zinc-400 dark:text-zinc-500" : "text-zinc-300 dark:text-zinc-600")} />
                                     )}
                                 </div>
 
@@ -136,14 +153,29 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                     <div className="flex items-center flex-wrap gap-2">
                                         <h5 className={cn(
                                             "text-xs font-black uppercase tracking-tight",
-                                            isCurrent && "text-zinc-900 dark:text-zinc-100",
+                                            isCurrentActive && "text-zinc-900 dark:text-zinc-100",
                                             isCompleted && "text-zinc-700 dark:text-zinc-300",
-                                            isFuture && "text-zinc-300 dark:text-zinc-600",
+                                            isNext && "text-zinc-500 dark:text-zinc-400",
+                                            isUpcoming && "text-zinc-300 dark:text-zinc-600",
                                         )}>
                                             {step.label}
                                         </h5>
 
-                                        {isCurrent && (
+                                        {isDelivered && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50">
+                                                <CheckCircle2 className="size-2.5 text-emerald-500" />
+                                                Delivered
+                                            </span>
+                                        )}
+
+                                        {isCompletedCurrent && (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50">
+                                                <CheckCircle2 className="size-2.5 text-emerald-500" />
+                                                Completed
+                                            </span>
+                                        )}
+
+                                        {isInProgress && (
                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50">
                                                 <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
                                                 In Progress
@@ -156,7 +188,13 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                             </span>
                                         )}
 
-                                        {isFuture && (
+                                        {isNext && (
+                                            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                                                Next Up
+                                            </span>
+                                        )}
+
+                                        {isUpcoming && (
                                             <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
                                                 Upcoming
                                             </span>
@@ -179,7 +217,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                         key={eIdx}
                                                         className={cn(
                                                             "p-3.5 md:p-4 rounded-xl border transition-all duration-300 space-y-1.5",
-                                                            isCurrent
+                                                            isCurrentActive
                                                                 ? "bg-zinc-50/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 shadow-sm"
                                                                 : "bg-white dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800/60"
                                                         )}
@@ -187,7 +225,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                         <div className="flex items-center justify-between">
                                                             <p className={cn(
                                                                 "text-xs font-medium leading-relaxed",
-                                                                isCurrent ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"
+                                                                isCurrentActive ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"
                                                             )}>
                                                                 {description}
                                                             </p>

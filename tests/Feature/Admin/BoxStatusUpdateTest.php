@@ -264,5 +264,80 @@ class BoxStatusUpdateTest extends TestCase
         $this->assertEquals('loading_container', $box->tracking_step_key);
         $this->assertEquals($batch->id, $box->batch_id);
     }
+
+    public function test_admin_cannot_update_box_with_invalid_tracking_step_key()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'tracking_step_key' => 'received_by_branch',
+        ]);
+
+        $response = $this->actingAs($admin)->put(route('admin.boxes.update', $box), [
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'non_existent_step_key',
+            'courier_notes' => 'Testing invalid key',
+        ]);
+
+        $response->assertSessionHasErrors('tracking_step_key');
+    }
+
+    public function test_admin_cannot_select_backward_tracking_step()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        // Box is already at sorting (order 9)
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit,
+            'tracking_step_key' => 'sorting',
+        ]);
+
+        // Attempting to set tracking_step_key back to in_transit_sea (order 4) without override
+        $response = $this->actingAs($admin)->put(route('admin.boxes.update', $box), [
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'in_transit_sea',
+            'courier_notes' => 'Attempting regression',
+        ]);
+
+        $response->assertSessionHasErrors('tracking_step_key');
+    }
+
+    public function test_admin_can_select_forward_tracking_step_sharing_same_system_status()
+    {
+        /** @var User $admin */
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $booking = Booking::factory()->create();
+
+        // Box is at in_transit_sea (order 4, status in_transit)
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit,
+            'tracking_step_key' => 'in_transit_sea',
+        ]);
+
+        // Forward progression to sorting (order 9, also status in_transit)
+        $response = $this->actingAs($admin)->put(route('admin.boxes.update', $box), [
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'sorting',
+            'courier_notes' => 'Advancing to local sorting facility',
+        ]);
+
+        $response->assertRedirect();
+        $response->assertSessionHasNoErrors();
+
+        $box->refresh();
+        $this->assertEquals('sorting', $box->tracking_step_key);
+        $this->assertEquals(BoxStatus::InTransit, $box->status);
+    }
 }
 
