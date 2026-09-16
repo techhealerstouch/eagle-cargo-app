@@ -1,6 +1,6 @@
 import { Form, Head, Link, usePage } from '@inertiajs/react';
 import React from 'react';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import InputError from '@/components/common/input-error';
 import PasswordInput from '@/components/common/password-input';
 import TextLink from '@/components/common/text-link';
@@ -483,8 +483,8 @@ export default function Register() {
                                                     />
                                                 </div>
 
-                                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                                    <div className="grid gap-2">
+                                                <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+                                                    <div className="grid gap-2 content-start">
                                                         <Label
                                                             htmlFor="email"
                                                             className="font-sans font-semibold text-zinc-900"
@@ -517,7 +517,7 @@ export default function Register() {
                                                         />
                                                     </div>
 
-                                                    <div className="grid gap-2">
+                                                    <div className="grid gap-2 content-start">
                                                         <Label
                                                             htmlFor="mobile"
                                                             className="font-sans font-semibold text-zinc-900"
@@ -551,8 +551,8 @@ export default function Register() {
                                                     </div>
                                                 </div>
 
-                                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                                    <div className="grid gap-2">
+                                                <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+                                                    <div className="grid gap-2 content-start">
                                                         <Label
                                                             htmlFor="password"
                                                             className="font-sans font-semibold text-zinc-900"
@@ -634,7 +634,7 @@ export default function Register() {
                                                         />
                                                     </div>
 
-                                                    <div className="grid gap-2">
+                                                    <div className="grid gap-2 content-start">
                                                         <Label
                                                             htmlFor="password_confirmation"
                                                             className="font-sans font-semibold text-zinc-900"
@@ -658,6 +658,30 @@ export default function Register() {
                                                             placeholder="Re-enter password"
                                                             className="h-11 rounded-lg border-zinc-200 bg-white font-sans text-zinc-900 focus-visible:border-zinc-950 focus-visible:ring-zinc-950/10"
                                                         />
+                                                        {/* Matching status / Balance spacer */}
+                                                        {formData.password_confirmation ? (
+                                                            <div className="mt-2 flex items-center gap-1.5 text-xs font-medium">
+                                                                {formData.password ===
+                                                                formData.password_confirmation ? (
+                                                                    <span className="flex items-center gap-1 text-emerald-600">
+                                                                        <Check className="size-3.5" />{' '}
+                                                                        Passwords
+                                                                        match
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-zinc-400">
+                                                                        Passwords
+                                                                        do not
+                                                                        match
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div
+                                                                className="mt-2 h-1 invisible"
+                                                                aria-hidden="true"
+                                                            />
+                                                        )}
                                                         <InputError
                                                             message={
                                                                 stepErrors.password_confirmation ??

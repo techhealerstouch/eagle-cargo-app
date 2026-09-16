@@ -164,6 +164,8 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
                     label: step.label,
                     statusKey: step.key,
                     systemStatus: step.system_status,
+                    step_type: step.step_type,
+                    stepType: step.step_type,
                     description: step.description,
                     icon: resolveIcon(step.icon),
                 }));
@@ -179,10 +181,10 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
 
         // Default Fallback Steps
         return [
-            { label: 'Manifested', statusKey: 'pending', icon: Package },
-            { label: 'Collected', statusKey: 'collected', icon: Truck },
-            { label: 'In Transit', statusKey: 'in_transit', icon: Ship },
-            { label: 'Delivered', statusKey: 'delivered', icon: Home },
+            { label: 'Manifested', statusKey: 'pending', step_type: 'checkpoint', icon: Package },
+            { label: 'Collected', statusKey: 'collected', step_type: 'checkpoint', icon: Truck },
+            { label: 'In Transit', statusKey: 'in_transit', step_type: 'ongoing', icon: Ship },
+            { label: 'Delivered', statusKey: 'delivered', step_type: 'checkpoint', icon: Home },
         ];
     }, [activeTrackingData?.area_milestones, trackingSteps]);
 
@@ -219,6 +221,14 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
     const simplifiedStepIndex = useMemo(() => {
         if (!activeTrackingData) {
             return 0;
+        }
+
+        const rawStatus = (activeTrackingData.status || '').toLowerCase();
+        if (rawStatus === 'pending' || rawStatus === 'booking_created' || rawStatus === 'confirmed') {
+            const hasTimelineEvents = !!(activeTrackingData.timeline && activeTrackingData.timeline.length > 0);
+            if (!hasTimelineEvents && !activeTrackingData.tracking_step_key) {
+                return 0;
+            }
         }
 
         const phase = (activeTrackingData.tracking_step_key || latestJourneyPhase || '').replace(/_/g, ' ');
@@ -266,13 +276,21 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
     }, [activeTrackingData, latestJourneyPhase]);
 
     const currentStepIndex = useMemo(() => {
-        if (!activeTrackingData) {
-            return 0;
+        if (!activeTrackingData || !activeTrackingData.status) {
+            return -1;
         }
 
         const { status, current_milestone_id, area_milestones, timeline, tracking_step_key } = activeTrackingData;
         const rawStatus = (status || '').toLowerCase();
         const s = rawStatus.replace(/_/g, ' ');
+        const hasTimelineEvents = !!(timeline && timeline.length > 0);
+
+        // If status is pending/booking created and no real milestone events exist, return -1
+        if (rawStatus === 'pending' || rawStatus === 'booking_created' || rawStatus === 'confirmed') {
+            if (!hasTimelineEvents && !tracking_step_key) {
+                return -1;
+            }
+        }
 
         // 0. Match by tracking_step_key directly against dynamicSteps
         if (tracking_step_key) {
@@ -294,7 +312,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
         }
 
         // 2. Match by latest phase/step in timeline
-        if (timeline && timeline.length > 0) {
+        if (hasTimelineEvents) {
             const latestStepKey = timeline[0].tracking_step_key?.toLowerCase();
             if (latestStepKey) {
                 const stepIndex = dynamicSteps.findIndex((step) =>
@@ -321,38 +339,34 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
         }
 
         // 3. Match by system status or exact status key
-        const systemMatch = dynamicSteps.findIndex((step) =>
-            step.systemStatus?.toLowerCase() === rawStatus ||
-            step.statusKey.toLowerCase() === rawStatus ||
-            step.systemStatus?.toLowerCase().replace(/_/g, ' ') === s ||
-            step.statusKey.toLowerCase().replace(/_/g, ' ') === s
-        );
+        if (rawStatus !== 'pending' || hasTimelineEvents) {
+            const systemMatch = dynamicSteps.findIndex((step) =>
+                step.systemStatus?.toLowerCase() === rawStatus ||
+                step.statusKey.toLowerCase() === rawStatus ||
+                step.systemStatus?.toLowerCase().replace(/_/g, ' ') === s ||
+                step.statusKey.toLowerCase().replace(/_/g, ' ') === s
+            );
 
-        if (systemMatch !== -1) {
-            return systemMatch;
+            if (systemMatch !== -1) {
+                return systemMatch;
+            }
         }
 
-        // 4. Heuristic fallbacks
+        // 4. Delivered status fallback
         if (s === 'delivered') {
             return dynamicSteps.length - 1;
         }
 
-        if (s.includes('out for delivery') || s.includes('dispatched')) {
+        // 5. Out for delivery status fallback
+        if (s.includes('out for delivery')) {
             const outIndex = dynamicSteps.findIndex(
                 (step) => step.statusKey === 'out_for_delivery' || step.systemStatus === 'out_for_delivery'
             );
             if (outIndex !== -1) return outIndex;
         }
 
-        if (s.includes('transit') || s.includes('shipping') || s.includes('vessel') || s.includes('container') || s.includes('arrived')) {
-            return Math.max(0, Math.floor(dynamicSteps.length / 2));
-        }
-
-        if (s.includes('collected') || s.includes('picked')) {
-            return 1;
-        }
-
-        return 0;
+        // If pending or no reliable event/status match found, safe fallback is -1
+        return -1;
     }, [activeTrackingData, dynamicSteps]);
 
     const isMultiBox = trackingData?.is_multi_box || trackingData?.is_booking_search || (trackingData?.all_boxes && trackingData.all_boxes.length > 1);
@@ -498,7 +512,12 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
                                         <Package className="size-4 text-brand-rust" /> Transit Journey ({activeTrackingData.tracking_number})
                                     </h3>
                                 </div>
-                                <TrackingTimeline timeline={activeTrackingData.timeline} steps={dynamicSteps} currentIndex={currentStepIndex} />
+                                <TrackingTimeline
+                                    timeline={activeTrackingData.timeline}
+                                    steps={dynamicSteps}
+                                    currentIndex={currentStepIndex}
+                                    currentStatus={activeTrackingData.status}
+                                />
                             </div>
 
                             <div className="space-y-6 md:space-y-8 lg:sticky lg:top-6 self-start">

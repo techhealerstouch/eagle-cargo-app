@@ -21,17 +21,22 @@ class UpdateBoxRequest extends FormRequest
             'box_type_id' => 'nullable|exists:box_types,id',
             'batch_id' => 'nullable|exists:batches,id',
             'status' => ['required', new Enum(BoxStatus::class)],
-            'tracking_step_key' => 'nullable|string',
+            'tracking_step_key' => [
+                'nullable',
+                'string',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        $stepService = app(\App\Services\TrackingStepService::class);
+                        if (! $stepService->isValidStepKey($value)) {
+                            $fail("The selected tracking step key [{$value}] is invalid.");
+                        }
+                    }
+                },
+            ],
             'courier_notes' => 'nullable|string',
             'admin_delivery_override_reason' => 'nullable|string|min:10|max:1000',
             'weight' => 'nullable|numeric|min:0',
             'price_charged' => 'nullable|numeric|min:0',
-            'update_eta' => 'nullable|boolean',
-            'eta_date' => 'nullable|date',
-            'eta_message' => 'nullable|string|max:255',
-            'update_estimate_delivery' => 'nullable|boolean',
-            'estimate_delivery_date' => 'nullable|date',
-            'estimate_delivery_message' => 'nullable|string|max:255',
         ];
     }
 }

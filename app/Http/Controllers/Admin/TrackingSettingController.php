@@ -48,9 +48,17 @@ class TrackingSettingController extends Controller
             'steps.*.allowed_roles' => 'sometimes|array',
             'steps.*.allowed_roles.*' => ['string', Rule::in($allowedRoles)],
             'steps.*.system_status' => ['required', 'string', Rule::in(array_column(BoxStatus::cases(), 'value'))],
+            'steps.*.step_type' => ['nullable', 'string', Rule::in(['checkpoint', 'ongoing'])],
+            'steps.*.description' => 'nullable|string|max:500',
         ]);
 
-        $this->trackingStepService->updateSteps($validated['steps']);
+        try {
+            $this->trackingStepService->updateSteps($validated['steps']);
+        } catch (\InvalidArgumentException $e) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'steps' => $e->getMessage(),
+            ]);
+        }
 
         return back()->with('success', 'Tracking steps updated successfully.');
     }

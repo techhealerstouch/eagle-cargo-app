@@ -83,6 +83,7 @@ export interface TrackingStep {
     order: number;
     icon: string;
     system_status?: string;
+    step_type?: 'checkpoint' | 'ongoing';
     description?: string;
 }
 
@@ -91,5 +92,7 @@ export interface NormalizedStep {
     statusKey: string;
     icon: LucideIcon;
     systemStatus?: string;
+    step_type?: 'checkpoint' | 'ongoing';
+    stepType?: 'checkpoint' | 'ongoing';
     description?: string;
 }

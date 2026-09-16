@@ -13,8 +13,9 @@ import {
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import AppLayout from '@/layouts/app-layout';
-import { cn } from '@/lib/utils';
+import { cn, humanize } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
+import { getSenderBookingStatusIndex } from './sender-dashboard-statuses';
 
 export default function Bookings({ sender, history, filters = {}, pageTitle = 'My Bookings', breadcrumbs = [] }: any) {
     const { delete: destroy } = useForm();
@@ -221,10 +222,11 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                     isDraft ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40' :
                                     isCancelled ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-900/40' :
                                     isPending ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40' :
-                                    isConfirmed ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40' :
+                                    bStatus === 'confirmed' || bStatus === 'delivered' ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40' :
+                                    bStatus === 'shipped' || bStatus === 'collected' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/40' :
                                     'bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800'
                                 )}>
-                                    {isDraft ? 'DRAFT' : isCancelled ? 'CANCELLED' : isPending ? 'PENDING' : isConfirmed ? 'CONFIRMED' : 'ACTIVE'}
+                                    {isDraft ? 'DRAFT' : isCancelled ? 'CANCELLED' : isPending ? 'PENDING' : bStatus === 'confirmed' ? 'CONFIRMED' : humanize(bStatus).toUpperCase()}
                                 </span>
                                 {!isDraft && !isCancelled && booking.payment_status === 'pending' && (
                                     <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/40 flex items-center gap-1">
@@ -425,19 +427,8 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                             {booking.boxes?.map((box: any) => {
-                                const getStatusIndex = (boxStatus: string, bookingStatus: string) => {
-                                    const getWeight = (status: string) => {
-                                        const s = status?.toLowerCase() || '';
-                                        if (s === 'delivered') return 3;
-                                        if (['in_transit', 'shipped', 'arrived', 'out_for_delivery'].includes(s)) return 2;
-                                        if (['collected', 'warehouse', 'received_by_branch', 'loaded_to_container', 'confirmed'].includes(s)) return 1;
-                                        return 0;
-                                    };
-
-                                    return Math.max(getWeight(boxStatus), getWeight(bookingStatus));
-                                };
-
-                                const currentIdx = getStatusIndex(box.status, booking.status);
+                                const isBoxCancelled = isCancelled || (box.status || '').toLowerCase() === 'cancelled';
+                                const currentIdx = getSenderBookingStatusIndex(box.status, booking.status);
                                 const isDelivered = currentIdx === 3;
 
                                 const totalSteps = 4;
@@ -468,7 +459,7 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                         </div>
 
                                         {/* Status Progress Stepper */}
-                                        {isCancelled ? (
+                                        {isBoxCancelled ? (
                                             <div className="flex items-center gap-3 p-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-xl">
                                                 <AlertCircle className="size-4 text-zinc-400 shrink-0" />
                                                 <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">Shipment Cancelled</span>

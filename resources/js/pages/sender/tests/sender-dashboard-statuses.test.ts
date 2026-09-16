@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { getSenderDashboardStatusStep, isActiveBoxStatus, isPendingBoxStatus, summarizeBookingBoxStatuses } from '../sender-dashboard-statuses';
+import {
+    getSenderDashboardStatusStep,
+    getSenderBookingStatusIndex,
+    isActiveBoxStatus,
+    isPendingBoxStatus,
+    summarizeBookingBoxStatuses,
+} from '../sender-dashboard-statuses';
 
 describe('sender dashboard box statuses', () => {
     it.each([
@@ -36,4 +42,27 @@ describe('sender dashboard box statuses', () => {
             status: 'ARRIVED',
         });
     });
+
+    it('maps box and booking statuses to the correct 4-step stepper index (0: Pending, 1: Picked Up, 2: In Transit, 3: Delivered)', () => {
+        // Confirmed booking with uncollected box MUST stay at Pending (step 0), NOT Picked Up
+        expect(getSenderBookingStatusIndex('pending', 'confirmed')).toBe(0);
+        expect(getSenderBookingStatusIndex('pending', 'pending')).toBe(0);
+        expect(getSenderBookingStatusIndex('draft', 'draft')).toBe(0);
+
+        // Picked up / collected boxes
+        expect(getSenderBookingStatusIndex('collected', 'confirmed')).toBe(1);
+        expect(getSenderBookingStatusIndex('received_by_branch', 'confirmed')).toBe(1);
+        expect(getSenderBookingStatusIndex('loaded_to_container', 'confirmed')).toBe(1);
+        expect(getSenderBookingStatusIndex('pending', 'collected')).toBe(1);
+
+        // In Transit
+        expect(getSenderBookingStatusIndex('in_transit', 'confirmed')).toBe(2);
+        expect(getSenderBookingStatusIndex('out_for_delivery', 'confirmed')).toBe(2);
+        expect(getSenderBookingStatusIndex('pending', 'shipped')).toBe(2);
+
+        // Delivered
+        expect(getSenderBookingStatusIndex('delivered', 'confirmed')).toBe(3);
+        expect(getSenderBookingStatusIndex('pending', 'delivered')).toBe(3);
+    });
 });
+

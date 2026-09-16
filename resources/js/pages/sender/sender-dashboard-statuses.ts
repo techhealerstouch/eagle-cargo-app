@@ -55,3 +55,42 @@ export const summarizeBookingBoxStatuses = (boxes: Array<{ status?: string }>): 
         status: leastAdvancedStatus,
     };
 };
+
+export const getSenderBookingStatusIndex = (boxStatus?: string, bookingStatus?: string): number => {
+    const getWeight = (status?: string): number => {
+        const s = (status || '').toLowerCase();
+        if (s === 'delivered') return 3;
+        if (
+            [
+                'in_transit',
+                'shipped',
+                'arrived',
+                'out_for_delivery',
+                'for_checking_unloading',
+                'unloaded_manila',
+                'for_delivery_scheduling',
+                'en_route_roro',
+            ].includes(s)
+        ) {
+            return 2;
+        }
+        if (
+            [
+                'collected',
+                'warehouse',
+                'received_by_branch',
+                'loaded_to_container',
+                'damaged',
+                'held',
+                'held_bulging',
+            ].includes(s)
+        ) {
+            return 1;
+        }
+        // 'pending', 'draft', 'confirmed' are weight 0 (Pending stage: booking confirmed/scheduled, but box not yet picked up)
+        return 0;
+    };
+
+    return Math.max(getWeight(boxStatus), getWeight(bookingStatus));
+};
+

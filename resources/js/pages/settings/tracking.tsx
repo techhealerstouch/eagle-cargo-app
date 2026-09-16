@@ -94,6 +94,7 @@ interface TrackingStep {
     icon: string;
     allowed_roles: string[];
     system_status: string;
+    step_type?: 'checkpoint' | 'ongoing';
     description?: string;
 }
 
@@ -104,6 +105,7 @@ export default function TrackingSettings({ steps }: { steps: TrackingStep[] }) {
             order: i + 1,
             allowed_roles: s.allowed_roles || [],
             system_status: s.system_status || 'pending',
+            step_type: s.step_type || 'checkpoint',
             description: s.description || '',
         })),
     });
@@ -151,6 +153,7 @@ export default function TrackingSettings({ steps }: { steps: TrackingStep[] }) {
                 icon: 'circle',
                 allowed_roles: [],
                 system_status: 'pending',
+                step_type: 'checkpoint',
                 description: '',
             },
         ]);
@@ -286,6 +289,13 @@ export default function TrackingSettings({ steps }: { steps: TrackingStep[] }) {
                                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold border uppercase ${styles.bg}`}>
                                                     {step.phase}
                                                 </span>
+                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border uppercase ${
+                                                    step.step_type === 'ongoing'
+                                                        ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800'
+                                                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
+                                                }`}>
+                                                    {step.step_type === 'ongoing' ? 'Ongoing Phase' : 'Checkpoint'}
+                                                </span>
                                             </div>
                                             <span className="text-[11px] text-zinc-500 truncate">
                                                 Map: {humanize(step.system_status)} {step.description ? `• ${step.description}` : ''}
@@ -352,7 +362,7 @@ export default function TrackingSettings({ steps }: { steps: TrackingStep[] }) {
                                             Configure Milestone: {currentEditingStep.label || 'Step'}
                                         </DialogTitle>
                                         <DialogDescription className="text-xs text-zinc-500">
-                                            Edit step label, icon, and role permissions.
+                                            Edit step label, semantics, icon, and role permissions.
                                         </DialogDescription>
                                     </DialogHeader>
 
@@ -402,14 +412,14 @@ export default function TrackingSettings({ steps }: { steps: TrackingStep[] }) {
 
                                             <div className="space-y-1">
                                                 <Label className="text-xs font-semibold text-zinc-700">
-                                                    System Mapping
+                                                    Semantic Type
                                                 </Label>
                                                 <Select
-                                                    value={currentEditingStep.system_status}
+                                                    value={currentEditingStep.step_type || 'checkpoint'}
                                                     onValueChange={(v) =>
                                                         updateStep(
                                                             editingStepIndex!,
-                                                            'system_status',
+                                                            'step_type',
                                                             v,
                                                         )
                                                     }
@@ -418,14 +428,38 @@ export default function TrackingSettings({ steps }: { steps: TrackingStep[] }) {
                                                         <SelectValue />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        {systemStatuses.map((s) => (
-                                                            <SelectItem key={s.value} value={s.value} className="text-xs">
-                                                                {s.label}
-                                                            </SelectItem>
-                                                        ))}
+                                                        <SelectItem value="checkpoint" className="text-xs">Checkpoint (Milestone)</SelectItem>
+                                                        <SelectItem value="ongoing" className="text-xs">Ongoing (Active Phase)</SelectItem>
                                                     </SelectContent>
                                                 </Select>
                                             </div>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <Label className="text-xs font-semibold text-zinc-700">
+                                                System Mapping
+                                            </Label>
+                                            <Select
+                                                value={currentEditingStep.system_status}
+                                                onValueChange={(v) =>
+                                                    updateStep(
+                                                        editingStepIndex!,
+                                                        'system_status',
+                                                        v,
+                                                    )
+                                                }
+                                            >
+                                                <SelectTrigger className="h-9 text-xs rounded-lg border-zinc-200">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {systemStatuses.map((s) => (
+                                                        <SelectItem key={s.value} value={s.value} className="text-xs">
+                                                            {s.label}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                         </div>
 
                                         <div className="space-y-1">
