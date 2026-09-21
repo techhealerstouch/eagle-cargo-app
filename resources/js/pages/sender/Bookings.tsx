@@ -16,7 +16,7 @@ import {
 import AppLayout from '@/layouts/app-layout';
 import { cn, humanize } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
-import { getSenderBookingStatusIndex } from './sender-dashboard-statuses';
+import { getSenderBookingStatusIndex, getContinuousProgressInfo } from './sender-dashboard-statuses';
 
 export default function Bookings({ sender, history, filters = {}, pageTitle = 'My Bookings', breadcrumbs = [] }: any) {
     const { delete: destroy } = useForm();
@@ -441,18 +441,8 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                             {booking.boxes?.map((box: any) => {
                                 const isBoxCancelled = isCancelled || (box.status || '').toLowerCase() === 'cancelled';
-                                const currentIdx = getSenderBookingStatusIndex(box.status, booking.status);
-                                const isDelivered = currentIdx === 3;
-
-                                const totalSteps = 4;
-                                const progressPercent = currentIdx === 0 ? 0 : (currentIdx / (totalSteps - 1)) * 100;
-
-                                const stages = [
-                                    { label: 'Pending', key: 'pending' },
-                                    { label: 'Picked Up', key: 'collected' },
-                                    { label: 'In Transit', key: 'shipped' },
-                                    { label: 'Delivered', key: 'delivered' },
-                                ];
+                                const progressInfo = getContinuousProgressInfo(box.status, booking.status);
+                                const isDelivered = progressInfo.isDelivered;
 
                                 return (
                                     <div key={box.id} className="bg-white dark:bg-zinc-950 border border-zinc-200/70 dark:border-zinc-900 p-5 rounded-2xl flex flex-col justify-between gap-5 hover:border-zinc-300 dark:hover:border-zinc-800 transition-all duration-300 shadow-2xs">
@@ -471,60 +461,43 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                             </div>
                                         </div>
 
-                                        {/* Status Progress Stepper */}
+                                        {/* Status Progress Bar */}
                                         {isBoxCancelled ? (
                                             <div className="flex items-center gap-3 p-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-xl">
                                                 <AlertCircle className="size-4 text-zinc-400 shrink-0" />
                                                 <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">Shipment Cancelled</span>
                                             </div>
                                         ) : (
-                                            <div className="space-y-3 pt-1">
-                                                <div className="relative flex items-center justify-between px-1">
-                                                    <div className="absolute top-1/2 left-0 w-full h-1 bg-zinc-100 dark:bg-zinc-800 -translate-y-1/2 rounded-full" />
-                                                    {progressPercent > 0 && (
-                                                        <div
-                                                            className={cn(
-                                                                "absolute top-1/2 left-0 h-1 -translate-y-1/2 rounded-full transition-all duration-500",
-                                                                isDelivered ? 'bg-emerald-500' : 'bg-brand-rust'
-                                                            )}
-                                                            style={{ width: `${progressPercent}%` }}
-                                                        />
-                                                    )}
-
-                                                    {stages.map((stage, idx) => {
-                                                        const isCompleted = idx <= currentIdx;
-                                                        const isActive = idx === currentIdx;
-
-                                                        return (
-                                                            <div key={stage.key} className="relative z-10 flex flex-col items-center">
-                                                                <div
-                                                                    className={cn(
-                                                                        "h-3.5 w-3.5 rounded-full flex items-center justify-center border-2 border-white dark:border-zinc-900 transition-all shadow-2xs",
-                                                                        isCompleted
-                                                                            ? (isDelivered ? 'bg-emerald-500' : 'bg-brand-rust')
-                                                                            : 'bg-zinc-200 dark:bg-zinc-800'
-                                                                    )}
-                                                                >
-                                                                    {isActive && (
-                                                                        <span className={cn(
-                                                                            "absolute -inset-1 rounded-full animate-ping ring-2",
-                                                                            isDelivered ? 'ring-emerald-500/30' : 'ring-brand-rust/30'
-                                                                        )} />
-                                                                    )}
-                                                                </div>
-                                                                <span className={cn(
-                                                                    "absolute top-5 text-[9px] font-bold uppercase tracking-wider whitespace-nowrap transition-colors",
-                                                                    isActive
-                                                                        ? (isDelivered ? 'text-emerald-600 dark:text-emerald-400 font-extrabold' : 'text-zinc-900 dark:text-white font-extrabold')
-                                                                        : (isCompleted ? 'text-zinc-700 dark:text-zinc-300' : 'text-zinc-400 dark:text-zinc-600')
-                                                                )}>
-                                                                    {stage.label}
-                                                                </span>
-                                                            </div>
-                                                        );
-                                                    })}
+                                            <div className="space-y-2 pt-1">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className={cn(
+                                                        "font-bold text-xs tracking-tight transition-colors",
+                                                        progressInfo.isDelivered
+                                                            ? "text-emerald-600 dark:text-emerald-400"
+                                                            : "text-sky-600 dark:text-sky-400"
+                                                    )}>
+                                                        {progressInfo.label}
+                                                    </span>
+                                                    <span className="font-extrabold text-xs text-zinc-900 dark:text-zinc-100 font-mono">
+                                                        {progressInfo.percent}%
+                                                    </span>
                                                 </div>
-                                                <div className="h-2" />
+                                                <div
+                                                    className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden"
+                                                    role="progressbar"
+                                                    aria-valuenow={progressInfo.percent}
+                                                    aria-valuemin={0}
+                                                    aria-valuemax={100}
+                                                    aria-label={`Shipment progress: ${progressInfo.label} (${progressInfo.percent}%)`}
+                                                >
+                                                    <div
+                                                        className={cn(
+                                                            "h-full rounded-full transition-all duration-700 ease-out",
+                                                            progressInfo.barColor
+                                                        )}
+                                                        style={{ width: `${progressInfo.percent}%` }}
+                                                    />
+                                                </div>
                                             </div>
                                         )}
 
