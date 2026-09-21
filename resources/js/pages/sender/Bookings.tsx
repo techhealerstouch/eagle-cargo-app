@@ -2,6 +2,7 @@ import { Head, Link, router, useForm } from '@inertiajs/react';
 import { Package, Search, PlusCircle, ArrowRight, User, Edit2, Trash2, AlertCircle, FileEdit, FileText, CheckCircle2, Printer, SlidersHorizontal, CreditCard, Filter, Ban } from 'lucide-react';
 import { useEffect, useState, useMemo } from 'react';
 import ConfirmModal from '@/components/common/confirm-modal';
+import DeclarationPromptModal from '@/components/common/declaration-prompt-modal';
 import Heading from '@/components/common/heading';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -154,6 +155,7 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
     }, [filters.search, searchTerm]);
 
     const [uploadingProofFor, setUploadingProofFor] = useState<any>(null);
+    const [declarationPromptBookingId, setDeclarationPromptBookingId] = useState<number | null>(null);
     const { data: proofData, setData: setProofData, post: postProof, processing: uploadingProof, errors: proofErrors, reset: resetProof } = useForm({
         proof_of_payment: null as File | null,
     });
@@ -165,11 +167,22 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
             return;
         }
 
-        postProof(`/bookings/${uploadingProofFor.id}/upload-proof`, {
+        const targetBooking = uploadingProofFor;
+
+        postProof(`/bookings/${targetBooking.id}/upload-proof`, {
             preserveScroll: true,
             onSuccess: () => {
                 setUploadingProofFor(null);
                 resetProof();
+                const isSubmitted =
+                    targetBooking.declaration_form_status === 'submitted_online' ||
+                    targetBooking.declaration_form_status === 'physical_copy_received' ||
+                    Boolean(targetBooking.declaration_data) ||
+                    Boolean(targetBooking.declaration_form_path);
+
+                if (!isSubmitted) {
+                    setDeclarationPromptBookingId(targetBooking.id);
+                }
             },
         });
     };
@@ -757,6 +770,13 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                 }
                 variant="destructive"
                 confirmText={pendingAction?.type === 'cancel' ? 'Cancel Booking' : 'Delete Draft'}
+            />
+
+            {/* Customs Declaration Prompt Modal */}
+            <DeclarationPromptModal
+                isOpen={Boolean(declarationPromptBookingId)}
+                onClose={() => setDeclarationPromptBookingId(null)}
+                bookingId={declarationPromptBookingId}
             />
         </AppLayout>
     );

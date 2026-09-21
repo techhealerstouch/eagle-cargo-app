@@ -1,7 +1,6 @@
 import { useForm } from '@inertiajs/react';
 import { Upload, RefreshCw, Loader2 } from 'lucide-react';
 import React, { useState } from 'react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
@@ -13,7 +12,7 @@ interface ProofUploadFormProps {
 export function ProofUploadForm({ bookingId, onSuccess }: ProofUploadFormProps) {
     const [uploadPreview, setUploadPreview] = useState<string | null>(null);
 
-    const { data, setData, post, processing } = useForm<{ proof_of_payment: File | null }>({
+    const { data, setData, post, processing, reset } = useForm<{ proof_of_payment: File | null }>({
         proof_of_payment: null,
     });
 
@@ -21,14 +20,17 @@ export function ProofUploadForm({ bookingId, onSuccess }: ProofUploadFormProps) 
         e.preventDefault();
 
         if (processing) {
-return;
-}
+            return;
+        }
 
         post(`/bookings/${bookingId}/upload-proof`, {
+            preserveScroll: true,
             onSuccess: () => {
+                reset();
+                setUploadPreview(null);
                 if (onSuccess) {
-onSuccess();
-}
+                    onSuccess();
+                }
             },
         });
     };

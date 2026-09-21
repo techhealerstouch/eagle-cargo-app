@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Api\UserValidationController;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreUserRequest;
 use App\Http\Requests\Admin\UpdateUserRequest;
@@ -10,6 +11,7 @@ use App\Models\Area;
 use App\Models\Courier;
 use App\Models\PickupZone;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
@@ -18,8 +20,17 @@ use Inertia\Inertia;
 
 class UserController extends Controller
 {
+    /**
+     * Check if an email address is available.
+     */
+    public function checkEmail(Request $request): JsonResponse
+    {
+        return app(UserValidationController::class)->checkEmail($request);
+    }
+
     public function index(Request $request)
     {
+
         if ($request->role === Role::Sender->value || $request->role === 'sender') {
             return redirect()->route('admin.senders.index', $request->only(['search']));
         }

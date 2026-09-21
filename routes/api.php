@@ -6,8 +6,14 @@ use App\Http\Controllers\Api\BoxController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\NotificationPreferenceController;
 use App\Http\Controllers\Api\TrackingController;
+use App\Http\Controllers\Api\UserValidationController;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+// Public email availability check
+Route::match(['get', 'post'], '/users/check-email', [UserValidationController::class, 'checkEmail'])
+    ->middleware('throttle:api');
+
 
 Route::get('/user', function (Request $request) {
     return $request->user();

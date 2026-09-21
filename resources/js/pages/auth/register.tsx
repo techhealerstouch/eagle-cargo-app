@@ -1,6 +1,6 @@
 import { Form, Head, Link, usePage } from '@inertiajs/react';
 import React from 'react';
-import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import InputError from '@/components/common/input-error';
 import PasswordInput from '@/components/common/password-input';
 import TextLink from '@/components/common/text-link';
@@ -16,6 +16,8 @@ import { store } from '@/routes/register';
 import AppLogoIcon from '@/components/layout/app-logo-icon';
 import BrandLogoImage from '@/components/layout/brand-logo-image';
 import type { SharedData } from '@/types';
+import { useEmailValidator } from '@/hooks/use-email-validator';
+import { toast } from 'sonner';
 
 type Role = 'sender' | 'recipient';
 
@@ -66,6 +68,9 @@ export default function Register() {
     const [stepErrors, setStepErrors] = React.useState<
         Partial<Record<RegisterField, string>>
     >({});
+    const emailValidator = useEmailValidator({
+        endpoint: '/api/users/check-email',
+    });
     const [formData, setFormData] = React.useState<RegisterFormData>({
         role: 'sender',
         name: '',
@@ -158,9 +163,41 @@ export default function Register() {
         return Object.keys(nextErrors).length === 0;
     };
 
-    const handleNext = () => {
+    const handleNext = async () => {
         if (!validateStep(step)) {
+            if (step === 1) {
+                toast.error('Please select an account role to continue.');
+            } else if (step === 2) {
+                if (!formData.name.trim()) {
+                    toast.error('Please enter your full name.');
+                } else if (!formData.email.trim()) {
+                    toast.error('Please enter your email address.');
+                } else if (!formData.mobile) {
+                    toast.error('Please enter a valid mobile number.');
+                } else if (!formData.password) {
+                    toast.error('Please enter a password.');
+                } else if (formData.password !== formData.password_confirmation) {
+                    toast.error('Passwords do not match.');
+                } else {
+                    toast.error('Please complete all required fields in account details.');
+                }
+            } else if (step === 3) {
+                toast.error('Street address is required to proceed.');
+            }
             return;
+        }
+
+        if (step === 2) {
+            const isEmailAvailable = await emailValidator.validateEmailAsync(formData.email);
+            if (!isEmailAvailable) {
+                const errorMsg = emailValidator.message || 'This email address is already registered. Please use another email.';
+                setStepErrors((prev) => ({
+                    ...prev,
+                    email: errorMsg,
+                }));
+                toast.error(errorMsg);
+                return;
+            }
         }
 
         setStep((prev) => Math.min(prev + 1, WIZARD_STEPS.length));
@@ -491,28 +528,55 @@ export default function Register() {
                                                         >
                                                             Email address
                                                         </Label>
-                                                        <Input
-                                                            id="email"
-                                                            type="email"
-                                                            required
-                                                            autoComplete="email"
-                                                            value={
-                                                                formData.email
-                                                            }
-                                                            onChange={(e) =>
-                                                                setField(
-                                                                    'email',
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                            placeholder="mendozaryan640@gmail.com"
-                                                            className="h-11 rounded-lg border-zinc-200 bg-white font-sans text-zinc-900 focus-visible:border-zinc-950 focus-visible:ring-zinc-950/10"
-                                                        />
+                                                        <div className="relative">
+                                                            <Input
+                                                                id="email"
+                                                                type="email"
+                                                                required
+                                                                autoComplete="email"
+                                                                value={formData.email}
+                                                                onChange={(e) => {
+                                                                    setField('email', e.target.value);
+                                                                    emailValidator.checkEmail(e.target.value);
+                                                                }}
+                                                                onBlur={() => {
+                                                                    if (formData.email.trim()) {
+                                                                        emailValidator.validateEmailAsync(formData.email);
+                                                                    }
+                                                                }}
+                                                                placeholder="mendozaryan640@gmail.com"
+                                                                className={`h-11 rounded-lg border bg-white font-sans text-zinc-900 pr-10 ${
+                                                                    emailValidator.isChecking
+                                                                        ? 'border-amber-400 focus-visible:border-amber-400 focus-visible:ring-amber-400/20'
+                                                                        : emailValidator.status === 'valid'
+                                                                          ? 'border-emerald-500 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20'
+                                                                          : emailValidator.status === 'invalid' || emailValidator.status === 'error' || stepErrors.email || errors.email
+                                                                            ? 'border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20'
+                                                                            : 'border-zinc-200 focus-visible:border-zinc-950 focus-visible:ring-zinc-950/10'
+                                                                }`}
+                                                            />
+                                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
+                                                                {emailValidator.isChecking && (
+                                                                    <Loader2 className="size-4 animate-spin text-amber-500" />
+                                                                )}
+                                                                {!emailValidator.isChecking && emailValidator.status === 'valid' && (
+                                                                    <CheckCircle2 className="size-4 text-emerald-500" />
+                                                                )}
+                                                                {!emailValidator.isChecking && (emailValidator.status === 'invalid' || emailValidator.status === 'error') && (
+                                                                    <AlertCircle className="size-4 text-red-500" />
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                        {emailValidator.status === 'valid' && emailValidator.message && (
+                                                            <p className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                                                                <span>✓</span> {emailValidator.message}
+                                                            </p>
+                                                        )}
                                                         <InputError
                                                             message={
-                                                                stepErrors.email ??
-                                                                errors.email
+                                                                (emailValidator.status === 'invalid' || emailValidator.status === 'error')
+                                                                    ? emailValidator.message
+                                                                    : (stepErrors.email ?? errors.email)
                                                             }
                                                         />
                                                     </div>

@@ -14,8 +14,10 @@ import { useState, useEffect, useRef } from 'react';
 import DeclarationPromptModal from '@/components/common/declaration-prompt-modal';
 import { Button } from '@/components/ui/button';
 import { ManualPaymentEntry } from './ManualPaymentEntry';
+import { PaymentInitiatedState } from './PaymentInitiatedState';
 import type { PaymentMethodId, PaymentMethodDefinition } from './PaymentMethodSelector';
 import { PaymentMethodSelector } from './PaymentMethodSelector';
+import { ProofUploadForm } from './ProofUploadForm';
 import { StripeCheckoutForm } from './StripeCheckoutForm';
 import { SuccessState } from './SuccessState';
 import type { PaymentFlowProps } from './types';
@@ -53,7 +55,6 @@ export default function PaymentFlow({
     booking,
     stripeKey,
     clientSecret,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     bankDetails,
     onSuccess,
     onStripeLoadError,
@@ -63,18 +64,28 @@ export default function PaymentFlow({
     invoiceId,
     manualAmount,
     manualAmountCap: manualAmountCapProp,
-    backUrl,
-    backLabel,
+    backUrl = '/dashboard',
+    backLabel = 'Return to My Bookings',
 }: PaymentFlowProps) {
     const [paymentJustSucceeded, setPaymentJustSucceeded] = useState(false);
+    const [proofJustUploaded, setProofJustUploaded] = useState(false);
     const isPaid = booking.payment_status === 'paid' || paymentJustSucceeded;
+    const isOfflineInitiated =
+        proofJustUploaded ||
+        Boolean(booking.proof_of_payment) ||
+        Boolean(booking.payment_reference);
     
     const [showDeclarationModal, setShowDeclarationModal] = useState(false);
     const modalHasBeenShown = useRef(false);
 
     const triggerDeclarationModal = () => {
-        const needsDec = !booking.declaration_data && !booking.declaration_form_path;
-        if (role === 'sender' && needsDec && !modalHasBeenShown.current) {
+        const isSubmitted =
+            booking.declaration_form_status === 'submitted_online' ||
+            booking.declaration_form_status === 'physical_copy_received' ||
+            Boolean(booking.declaration_data) ||
+            Boolean(booking.declaration_form_path);
+
+        if (role === 'sender' && !isSubmitted && !modalHasBeenShown.current) {
             modalHasBeenShown.current = true;
             setShowDeclarationModal(true);
         }
@@ -166,7 +177,7 @@ export default function PaymentFlow({
 
             {activeMethod === 'stripe' && stripeKey && clientSecret && (
                 <Elements stripe={getStripe(stripeKey)} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#18181b', borderRadius: '12px' } } }}>
-<StripeCheckoutForm bookingId={booking.id} onSuccess={() => {
+                    <StripeCheckoutForm bookingId={booking.id} onSuccess={() => {
                         setPaymentJustSucceeded(true);
 
                         if (onSuccess) {
@@ -178,94 +189,205 @@ export default function PaymentFlow({
             )}
 
             {activeMethod === 'cash_on_pickup' && (
-                <div className="p-6 sm:p-8 text-center space-y-6 bg-emerald-50/30 rounded-3xl border border-emerald-100/50 animate-in zoom-in duration-500">
-                    <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                        <Coins className="size-10 text-emerald-600" />
+                <div className="p-6 sm:p-8 text-center space-y-6 bg-emerald-50/30 dark:bg-emerald-950/20 rounded-3xl border border-emerald-100/50 dark:border-emerald-900/40 animate-in zoom-in duration-500">
+                    <div className="w-20 h-20 bg-emerald-100 dark:bg-emerald-900/50 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                        <Coins className="size-10 text-emerald-600 dark:text-emerald-400" />
                     </div>
                     <div className="space-y-2">
-                        <h4 className="text-2xl font-bold text-emerald-900 tracking-tight">Ready for Pickup</h4>
-                        <p className="text-sm text-emerald-700/80 max-w-xs mx-auto leading-relaxed">
-                            Our driver will collect <span className="font-black text-emerald-900 underline underline-offset-4">${totalAmount.toFixed(2)}</span> in cash during pickup.
+                        <h4 className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 tracking-tight">Ready for Pickup</h4>
+                        <p className="text-sm text-emerald-700/80 dark:text-emerald-300 max-w-xs mx-auto leading-relaxed">
+                            Our driver will collect <span className="font-black text-emerald-900 dark:text-emerald-50 underline underline-offset-4">${totalAmount.toFixed(2)} AUD</span> in cash during pickup.
                         </p>
                     </div>
-                    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border border-emerald-100/50 text-left space-y-3">
+                    <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm p-5 rounded-2xl border border-emerald-100/50 dark:border-zinc-800 text-left space-y-3">
                          <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600" /></div>
-                             <p className="text-[11px] font-medium text-emerald-800">You will receive a physical receipt on-site.</p>
+                             <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
+                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">You will receive a physical receipt on-site.</p>
                          </div>
                          <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600" /></div>
-                             <p className="text-[11px] font-medium text-emerald-800">No advance payment required.</p>
+                             <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
+                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">No advance payment required.</p>
                          </div>
                          <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600" /></div>
-                             <p className="text-[11px] font-medium text-emerald-800">Pickup Date: <span className="font-bold">{booking.preferred_date ? new Date(booking.preferred_date).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'TBA'}</span></p>
+                             <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
+                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Pickup Date: <span className="font-bold">{booking.preferred_date ? new Date(booking.preferred_date).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'TBA'}</span></p>
                          </div>
                     </div>
-                    <Link href="/dashboard" className="block pt-2">
-                        <Button className="w-full h-12 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200">
-                           Go to My Bookings
+                    <Link href={backUrl} className="block pt-2">
+                        <Button className="w-full h-12 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 dark:shadow-none">
+                           {backLabel}
                         </Button>
                     </Link>
                 </div>
             )}
 
             {activeMethod === 'bank_transfer' && (
-                <div className="p-6 sm:p-8 text-center space-y-6 bg-blue-50/30 rounded-3xl border border-blue-100/50 animate-in zoom-in duration-500">
-                    <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                        <Building2 className="size-10 text-blue-600" />
+                isOfflineInitiated ? (
+                    <PaymentInitiatedState
+                        booking={booking}
+                        backUrl={backUrl}
+                        backLabel={backLabel}
+                        onProofSuccess={() => {
+                            setProofJustUploaded(true);
+                            triggerDeclarationModal();
+                            if (onSuccess) {
+                                onSuccess();
+                            }
+                        }}
+                    />
+                ) : (
+                    <div className="space-y-6 animate-in zoom-in duration-500">
+                        <div className="p-6 sm:p-8 text-center space-y-6 bg-blue-50/30 dark:bg-blue-950/20 rounded-3xl border border-blue-100/50 dark:border-blue-900/40">
+                            <div className="w-20 h-20 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                                <Building2 className="size-10 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <div className="space-y-2">
+                                <h4 className="text-2xl font-bold text-blue-900 dark:text-blue-100 tracking-tight">Bank Transfer</h4>
+                                <p className="text-sm text-blue-700/80 dark:text-blue-300 max-w-xs mx-auto leading-relaxed">
+                                    Please transfer <span className="font-black text-blue-900 dark:text-blue-50 underline underline-offset-4">${totalAmount.toFixed(2)} AUD</span> using the details below.
+                                </p>
+                            </div>
+
+                            <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm p-5 rounded-2xl border border-blue-100/60 dark:border-zinc-800 text-left space-y-2.5 text-xs">
+                                {bankDetails?.company_name && (
+                                    <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                                        <span className="text-zinc-500 dark:text-zinc-400">Account Name</span>
+                                        <span className="font-bold text-zinc-900 dark:text-zinc-100">{bankDetails.company_name}</span>
+                                    </div>
+                                )}
+                                {bankDetails?.bank_name && (
+                                    <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                                        <span className="text-zinc-500 dark:text-zinc-400">Bank</span>
+                                        <span className="font-bold text-zinc-900 dark:text-zinc-100">{bankDetails.bank_name}</span>
+                                    </div>
+                                )}
+                                {bankDetails?.bsb && (
+                                    <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                                        <span className="text-zinc-500 dark:text-zinc-400">BSB</span>
+                                        <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{bankDetails.bsb}</span>
+                                    </div>
+                                )}
+                                {bankDetails?.account_number && (
+                                    <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                                        <span className="text-zinc-500 dark:text-zinc-400">Account Number</span>
+                                        <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100">{bankDetails.account_number}</span>
+                                    </div>
+                                )}
+                                <div className="flex items-center justify-between">
+                                    <span className="text-zinc-500 dark:text-zinc-400">Payment Reference</span>
+                                    <span className="font-mono font-bold text-blue-600 dark:text-blue-400">{booking.reference_number}</span>
+                                </div>
+                            </div>
+
+                            <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm p-5 rounded-2xl border border-blue-100/50 dark:border-zinc-800 text-left space-y-3">
+                                <div className="flex items-start gap-3">
+                                    <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-blue-600 dark:text-blue-400" /></div>
+                                    <p className="text-[11px] font-medium text-blue-800 dark:text-blue-300">Your booking is secured and will be confirmed once payment clears.</p>
+                                </div>
+                                <div className="flex items-start gap-3">
+                                    <div className="h-5 w-5 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-blue-600 dark:text-blue-400" /></div>
+                                    <p className="text-[11px] font-medium text-blue-800 dark:text-blue-300">Upload your receipt below or from your dashboard at any time.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-4">
+                            <div>
+                                <h5 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Upload Transfer Receipt</h5>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400">Attach a screenshot or receipt of your bank transfer to speed up verification.</p>
+                            </div>
+                            <ProofUploadForm
+                                bookingId={booking.id}
+                                onSuccess={() => {
+                                    setProofJustUploaded(true);
+                                    triggerDeclarationModal();
+                                    if (onSuccess) {
+                                        onSuccess();
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        <Link href={backUrl} className="block pt-2">
+                            <Button variant="outline" className="w-full h-12 rounded-xl border-zinc-200 dark:border-zinc-800 font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                                {backLabel}
+                            </Button>
+                        </Link>
                     </div>
-                    <div className="space-y-2">
-                        <h4 className="text-2xl font-bold text-blue-900 tracking-tight">Bank Transfer</h4>
-                        <p className="text-sm text-blue-700/80 max-w-xs mx-auto leading-relaxed">
-                            Please transfer <span className="font-black text-blue-900 underline underline-offset-4">${totalAmount.toFixed(2)}</span> to our bank account.
-                        </p>
-                    </div>
-                    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border border-blue-100/50 text-left space-y-3">
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-blue-600" /></div>
-                             <p className="text-[11px] font-medium text-blue-800">Your booking is secured and will be confirmed once payment clears.</p>
-                         </div>
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-blue-600" /></div>
-                             <p className="text-[11px] font-medium text-blue-800">You can upload your proof of payment in your dashboard.</p>
-                         </div>
-                    </div>
-                    <Link href="/dashboard" className="block pt-2">
-                        <Button className="w-full h-12 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200">
-                           Go to My Bookings
-                        </Button>
-                    </Link>
-                </div>
+                )
             )}
 
             {activeMethod === 'pay_id' && (
-                <div className="p-6 sm:p-8 text-center space-y-6 bg-purple-50/30 rounded-3xl border border-purple-100/50 animate-in zoom-in duration-500">
-                    <div className="w-20 h-20 bg-purple-100 rounded-full flex items-center justify-center mx-auto shadow-inner">
-                        <Smartphone className="size-10 text-purple-600" />
+                isOfflineInitiated ? (
+                    <PaymentInitiatedState
+                        booking={booking}
+                        backUrl={backUrl}
+                        backLabel={backLabel}
+                        onProofSuccess={() => {
+                            setProofJustUploaded(true);
+                            triggerDeclarationModal();
+                            if (onSuccess) {
+                                onSuccess();
+                            }
+                        }}
+                    />
+                ) : (
+                    <div className="space-y-6 animate-in zoom-in duration-500">
+                        <div className="p-6 sm:p-8 text-center space-y-6 bg-purple-50/30 dark:bg-purple-950/20 rounded-3xl border border-purple-100/50 dark:border-purple-900/40">
+                            <div className="w-20 h-20 bg-purple-100 dark:bg-purple-900/50 rounded-full flex items-center justify-center mx-auto shadow-inner">
+                                <Smartphone className="size-10 text-purple-600 dark:text-purple-400" />
+                            </div>
+                            <div className="space-y-2">
+                                <h4 className="text-2xl font-bold text-purple-900 dark:text-purple-100 tracking-tight">PayID Payment</h4>
+                                <p className="text-sm text-purple-700/80 dark:text-purple-300 max-w-xs mx-auto leading-relaxed">
+                                    Please send <span className="font-black text-purple-900 dark:text-purple-50 underline underline-offset-4">${totalAmount.toFixed(2)} AUD</span> via PayID.
+                                </p>
+                            </div>
+
+                            <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm p-5 rounded-2xl border border-purple-100/60 dark:border-zinc-800 text-left space-y-2.5 text-xs">
+                                <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-2">
+                                    <span className="text-zinc-500 dark:text-zinc-400">Payment Reference / Description</span>
+                                    <span className="font-mono font-bold text-purple-600 dark:text-purple-400">{booking.reference_number}</span>
+                                </div>
+                                <p className="text-[11px] text-zinc-500">Please make sure to include the booking reference in your transfer description so we can match your payment.</p>
+                            </div>
+
+                            <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm p-5 rounded-2xl border border-purple-100/50 dark:border-zinc-800 text-left space-y-3">
+                                <div className="flex items-start gap-3">
+                                    <div className="h-5 w-5 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-purple-600 dark:text-purple-400" /></div>
+                                    <p className="text-[11px] font-medium text-purple-800 dark:text-purple-300">Your booking is secured and will be confirmed once payment clears.</p>
+                                </div>
+                                <div className="flex items-start gap-3">
+                                    <div className="h-5 w-5 rounded-full bg-purple-100 dark:bg-purple-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-purple-600 dark:text-purple-400" /></div>
+                                    <p className="text-[11px] font-medium text-purple-800 dark:text-purple-300">Upload your PayID confirmation receipt below or in your dashboard.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-sm space-y-4">
+                            <div>
+                                <h5 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Upload PayID Receipt</h5>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400">Attach a screenshot of your PayID confirmation to speed up verification.</p>
+                            </div>
+                            <ProofUploadForm
+                                bookingId={booking.id}
+                                onSuccess={() => {
+                                    setProofJustUploaded(true);
+                                    triggerDeclarationModal();
+                                    if (onSuccess) {
+                                        onSuccess();
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        <Link href={backUrl} className="block pt-2">
+                            <Button variant="outline" className="w-full h-12 rounded-xl border-zinc-200 dark:border-zinc-800 font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                                {backLabel}
+                            </Button>
+                        </Link>
                     </div>
-                    <div className="space-y-2">
-                        <h4 className="text-2xl font-bold text-purple-900 tracking-tight">PayID</h4>
-                        <p className="text-sm text-purple-700/80 max-w-xs mx-auto leading-relaxed">
-                            Please send <span className="font-black text-purple-900 underline underline-offset-4">${totalAmount.toFixed(2)}</span> via PayID.
-                        </p>
-                    </div>
-                    <div className="bg-white/80 backdrop-blur-sm p-5 rounded-2xl border border-purple-100/50 text-left space-y-3">
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-purple-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-purple-600" /></div>
-                             <p className="text-[11px] font-medium text-purple-800">Your booking is secured and will be confirmed once payment clears.</p>
-                         </div>
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-purple-100 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-purple-600" /></div>
-                             <p className="text-[11px] font-medium text-purple-800">You can upload your proof of payment in your dashboard.</p>
-                         </div>
-                    </div>
-                    <Link href="/dashboard" className="block pt-2">
-                        <Button className="w-full h-12 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-700 transition-all shadow-lg shadow-purple-200">
-                           Go to My Bookings
-                        </Button>
-                    </Link>
-                </div>
+                )
             )}
 
             {role !== 'sender' && activeMethod !== 'stripe' && endpoint && (

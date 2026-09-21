@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
-import { Save, ArrowLeft, User, ShieldCheck, Mail, Lock, Info, Phone, MapPin, ChevronDown } from 'lucide-react';
+import { Save, ArrowLeft, User, ShieldCheck, Mail, Lock, Info, Phone, MapPin, ChevronDown, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,9 @@ import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
 import CommissionCalculatorForm from '@/components/admin/users/commission-calculator-form';
 import PhoneInput from '@/components/ui/PhoneInput';
+import { useEmailValidator } from '@/hooks/use-email-validator';
+import { toast } from 'sonner';
+
 
 const ROLE_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
     sender: { label: 'CUSTOMER (SENDER)', bg: 'bg-blue-50/80', text: 'text-blue-700', border: 'border-blue-200' },
@@ -84,6 +87,12 @@ export default function UsersEdit({
     const isOwnProfile = auth?.user?.id === user.id;
     const [rawJsonMode, setRawJsonMode] = useState(false);
 
+    const emailValidator = useEmailValidator({
+        initialEmail: user.email,
+        ignoreUserId: user.id,
+        endpoint: '/admin/users/check-email',
+    });
+
     // Initial rates extraction for visual form
     const initialRates = user.commission_rates || {};
     const [commissionForm, setCommissionForm] = useState({
@@ -133,8 +142,26 @@ export default function UsersEdit({
         setData('commission_rates', JSON.stringify(jsonObject, null, 2));
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (!data.name.trim()) {
+            toast.error('Full Name is required.');
+            return;
+        }
+
+        if (!data.email.trim()) {
+            toast.error('Email Address is required.');
+            return;
+        }
+
+        if (data.email.trim().toLowerCase() !== user.email.trim().toLowerCase()) {
+            const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
+            if (!isEmailAvailable) {
+                toast.error(emailValidator.message || 'Cannot save changes: This email address is already registered to another user.');
+                return;
+            }
+        }
         
         let finalRates: any = null;
         if (data.role === 'picker') {
@@ -142,7 +169,7 @@ export default function UsersEdit({
                 try {
                     finalRates = JSON.parse(data.commission_rates);
                 } catch (err) {
-                    alert('Invalid JSON in Commission Rates');
+                    toast.error('Invalid JSON format in Commission Rates.');
                     return;
                 }
             } else {
@@ -171,7 +198,15 @@ export default function UsersEdit({
             ...(return_url ? { return_to: return_url } : {}),
         }));
         
-        put(`/admin/users/${user.id}`);
+        put(`/admin/users/${user.id}`, {
+            onError: (errs) => {
+                const firstError = Object.values(errs)[0];
+                toast.error(firstError || 'Failed to update user profile. Please check the form.');
+            },
+            onSuccess: () => {
+                toast.success('User updated successfully.');
+            },
+        });
     };
 
     const currentRoleBadge = ROLE_CONFIG[data.role] || ROLE_CONFIG['courier'];
@@ -266,15 +301,53 @@ export default function UsersEdit({
                                         <Input
                                             id="email"
                                             type="email"
-                                            className="h-12 rounded-xl border-border bg-card pl-11 pr-4 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all shadow-2xs"
+                                            className={`h-12 rounded-xl border bg-card pl-11 pr-11 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 transition-all shadow-2xs ${
+                                                emailValidator.isChecking
+                                                    ? 'border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20'
+                                                    : emailValidator.status === 'valid' && data.email.trim().toLowerCase() !== user.email.trim().toLowerCase()
+                                                      ? 'border-emerald-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                                                      : emailValidator.status === 'invalid' || emailValidator.status === 'error'
+                                                        ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
+                                                        : 'border-border focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust'
+                                            }`}
                                             value={data.email}
-                                            onChange={(e) => setData('email', e.target.value)}
+                                            onChange={(e) => {
+                                                setData('email', e.target.value);
+                                                emailValidator.checkEmail(e.target.value);
+                                            }}
+                                            onBlur={() => {
+                                                if (data.email.trim()) {
+                                                    emailValidator.validateEmailAsync(data.email);
+                                                }
+                                            }}
                                             placeholder="user@example.com"
                                             maxLength={255}
                                             required
                                         />
+                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
+                                            {emailValidator.isChecking && (
+                                                <Loader2 className="size-4 animate-spin text-amber-500" />
+                                            )}
+                                            {!emailValidator.isChecking && emailValidator.status === 'valid' && data.email.trim().toLowerCase() !== user.email.trim().toLowerCase() && (
+                                                <CheckCircle2 className="size-4 text-emerald-500" />
+                                            )}
+                                            {!emailValidator.isChecking && (emailValidator.status === 'invalid' || emailValidator.status === 'error') && (
+                                                <AlertCircle className="size-4 text-red-500" />
+                                            )}
+                                        </div>
                                     </div>
-                                    {errors.email && (
+                                    {/* Status messages */}
+                                    {emailValidator.status === 'valid' && emailValidator.message && data.email.trim().toLowerCase() !== user.email.trim().toLowerCase() && (
+                                        <p className="text-[11px] font-bold text-emerald-600 ml-0.5 uppercase tracking-wider flex items-center gap-1.5">
+                                            <span>✓</span> {emailValidator.message}
+                                        </p>
+                                    )}
+                                    {(emailValidator.status === 'invalid' || emailValidator.status === 'error') && emailValidator.message && (
+                                        <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">
+                                            {emailValidator.message}
+                                        </p>
+                                    )}
+                                    {!(emailValidator.status === 'invalid' || emailValidator.status === 'error') && errors.email && (
                                         <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{errors.email}</p>
                                     )}
                                 </div>

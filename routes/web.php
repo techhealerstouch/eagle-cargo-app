@@ -304,7 +304,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('payments/{payment}/confirm', [PaymentController::class, 'confirm'])->middleware('throttle:admin-mutations')->name('payments.confirm');
         Route::post('payments/{payment}/reject', [PaymentController::class, 'reject'])->middleware('throttle:admin-mutations')->name('payments.reject');
         Route::resource('enquiries', EnquiryController::class)->only(['index', 'show', 'update', 'destroy']);
-        Route::resource('shipping-updates', ShippingUpdateController::class);
+        Route::match(['get', 'post'], 'users/check-email', [UserController::class, 'checkEmail'])->name('users.check-email');
         Route::post('users/{id}/restore', [UserController::class, 'restore'])->middleware('throttle:admin-mutations')->name('users.restore');
         Route::resource('users', UserController::class)->withTrashed();
         Route::post('serial-numbers/bulk-void', [App\Http\Controllers\Admin\SerialNumberController::class, 'bulkVoid'])->name('serial-numbers.bulk-void');
