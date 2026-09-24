@@ -21,6 +21,7 @@ use App\Http\Controllers\Admin\SenderController;
 use App\Http\Controllers\Admin\ShippingUpdateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\BookingController;
+use App\Http\Controllers\GuestBookingController;
 use App\Http\Controllers\CourierController;
 use App\Http\Controllers\MockPaymentController;
 use App\Http\Controllers\Picker\EarningsController;
@@ -38,8 +39,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
 Route::get('/', function () {
-    return redirect()->route('login');
-});
+    return inertia('welcome');
+})->name('welcome');
 
 Route::get('/uploads/{path}', function (string $path) {
     $relativePath = ltrim($path, '/');
@@ -192,18 +193,41 @@ Route::get('/track/{tracking_number}', function (Request $request, $tracking_num
     return redirect()->route('track', array_merge(['tracking_number' => $tracking_number], $request->query()));
 });
 
+// Guest booking routes (public)
+Route::get('/guest/book', [GuestBookingController::class, 'create'])
+    ->middleware('throttle:public-tracking')
+    ->name('guest.book');
+Route::post('/guest/bookings', [GuestBookingController::class, 'store'])
+    ->middleware('throttle:booking-writes')
+    ->name('guest.bookings.store');
+Route::get('/guest/booking/confirmed', [GuestBookingController::class, 'confirmed'])
+    ->middleware('throttle:public-tracking')
+    ->name('guest.booking.confirmed');
+
+// Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
+Route::inertia('/about', 'marketing/about')->name('about');
+Route::inertia('/services', 'marketing/services')->name('services');
+Route::inertia('/faq', 'marketing/faq')->name('faq');
+Route::get('/contact', function (\App\Services\SettingsService $settingsService) {
+    $general = $settingsService->getGeneralSettings();
+    $invoice = $settingsService->getInvoiceSettings();
+
+    return inertia('marketing/contact', [
+        'contactInfo' => [
+            'phone' => $general['contactPhone'] ?: '+61 406 828 471',
+            'email' => $general['supportEmail'] ?: 'support@eaglecargo.com.au',
+            'address' => $invoice['address'] ?: "6 Ivan St, Arundel QLD 4214, Australia",
+            'hours' => 'Monday – Saturday: 8:00 AM – 6:00 PM AEST',
+        ],
+    ]);
+})->name('contact');
+Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
+
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('/home', 'welcome')->name('home');
     Route::get('/notifications', function () {
         return inertia('notifications/index');
     })->name('notifications.index');
-    Route::inertia('/about', 'marketing/about')->name('about');
-    Route::inertia('/services', 'marketing/services')->name('services');
-    Route::inertia('/faq', 'marketing/faq')->name('faq');
-    Route::get('/contact', function () {
-        return inertia('marketing/contact');
-    })->name('contact');
-    Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
 
     Route::get('/book', [BookingController::class, 'create'])->name('book');
     Route::get('/declaration-form/blank', [BookingController::class, 'downloadBlankDeclaration'])->name('declaration.blank');

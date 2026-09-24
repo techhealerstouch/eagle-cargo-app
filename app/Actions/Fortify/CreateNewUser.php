@@ -5,6 +5,7 @@ namespace App\Actions\Fortify;
 use App\Concerns\PasswordValidationRules;
 use App\Concerns\ProfileValidationRules;
 use App\Enums\Role;
+use App\Models\Booking;
 use App\Models\Courier;
 use App\Models\Picker;
 use App\Models\Recipient;
@@ -56,7 +57,12 @@ class CreateNewUser implements CreatesNewUsers
             $lastName = count($nameParts) > 1 ? implode(' ', array_slice($nameParts, 1)) : '';
 
             if ($userRole === Role::Sender) {
-                Sender::updateOrCreate(
+                $guestSender = Sender::where('email', $user->email)->whereNull('user_id')->first();
+                if ($guestSender) {
+                    $guestSender->update(['user_id' => $user->id]);
+                }
+
+                $sender = Sender::updateOrCreate(
                     ['user_id' => $user->id],
                     [
                         'first_name' => $firstName,
@@ -72,6 +78,17 @@ class CreateNewUser implements CreatesNewUsers
                         'longitude' => $input['longitude'] ?? null,
                     ]
                 );
+
+                // Reassign any remaining guest sender bookings or recipients with matching email
+                $otherGuestSenders = Sender::where('email', $user->email)
+                    ->where('id', '!=', $sender->id)
+                    ->get();
+
+                foreach ($otherGuestSenders as $other) {
+                    Booking::where('sender_id', $other->id)->update(['sender_id' => $sender->id]);
+                    Recipient::where('sender_id', $other->id)->update(['sender_id' => $sender->id]);
+                    $other->delete();
+                }
             } elseif ($userRole === Role::Recipient) {
                 Recipient::updateOrCreate(
                     ['user_id' => $user->id],

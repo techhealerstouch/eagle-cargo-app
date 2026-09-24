@@ -21,6 +21,17 @@ class Suburb extends Model
         'is_active' => 'boolean',
     ];
 
+    protected static function booted(): void
+    {
+        static::saved(function () {
+            \Illuminate\Support\Facades\Cache::forget('reference.suburbs.active');
+        });
+
+        static::deleted(function () {
+            \Illuminate\Support\Facades\Cache::forget('reference.suburbs.active');
+        });
+    }
+
     public function pickupZone(): BelongsTo
     {
         return $this->belongsTo(PickupZone::class);

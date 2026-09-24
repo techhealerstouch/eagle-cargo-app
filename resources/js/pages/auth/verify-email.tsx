@@ -3,6 +3,7 @@ import TextLink from '@/components/common/text-link';
 import { Button } from '@/components/ui/button';
 import AppLogoIcon from '@/components/layout/app-logo-icon';
 import BrandLogoImage from '@/components/layout/brand-logo-image';
+import MarketingLayout from '@/layouts/marketing-layout';
 import type { SharedData } from '@/types';
 import { logout } from '@/routes';
 import { send } from '@/routes/verification';
@@ -11,9 +12,10 @@ export default function VerifyEmail({ status }: { status?: string }) {
     const { settings } = usePage<SharedData>().props;
 
     return (
-        <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-50/50 p-6 font-sans md:p-10">
+        <MarketingLayout>
             <Head title="Email verification" />
-            <div className="w-full max-w-md">
+            <div className="flex min-h-[calc(100vh-14rem)] flex-col items-center justify-center py-12 px-4 sm:px-6 md:px-8 font-sans">
+                <div className="w-full max-w-md">
                 {/* Header */}
                 <div className="mb-8 flex flex-col items-center gap-4">
                     <Link
@@ -79,5 +81,6 @@ export default function VerifyEmail({ status }: { status?: string }) {
                 </div>
             </div>
         </div>
+        </MarketingLayout>
     );
 }

@@ -85,6 +85,52 @@ class ObserverSideEffectsTest extends TestCase
         $this->assertNotNull($booking->fresh()->shipped_at);
     }
 
+    public function test_booking_observer_syncs_collected_status_to_pending_boxes(): void
+    {
+        $booking = Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'confirmed_at' => now(),
+        ]);
+
+        $box1 = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::Pending,
+        ]);
+
+        $box2 = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::Pending,
+        ]);
+
+        $booking->update(['status' => BookingStatus::Collected]);
+
+        $this->assertEquals(BoxStatus::Collected, $box1->fresh()->status);
+        $this->assertEquals(BoxStatus::Collected, $box2->fresh()->status);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $box1->id,
+            'status' => BoxStatus::Collected->value,
+            'tracking_phase' => \App\Enums\TrackingPhase::PICKED_UP->value,
+        ]);
+    }
+
+    public function test_booking_observer_syncs_delivered_status_to_boxes(): void
+    {
+        $booking = Booking::factory()->create([
+            'status' => BookingStatus::Shipped,
+            'confirmed_at' => now(),
+            'shipped_at' => now(),
+        ]);
+
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::InTransit,
+        ]);
+
+        $booking->update(['status' => BookingStatus::Delivered]);
+
+        $this->assertEquals(BoxStatus::Delivered, $box->fresh()->status);
+    }
+
     // ---------------------------------------------------------------
     // 2. BoxObserver
     // ---------------------------------------------------------------
@@ -104,21 +150,27 @@ class ObserverSideEffectsTest extends TestCase
 
     public function test_box_observer_auto_populates_price_from_reference_data(): void
     {
-        $area = \App\Models\Area::factory()->create(['name' => 'Metro Manila', 'is_active' => true]);
-        $boxType = BoxType::factory()->create(['name' => 'Jumbo', 'is_active' => true]);
-        \App\Models\BoxPrice::create([
+        $zone = \App\Models\PickupZone::first() ?? \App\Models\PickupZone::create(['name' => 'Gold Coast Price Test', 'is_active' => true]);
+        $area = \App\Models\Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        $boxType = BoxType::factory()->create(['name' => 'Jumbo Price Test', 'is_active' => true]);
+        \App\Models\BoxPrice::firstOrCreate([
+            'pickup_zone_id' => $zone->id,
             'area_id' => $area->id,
             'box_type_id' => $boxType->id,
+        ], [
             'price' => 150.00,
         ]);
 
-        $sender = Sender::factory()->create();
+        $sender = Sender::factory()->create(['pickup_zone_id' => $zone->id]);
         $recipient = Recipient::factory()->create([
             'sender_id' => $sender->id,
             'area_id' => $area->id,
         ]);
 
-        $booking = Booking::factory()->create(['sender_id' => $sender->id]);
+        $booking = Booking::factory()->create([
+            'sender_id' => $sender->id,
+            'pickup_zone_id' => $zone->id,
+        ]);
 
         $box = Box::factory()->create([
             'booking_id' => $booking->id,

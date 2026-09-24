@@ -3,13 +3,15 @@ import { Search, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type SuburbOption = {
+    id?: number;
     name: string;
     postcode?: string | null;
+    pickup_zone_id?: number | null;
 };
 
 interface SuburbSelectProps {
     value: string;
-    onChange: (suburbName: string, postcode?: string) => void;
+    onChange: (suburbName: string, postcode?: string, suburb?: SuburbOption) => void;
     suburbs?: SuburbOption[];
     placeholder?: string;
     className?: string;
@@ -70,7 +72,7 @@ export function SuburbSelect({
 
     const handleSelect = (suburb: SuburbOption) => {
         setInputValue(suburb.name);
-        onChange(suburb.name, suburb.postcode || undefined);
+        onChange(suburb.name, suburb.postcode || undefined, suburb);
         setIsOpen(false);
     };
 
@@ -94,18 +96,19 @@ export function SuburbSelect({
                     onFocus={() => setIsOpen(true)}
                     placeholder={placeholder}
                     className={cn(
-                        'h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 pr-8 text-xs font-medium text-zinc-900 focus:border-brand-rust focus:outline-none focus:ring-1 focus:ring-brand-rust dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100',
-                        className
+                        'h-10 w-full rounded-lg border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-900 focus:border-brand-rust focus:outline-none focus:ring-1 focus:ring-brand-rust dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100',
+                        className,
+                        'pr-10'
                     )}
                 />
-                <Search className="absolute right-3 size-3.5 text-zinc-400 pointer-events-none" />
+                <Search className="absolute right-3.5 size-4 text-zinc-400 pointer-events-none" />
             </div>
 
             {/* Suggestions Dropdown Menu */}
             {isOpen && (
                 <div
                     className={cn(
-                        'absolute left-0 right-0 z-50 max-h-52 w-full overflow-y-auto rounded-lg border border-zinc-200 bg-white p-1 shadow-xl transition-all dark:border-zinc-800 dark:bg-zinc-900',
+                        'absolute left-0 right-0 z-50 max-h-56 w-full overflow-y-auto rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl transition-all dark:border-zinc-800 dark:bg-zinc-900',
                         openUpward ? 'bottom-full mb-1' : 'top-full mt-1'
                     )}
                 >
@@ -118,15 +121,23 @@ export function SuburbSelect({
                             const isSelected = suburb.name.toLowerCase() === value.toLowerCase();
                             return (
                                 <div
-                                    key={`${suburb.name}-${suburb.postcode || ''}`}
-                                    onClick={() => handleSelect(suburb)}
+                                    key={`${suburb.id || suburb.name}-${suburb.postcode || ''}`}
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        handleSelect(suburb);
+                                    }}
                                     className={cn(
-                                        'flex items-center justify-between rounded-md px-3 py-2 text-xs font-medium cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                                        'flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium cursor-pointer transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800',
                                         isSelected && 'bg-zinc-100 font-semibold text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
                                     )}
                                 >
-                                    <span>
-                                        {suburb.name} {suburb.postcode ? <span className="text-zinc-400 font-normal ml-1">({suburb.postcode})</span> : null}
+                                    <span className="flex items-center gap-2">
+                                        <span className="text-zinc-900 dark:text-zinc-100">{suburb.name}</span>
+                                        {suburb.postcode ? (
+                                            <span className="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                                                {suburb.postcode}
+                                            </span>
+                                        ) : null}
                                     </span>
                                     {isSelected && <Check className="size-3.5 text-emerald-600" />}
                                 </div>

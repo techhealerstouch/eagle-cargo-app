@@ -9,8 +9,10 @@
     $paymentStatus = $booking->payment_status instanceof \BackedEnum ? $booking->payment_status->value : $booking->payment_status;
     $paymentMethod = $booking->payment_method ? str($booking->payment_method)->replace('_', ' ')->title() : 'To be confirmed';
     $amount = $booking->invoice?->amount !== null ? 'AUD ' . number_format((float) $booking->invoice->amount, 2) : 'To be confirmed';
-    $paymentUrl = route('bookings.pay', $booking);
-    $trackingUrl = route('track', ['tracking_number' => $booking->boxes->first()?->tracking_number]);
+    $isGuest = empty($sender?->user_id);
+    $trackingNumber = $booking->boxes->first()?->tracking_number ?? $booking->reference_number;
+    $trackingUrl = route('track', ['tracking_number' => $trackingNumber]);
+    $paymentUrl = $isGuest ? $trackingUrl : route('bookings.pay', $booking);
 @endphp
 
 <x-mail::message>
@@ -48,7 +50,11 @@ Track Your Box
 </x-mail::button>
 @endif
 
+@if ($isGuest)
+You can track your shipment anytime using your booking reference on our tracking page. Create an account anytime to manage all your shipments in one place.
+@else
 You can also view this booking any time from your account dashboard.
+@endif
 
 <x-mail::subcopy>
 Need help? Reply to this email or contact our support team with booking reference {{ $reference }}.

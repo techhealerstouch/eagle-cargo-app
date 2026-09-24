@@ -56,6 +56,19 @@ class PublicTrackingTest extends TestCase
         $response->assertStatus(200);
     }
 
+    public function test_track_by_booking_reference_via_tracking_number_param(): void
+    {
+        $box = $this->createTrackableBox();
+        $booking = $box->booking;
+
+        $response = $this->get(route('track', ['tracking_number' => $booking->reference_number]));
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page->has('trackingData')
+            ->where('tracking_number', $booking->reference_number)
+        );
+    }
+
     public function test_track_nonexistent_number_shows_no_data(): void
     {
         $response = $this->get(route('track', ['tracking_number' => 'TRK-9999-999-999']));

@@ -94,6 +94,7 @@ class SettingsService
             'appLogo' => $this->assetUrl($settings->get('app_logo') ?: '/images/eagle_logo.png'),
             'supportEmail' => $settings->get('app_support_email', 'support@eaglecargo.com.au'),
             'contactPhone' => $settings->get('app_contact_phone', '+61 406 828 471'),
+            'warehouseAddress' => $this->getInvoiceSettings()['address'] ?? "6 Ivan St, Arundel QLD 4214, Australia",
             'currency' => $settings->get('app_default_currency', 'AUD'),
             'currencySymbol' => $this->get('app_currency_symbol', '$'),
             'timezone' => $settings->get('app_timezone', 'Australia/Sydney'),

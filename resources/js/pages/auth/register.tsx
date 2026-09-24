@@ -15,6 +15,7 @@ import { login } from '@/routes';
 import { store } from '@/routes/register';
 import AppLogoIcon from '@/components/layout/app-logo-icon';
 import BrandLogoImage from '@/components/layout/brand-logo-image';
+import MarketingLayout from '@/layouts/marketing-layout';
 import type { SharedData } from '@/types';
 import { useEmailValidator } from '@/hooks/use-email-validator';
 import { toast } from 'sonner';
@@ -245,9 +246,10 @@ export default function Register() {
     const stepHeader = getStepHeader();
 
     return (
-        <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-50/50 p-6 font-sans md:p-10">
+        <MarketingLayout>
             <Head title="Register" />
-            <div className="w-full max-w-2xl">
+            <div className="flex min-h-[calc(100vh-14rem)] flex-col items-center justify-center py-12 px-4 sm:px-6 md:px-8 font-sans">
+                <div className="w-full max-w-2xl">
                 {/* Header */}
                 <div className="mb-8 flex flex-col items-center gap-4">
                     <Link
@@ -1128,5 +1130,6 @@ export default function Register() {
                 </div>
             </div>
         </div>
+        </MarketingLayout>
     );
 }

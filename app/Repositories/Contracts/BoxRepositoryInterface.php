@@ -29,7 +29,7 @@ interface BoxRepositoryInterface
         Box $box,
         string $status,
         ?string $notes,
-        int $courierId,
+        ?int $courierId = null,
         ?int $areaMilestoneId = null,
         ?UploadedFile $deliveryProof = null,
         ?string $trackingPhase = null,

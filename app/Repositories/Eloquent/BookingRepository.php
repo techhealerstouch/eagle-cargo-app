@@ -64,6 +64,7 @@ class BookingRepository implements BookingRepositoryInterface
             $booking = $sender->bookings()->create([
                 'reference_number' => null, // Handled by BookingObserver
                 'initialization_key' => $data['initialization_key'] ?? null,
+                'is_guest' => $data['is_guest'] ?? ($sender ? $sender->user_id === null : ! Auth::check()),
                 'booking_type' => $data['booking_type'] ?? 'home_pickup',
                 'preferred_date' => $data['preferred_date'] ?? null,
                 'pickup_zone_id' => $data['pickup_zone_id'] ?? null,

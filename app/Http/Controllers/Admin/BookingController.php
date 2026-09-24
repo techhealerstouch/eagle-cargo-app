@@ -189,7 +189,7 @@ class BookingController extends Controller
             'pickers' => $pickers,
             'couriers' => $couriers,
             'activeRunsheets' => $activeRunsheets,
-            'filters' => $request->only(['search', 'status', 'sort', 'direction', 'trashed', 'payment_status', 'declaration_form_status']),
+            'filters' => $request->only(['search', 'status', 'sort', 'direction', 'trashed', 'payment_status', 'declaration_form_status', 'customer_type']),
         ]);
     }
 
@@ -530,6 +530,31 @@ class BookingController extends Controller
                 }
             }
         });
+
+        // Ensure child box statuses stay aligned with booking status
+        if ($booking->status === BookingStatus::Collected) {
+            $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
+            $booking->boxes()->where('status', BoxStatus::Pending)->get()->each(function ($box) use ($boxRepo) {
+                $boxRepo->updateStatus(
+                    box: $box,
+                    status: BoxStatus::Collected->value,
+                    notes: 'Collected as part of booking collection (Admin update)',
+                    courierId: Auth::id()
+                );
+            });
+        } elseif ($booking->status === BookingStatus::Delivered) {
+            $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
+            $booking->boxes()->whereNotIn('status', [BoxStatus::Delivered, BoxStatus::Cancelled])->get()->each(function ($box) use ($boxRepo) {
+                $boxRepo->updateStatus(
+                    box: $box,
+                    status: BoxStatus::Delivered->value,
+                    notes: 'Delivered as part of booking completion (Admin update)',
+                    courierId: Auth::id(),
+                    deliveryOverrideReason: 'Marked delivered via booking status update',
+                    bypassValidation: true
+                );
+            });
+        }
 
         $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.bookings.index') ?? session('admin_return_url') ?? route('admin.bookings.index');
         return redirect($returnUrl)->with('success', 'Booking updated successfully.');
@@ -1091,6 +1116,14 @@ class BookingController extends Controller
                 $query->whereIn('declaration_form_status', ['submitted_online', 'physical_copy_received']);
             } else {
                 $query->where('declaration_form_status', $request->declaration_form_status);
+            }
+        }
+
+        if ($request->filled('customer_type')) {
+            if ($request->customer_type === 'guest') {
+                $query->guest();
+            } elseif ($request->customer_type === 'registered') {
+                $query->registered();
             }
         }
 

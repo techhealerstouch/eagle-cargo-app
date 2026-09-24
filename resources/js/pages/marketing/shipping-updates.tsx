@@ -11,12 +11,13 @@ export default function ShippingUpdates() {
         { title: 'Shipping Updates', href: '/shipping-updates' },
     ];
 
-    const { auth } = usePage<PageProps & { auth: Auth }>().props;
+    const { auth, settings } = usePage<PageProps & { auth: Auth; settings?: any }>().props;
     const Layout = !auth.user ? MarketingLayout : AppLayout;
+    const appName = settings?.appName || 'Eagle Cargo';
 
     return (
         <Layout breadcrumbs={breadcrumbs}>
-            <Head title="Shipping Updates | Box Tracker" />
+            <Head title={`Shipping Updates | ${appName}`} />
             <div className="section-padding container-default mx-auto max-w-5xl">
                 <div className="mb-16 text-center">
                     <span className="eyebrow mb-4 inline-block">
