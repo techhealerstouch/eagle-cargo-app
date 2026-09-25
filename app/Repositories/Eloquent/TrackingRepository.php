@@ -176,6 +176,15 @@ class TrackingRepository implements TrackingRepositoryInterface
             'shipped_at' => $booking->shipped_at,
             'payment_status' => $booking->payment_status,
             'declaration_form_status' => $booking->declaration_form_status,
+            'can_edit_declaration' => (function () use ($booking) {
+                $user = auth()->user();
+                if (! $user) {
+                    return false;
+                }
+                $isAdmin = in_array($user->role, [\App\Enums\Role::Admin, \App\Enums\Role::SuperAdmin], true);
+                $isOwner = $user->role === \App\Enums\Role::Sender && $booking->sender_id === $user->sender?->id;
+                return $isAdmin || $isOwner;
+            })(),
             'eta_date' => $primaryBox->eta_date,
             'eta_message' => $primaryBox->eta_message,
             'estimate_delivery_date' => $primaryBox->estimate_delivery_date,

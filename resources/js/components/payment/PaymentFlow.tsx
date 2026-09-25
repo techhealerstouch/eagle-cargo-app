@@ -61,12 +61,22 @@ export default function PaymentFlow({
     isLoading = false,
     role = 'sender',
     endpoint,
+    uploadUrl,
+    verifyUrl,
     invoiceId,
     manualAmount,
     manualAmountCap: manualAmountCapProp,
     backUrl = '/dashboard',
     backLabel = 'Return to My Bookings',
 }: PaymentFlowProps) {
+    const isGuest = role === 'guest';
+    const isSenderOrGuest = role === 'sender' || isGuest;
+    const defaultUploadUrl = isGuest ? '/guest/booking/upload-proof' : undefined;
+    const defaultVerifyUrl = isGuest ? `/guest/bookings/${booking.id}/stripe-verify` : undefined;
+    const resolvedUploadUrl = uploadUrl || defaultUploadUrl;
+    const resolvedVerifyUrl = verifyUrl || defaultVerifyUrl;
+    const guestToken = booking.guest_token;
+
     const [paymentJustSucceeded, setPaymentJustSucceeded] = useState(false);
     const [proofJustUploaded, setProofJustUploaded] = useState(false);
     const isPaid = booking.payment_status === 'paid' || paymentJustSucceeded;
@@ -85,7 +95,7 @@ export default function PaymentFlow({
             Boolean(booking.declaration_data) ||
             Boolean(booking.declaration_form_path);
 
-        if (role === 'sender' && !isSubmitted && !modalHasBeenShown.current) {
+        if (isSenderOrGuest && !isSubmitted && !modalHasBeenShown.current) {
             modalHasBeenShown.current = true;
             setShowDeclarationModal(true);
         }
@@ -104,7 +114,7 @@ export default function PaymentFlow({
             return method;
         }
 
-        return role === 'sender' ? 'stripe' : 'cash';
+        return isSenderOrGuest ? 'stripe' : 'cash';
     });
 
     const [isChangingMethod, setIsChangingMethod] = useState(false);
@@ -131,7 +141,7 @@ export default function PaymentFlow({
         { id: 'cash', label: 'Cash', icon: Coins, color: 'bg-emerald-50 text-emerald-600 border-emerald-100' },
     ];
 
-    const currentMethods = role === 'sender' ? senderMethods : pickerMethods;
+    const currentMethods = isSenderOrGuest ? senderMethods : pickerMethods;
 
     if (isPaid) {
         return <SuccessState booking={booking} backUrl={backUrl} backLabel={backLabel} />;
@@ -154,7 +164,7 @@ export default function PaymentFlow({
                             triggerDeclarationModal();
                         }
                     }}
-                    role={role}
+                    role={role === 'guest' ? 'sender' : role}
                 />
             ) : (
                 <div className="flex items-center justify-between mb-8 group cursor-pointer" onClick={() => setIsChangingMethod(true)}>
@@ -177,14 +187,20 @@ export default function PaymentFlow({
 
             {activeMethod === 'stripe' && stripeKey && clientSecret && (
                 <Elements stripe={getStripe(stripeKey)} options={{ clientSecret, appearance: { theme: 'stripe', variables: { colorPrimary: '#18181b', borderRadius: '12px' } } }}>
-                    <StripeCheckoutForm bookingId={booking.id} onSuccess={() => {
-                        setPaymentJustSucceeded(true);
+                    <StripeCheckoutForm
+                        bookingId={booking.id}
+                        verifyUrl={resolvedVerifyUrl}
+                        token={guestToken}
+                        onSuccess={() => {
+                            setPaymentJustSucceeded(true);
 
-                        if (onSuccess) {
-                            onSuccess();
-                        }
-                        triggerDeclarationModal();
-                    }} onLoadError={onStripeLoadError} />
+                            if (onSuccess) {
+                                onSuccess();
+                            }
+                            triggerDeclarationModal();
+                        }}
+                        onLoadError={onStripeLoadError}
+                    />
                 </Elements>
             )}
 
@@ -227,6 +243,8 @@ export default function PaymentFlow({
                         booking={booking}
                         backUrl={backUrl}
                         backLabel={backLabel}
+                        uploadUrl={resolvedUploadUrl}
+                        token={guestToken}
                         onProofSuccess={() => {
                             setProofJustUploaded(true);
                             triggerDeclarationModal();
@@ -298,6 +316,8 @@ export default function PaymentFlow({
                             </div>
                             <ProofUploadForm
                                 bookingId={booking.id}
+                                uploadUrl={resolvedUploadUrl}
+                                token={guestToken}
                                 onSuccess={() => {
                                     setProofJustUploaded(true);
                                     triggerDeclarationModal();
@@ -323,6 +343,8 @@ export default function PaymentFlow({
                         booking={booking}
                         backUrl={backUrl}
                         backLabel={backLabel}
+                        uploadUrl={resolvedUploadUrl}
+                        token={guestToken}
                         onProofSuccess={() => {
                             setProofJustUploaded(true);
                             triggerDeclarationModal();
@@ -371,6 +393,8 @@ export default function PaymentFlow({
                             </div>
                             <ProofUploadForm
                                 bookingId={booking.id}
+                                uploadUrl={resolvedUploadUrl}
+                                token={guestToken}
                                 onSuccess={() => {
                                     setProofJustUploaded(true);
                                     triggerDeclarationModal();
@@ -390,7 +414,7 @@ export default function PaymentFlow({
                 )
             )}
 
-            {role !== 'sender' && activeMethod !== 'stripe' && endpoint && (
+            {role !== 'sender' && role !== 'guest' && activeMethod !== 'stripe' && endpoint && (
                 <ManualPaymentEntry
                     bookingId={booking.id}
                     invoiceId={invoiceId}
@@ -406,6 +430,7 @@ export default function PaymentFlow({
                 isOpen={showDeclarationModal}
                 onClose={() => setShowDeclarationModal(false)}
                 bookingId={booking.id}
+                guestToken={guestToken}
             />
         </div>
     );

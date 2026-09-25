@@ -12,6 +12,7 @@ export interface Box {
 export interface Booking {
     id: number;
     reference_number: string;
+    guest_token?: string;
     payment_status?: string;
     boxes: Box[];
     proof_of_payment?: string;
@@ -30,8 +31,10 @@ export interface PaymentFlowProps {
     bankDetails?: { bank_name?: string; bsb?: string; account_number?: string; company_name?: string; };
     onSuccess?: () => void;
     onStripeLoadError?: (errorMessage?: string) => void;
-    role?: 'sender' | 'picker' | 'admin';
+    role?: 'sender' | 'picker' | 'admin' | 'guest';
     endpoint?: string;
+    uploadUrl?: string;
+    verifyUrl?: string;
     invoiceId?: number;
     manualAmount?: number;
     manualAmountCap?: number;

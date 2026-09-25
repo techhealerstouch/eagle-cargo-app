@@ -126,6 +126,100 @@ class StripePaymentController extends Controller
     }
 
     /**
+     * Create a Stripe PaymentIntent for a guest booking.
+     */
+    public function createGuestIntent(Request $request, Booking $booking)
+    {
+        if (! $booking->is_guest) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $token = $request->input('token') ?? $request->header('X-Guest-Token');
+        if (empty($booking->guest_token) || ! hash_equals($booking->guest_token, (string) $token)) {
+            abort(403, 'Unauthorized guest access.');
+        }
+
+        if ($this->hasStripeModeMismatch()) {
+            return response()->json([
+                'error' => 'Payment gateway configuration mismatch. Please contact support.',
+            ], 500);
+        }
+
+        if (in_array($booking->status, [BookingStatus::Cancelled])) {
+            abort(422, 'This booking has been cancelled and cannot be paid.');
+        }
+
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return response()->json([
+                'alreadyPaid' => true,
+                'status' => 'succeeded',
+            ]);
+        }
+
+        $forceNew = $request->boolean('force_new');
+
+        try {
+            $paymentIntent = $this->paymentService->createPaymentIntent($booking, $forceNew);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Could not initialize Stripe: '.$e->getMessage(),
+            ], 500);
+        }
+
+        if ($paymentIntent->status === 'succeeded') {
+            return response()->json([
+                'alreadyPaid' => true,
+                'status' => 'succeeded',
+            ]);
+        }
+
+        return response()->json([
+            'clientSecret' => $paymentIntent->client_secret,
+        ]);
+    }
+
+    /**
+     * Verify a guest payment status after frontend confirmation.
+     */
+    public function verifyGuestPayment(Request $request, Booking $booking)
+    {
+        if (! $booking->is_guest) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $token = $request->input('token') ?? $request->header('X-Guest-Token');
+        if (empty($booking->guest_token) || ! hash_equals($booking->guest_token, (string) $token)) {
+            abort(403, 'Unauthorized guest access.');
+        }
+
+        $paymentIntentId = $request->input('payment_intent');
+
+        if (! $paymentIntentId) {
+            return response()->json(['error' => 'Missing payment_intent ID'], 400);
+        }
+
+        try {
+            $paymentIntent = PaymentIntent::retrieve($paymentIntentId);
+
+            if ($paymentIntent->status === 'succeeded') {
+                $this->paymentService->handleSuccessfulPayment($paymentIntent);
+
+                return response()->json([
+                    'status' => 'paid',
+                    'booking_id' => $booking->id,
+                ]);
+            }
+
+            return response()->json([
+                'status' => $paymentIntent->status,
+                'booking_id' => $booking->id,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Handle payment success callback/webhook.
      */
     public function webhook(Request $request)

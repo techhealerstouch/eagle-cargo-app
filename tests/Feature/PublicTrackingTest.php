@@ -157,4 +157,24 @@ class PublicTrackingTest extends TestCase
 
         $response->assertStatus(200);
     }
+
+    public function test_public_tracking_never_exposes_guest_token(): void
+    {
+        $box = $this->createTrackableBox();
+        $booking = $box->booking;
+        $booking->update([
+            'is_guest' => true,
+            'guest_token' => 'super-secret-guest-token-12345',
+            'declaration_form_status' => 'missing',
+        ]);
+
+        $response = $this->get(route('track', ['tracking_number' => $box->tracking_number]));
+
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->has('trackingData')
+            ->missing('trackingData.guest_token')
+            ->where('trackingData.can_edit_declaration', false)
+        );
+    }
 }

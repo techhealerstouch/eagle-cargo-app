@@ -200,9 +200,21 @@ Route::get('/guest/book', [GuestBookingController::class, 'create'])
 Route::post('/guest/bookings', [GuestBookingController::class, 'store'])
     ->middleware('throttle:booking-writes')
     ->name('guest.bookings.store');
+Route::post('/guest/bookings/initialize', [GuestBookingController::class, 'initialize'])
+    ->middleware('throttle:booking-writes')
+    ->name('guest.bookings.initialize');
+Route::post('/guest/bookings/{booking}/stripe-intent', [StripePaymentController::class, 'createGuestIntent'])
+    ->middleware('throttle:payments')
+    ->name('guest.bookings.stripe-intent');
+Route::post('/guest/bookings/{booking}/stripe-verify', [StripePaymentController::class, 'verifyGuestPayment'])
+    ->middleware('throttle:payments')
+    ->name('guest.bookings.stripe-verify');
 Route::get('/guest/booking/confirmed', [GuestBookingController::class, 'confirmed'])
     ->middleware('throttle:public-tracking')
     ->name('guest.booking.confirmed');
+Route::post('/guest/booking/upload-proof', [GuestBookingController::class, 'uploadProofOfPayment'])
+    ->middleware('throttle:uploads')
+    ->name('guest.booking.upload-proof');
 
 // Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
 Route::inertia('/about', 'marketing/about')->name('about');
@@ -222,6 +234,15 @@ Route::get('/contact', function (\App\Services\SettingsService $settingsService)
     ]);
 })->name('contact');
 Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
+Route::inertia('/our-story', 'marketing/community-story')->name('our-story');
+Route::inertia('/shipping-updates', 'marketing/shipping-updates')->name('shipping-updates');
+
+// Declaration routes (accessible by authenticated owners or guests with secure token)
+Route::get('/declaration-form/blank', [BookingController::class, 'downloadBlankDeclaration'])->name('declaration.blank');
+Route::get('/track/declaration/{booking}', [TrackingController::class, 'showDeclarationForm'])->name('track.declaration.form');
+Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'viewDeclaration'])->name('track.declaration.view');
+Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
+Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('/home', 'welcome')->name('home');
@@ -230,7 +251,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     })->name('notifications.index');
 
     Route::get('/book', [BookingController::class, 'create'])->name('book');
-    Route::get('/declaration-form/blank', [BookingController::class, 'downloadBlankDeclaration'])->name('declaration.blank');
     Route::post('/bookings', [BookingController::class, 'store'])->middleware('throttle:booking-writes')->name('bookings.store');
     Route::post('/bookings/initialize', [BookingController::class, 'initialize'])->middleware('throttle:booking-writes')->name('bookings.initialize');
     Route::post('/bookings/draft', [BookingController::class, 'saveDraft'])->middleware('throttle:booking-writes')->name('bookings.draft');
@@ -245,12 +265,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/bookings/{booking}/edit', [BookingController::class, 'edit'])->name('bookings.edit');
     Route::put('/bookings/{booking}', [BookingController::class, 'update'])->middleware('throttle:booking-writes')->name('bookings.update');
     Route::delete('/bookings/{booking}', [BookingController::class, 'destroy'])->middleware('throttle:booking-writes')->name('bookings.destroy');
-    Route::inertia('/our-story', 'marketing/community-story')->name('our-story');
-    Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
-    Route::get('/track/declaration/{booking}', [TrackingController::class, 'showDeclarationForm'])->name('track.declaration.form');
-    Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'viewDeclaration'])->name('track.declaration.view');
-    Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
-    Route::inertia('/shipping-updates', 'marketing/shipping-updates')->name('shipping-updates');
 
     Route::get('/dashboard', [SenderDashboardController::class, 'index'])->name('dashboard');
     Route::get('/bookings', [SenderDashboardController::class, 'bookings'])->name('sender.bookings');

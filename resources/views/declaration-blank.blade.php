@@ -573,7 +573,7 @@
             }
         }
 
-        return $html ?: '<div class="terms-line">Terms and conditions will be provided by Love Balikbayan Boxes Cargo.</div>';
+        return $html ?: '<div class="terms-line">Terms and conditions will be provided by Eagle Cargo.</div>';
     };
 
     $splitTermsColumns = function (array $termsData) use ($formatTerms): array {
@@ -628,7 +628,7 @@
         $originLocation = 'Victoria, Australia';
     }
     $logo = $declarationSettings['logo'] ?? null;
-    $appName = $cleanCopy($declarationSettings['appName'] ?? null, 'Love Balikbayan Box');
+    $appName = $cleanCopy($declarationSettings['appName'] ?? null, 'Eagle Cargo');
     $appSubtitle = $cleanCopy($declarationSettings['appSubtitle'] ?? null, 'Door to Door Sea Cargo');
     $termsColumns = $splitTermsColumns($loadTermsData());
     $certification = isset($booking) ? ($booking->declaration_data['certification'] ?? []) : [];
@@ -859,7 +859,7 @@
             <table>
                 <tr>
                     <td>Digital Signature ID: {{ isset($booking) && $booking->uuid ? explode('-', $booking->uuid)[0] : '________________' }}</td>
-                    <td class="right">{{ $declarationSettings['brandName'] ?? 'Love Balikbayan Logistics System' }} - Printed {{ now()->format('d/m/Y H:i') }}</td>
+                    <td class="right">{{ $declarationSettings['brandName'] ?? 'Eagle Cargo Logistics System' }} - Printed {{ now()->format('d/m/Y H:i') }}</td>
                 </tr>
             </table>
         </div>
@@ -936,7 +936,7 @@
                     I certify that I am the Consignor/Sender of the above goods and that this detailed packing list is the true and correct description of the goods contained in this box/parcel being sent to the Philippines. I certify that there are no undeclared, restricted, illegal, or banned items, including firearms, ammunition, illegal drugs, or combustible goods, included in this shipment.
                 </p>
                 <p class="cert-copy">
-                    I authorize <strong>LOVE BALIKBAYAN BOXES CARGO SERVICES</strong>, located in <strong>Victoria, Australia</strong>, to clear this shipment through Customs and acknowledge that duties, taxes, charges, penalties, and other expenses due on the shipment or incurred for its release must be paid. By signing, I agree to all Terms & Conditions stated in this declaration.
+                    I authorize <strong>EAGLE CARGO</strong>, located in <strong>Victoria, Australia</strong>, to clear this shipment through Customs and acknowledge that duties, taxes, charges, penalties, and other expenses due on the shipment or incurred for its release must be paid. By signing, I agree to all Terms & Conditions stated in this declaration.
                 </p>
 
                 <table class="signature-table">
@@ -1054,7 +1054,7 @@
         <div class="footer">
             <table>
                 <tr>
-                    <td>{{ $declarationSettings['brandName'] ?? 'Love Balikbayan Logistics System' }}</td>
+                    <td>{{ $declarationSettings['brandName'] ?? 'Eagle Cargo Logistics System' }}</td>
                     <td class="right">Printed {{ now()->format('d/m/Y H:i') }}</td>
                 </tr>
             </table>

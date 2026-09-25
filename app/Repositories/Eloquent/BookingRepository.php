@@ -63,6 +63,7 @@ class BookingRepository implements BookingRepositoryInterface
             // Generate Booking Shell
             $booking = $sender->bookings()->create([
                 'reference_number' => null, // Handled by BookingObserver
+                'status' => BookingStatus::Pending,
                 'initialization_key' => $data['initialization_key'] ?? null,
                 'is_guest' => $data['is_guest'] ?? ($sender ? $sender->user_id === null : ! Auth::check()),
                 'booking_type' => $data['booking_type'] ?? 'home_pickup',
@@ -70,7 +71,7 @@ class BookingRepository implements BookingRepositoryInterface
                 'pickup_zone_id' => $data['pickup_zone_id'] ?? null,
                 'payment_method' => $data['payment_method'] ?? 'stripe',
                 'payment_status' => ($data['payment_method'] ?? null) === 'cash_on_pickup' ? PaymentStatus::CashOnPickup : PaymentStatus::Pending,
-                'empty_box_count' => (int) ($data['empty_box_count'] ?? 0),
+                'empty_box_count' => !empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : (int) ($data['empty_box_count'] ?? 0),
                 'empty_box_fee' => (float) ($data['empty_box_fee'] ?? 10.00),
                 'notes' => $data['notes'] ?? null,
             ]);
@@ -161,7 +162,9 @@ class BookingRepository implements BookingRepositoryInterface
                 'preferred_date' => $data['preferred_date'] ?? $booking->preferred_date,
                 'pickup_zone_id' => array_key_exists('pickup_zone_id', $data) ? $data['pickup_zone_id'] : $booking->pickup_zone_id,
                 'payment_method' => $data['payment_method'] ?? $booking->payment_method,
-                'empty_box_count' => isset($data['empty_box_count']) ? (int) $data['empty_box_count'] : $booking->empty_box_count,
+                'empty_box_count' => array_key_exists('request_empty_box', $data)
+                    ? (!empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : 0)
+                    : (isset($data['empty_box_count']) ? (int) $data['empty_box_count'] : $booking->empty_box_count),
                 'empty_box_fee' => isset($data['empty_box_fee']) ? (float) $data['empty_box_fee'] : $booking->empty_box_fee,
                 'notes' => $data['notes'] ?? $booking->notes,
             ]);

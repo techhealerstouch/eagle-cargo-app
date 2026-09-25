@@ -36,17 +36,24 @@ class TrackingController extends Controller
     }
 
     /**
-     * Assert that the authenticated user owns the booking or is an admin.
+     * Assert that the authenticated user owns the booking or is an admin,
+     * or that a valid guest token is provided for guest bookings.
      */
-    private function assertBookingOwnership(Booking $booking): void
+    private function assertBookingOwnership(Booking $booking, ?string $token = null): void
     {
         $user = Auth::user();
         $isAdmin = $user && in_array($user->role, [Role::Admin, Role::SuperAdmin], true);
         $isOwner = $user && $user->sender && $booking->sender_id === $user->sender->id;
 
-        if (! $isAdmin && ! $isOwner) {
-            abort(403, 'You do not have permission to modify this booking.');
+        if ($isAdmin || $isOwner) {
+            return;
         }
+
+        if ($token && ! empty($booking->guest_token) && hash_equals($booking->guest_token, $token)) {
+            return;
+        }
+
+        abort(403, 'You do not have permission to modify this booking.');
     }
 
     public function index(Request $request)
@@ -80,10 +87,11 @@ class TrackingController extends Controller
         $request->validate([
             'booking_id' => 'required|exists:bookings,id',
             'declaration_form' => 'required|file|mimes:pdf,jpg,jpeg,png|max:5120', // 5MB max
+            'token' => 'nullable|string',
         ]);
 
         $booking = Booking::findOrFail($request->booking_id);
-        $this->assertBookingOwnership($booking);
+        $this->assertBookingOwnership($booking, $request->input('token'));
 
         if ($request->hasFile('declaration_form')) {
             $this->trackingRepo->uploadDeclaration(
@@ -97,15 +105,18 @@ class TrackingController extends Controller
         return back()->withErrors(['declaration_form' => 'Failed to upload file.']);
     }
 
-    public function showDeclarationForm(Booking $booking)
+    public function showDeclarationForm(Request $request, Booking $booking)
     {
-        $this->assertBookingOwnership($booking);
+        $token = $request->query('token');
+        $this->assertBookingOwnership($booking, $token);
 
         $booking->load(['sender', 'boxes.recipient', 'boxes.boxType']);
 
         return inertia('marketing/declaration', [
             'booking' => $booking,
             'declarationSettings' => $this->settingsService->getDeclarationSettings(),
+            'isGuest' => empty($booking->sender?->user_id),
+            'guestToken' => $token,
         ]);
     }
 
@@ -114,15 +125,23 @@ class TrackingController extends Controller
         $request->validate([
             'booking_id' => 'required|exists:bookings,id',
             'declaration_data' => 'required|array',
+            'token' => 'nullable|string',
         ]);
 
         $booking = Booking::findOrFail($request->booking_id);
-        $this->assertBookingOwnership($booking);
+        $this->assertBookingOwnership($booking, $request->input('token'));
 
         $this->trackingRepo->saveDeclarationData(
             $booking->id,
             $request->declaration_data
         );
+
+        $isGuest = empty($booking->sender?->user_id);
+        if ($isGuest && $booking->guest_token) {
+            return redirect()
+                ->route('guest.booking.confirmed', ['token' => $booking->guest_token])
+                ->with('success', 'Customs declaration submitted successfully.');
+        }
 
         return redirect()->route('dashboard')->with('success', 'Customs declaration submitted successfully.');
     }
@@ -147,17 +166,19 @@ class TrackingController extends Controller
             default => false,
         };
     }
-    public function viewDeclaration(Booking $booking)
+    public function viewDeclaration(Request $request, Booking $booking)
     {
         $user = Auth::user();
+        $token = $request->query('token');
 
         $isAdmin = $user && in_array($user->role, [Role::Admin, Role::SuperAdmin], true);
         $isOwnerSender = $user
             && $user->role === Role::Sender
             && $booking->sender_id === $user->sender?->id;
         $isOperational = $this->isAssignedOperationalUser($booking);
+        $isValidGuest = $token && ! empty($booking->guest_token) && hash_equals($booking->guest_token, $token);
 
-        if (! $isAdmin && ! $isOwnerSender && ! $isOperational) {
+        if (! $isAdmin && ! $isOwnerSender && ! $isOperational && ! $isValidGuest) {
             abort(403);
         }
 

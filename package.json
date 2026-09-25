@@ -11,6 +11,9 @@
         "format:check": "prettier --check resources/",
         "lint": "eslint . --fix",
         "lint:check": "eslint .",
+        "test": "vitest run",
+        "test:ui": "vitest run resources/js/tests/booking-ui.test.tsx",
+        "test:booking": "node scripts/test-booking-ui.mjs",
         "types:check": "tsc --noEmit"
     },
     "devDependencies": {

@@ -507,7 +507,10 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
 
                         {/* Action Required Alert */}
                         {trackingData.declaration_form_status === 'missing' && trackingData.status?.toLowerCase() !== 'cancelled' && (
-                            <DeclarationAlert bookingId={trackingData.booking_id} />
+                            <DeclarationAlert
+                                bookingId={trackingData.booking_id}
+                                canEdit={!!trackingData.can_edit_declaration}
+                            />
                         )}
 
                         {/* Main Content: Timeline & Sidebar */}

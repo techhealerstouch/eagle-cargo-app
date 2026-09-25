@@ -2,12 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\BookingStatus;
 use App\Http\Requests\StoreGuestBookingRequest;
 use App\Models\Booking;
 use App\Models\Sender;
 use App\Repositories\Contracts\BookingRepositoryInterface;
+use App\Rules\SecureFile;
+use App\Services\PaymentService;
 use App\Services\ReferenceDataService;
+use App\Services\SettingsService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 
@@ -98,9 +103,119 @@ class GuestBookingController extends Controller
     }
 
     /**
+     * Initialize a guest booking and return live payment console data (Step 4).
+     */
+    public function initialize(StoreGuestBookingRequest $request, PaymentService $paymentService, SettingsService $settingsService)
+    {
+        if ($request->filled('website')) {
+            return response()->json(['error' => 'Invalid request.'], 422);
+        }
+
+        $validated = $request->validated();
+
+        // Find existing guest sender (where user_id is null) or create a new one
+        $sender = Sender::where('email', $validated['email'])
+            ->whereNull('user_id')
+            ->first();
+
+        if (! $sender) {
+            $sender = Sender::create([
+                'user_id' => null,
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'email' => $validated['email'],
+                'mobile' => $validated['mobile'],
+                'secondary_mobile' => $validated['secondary_mobile'] ?? null,
+                'address' => $validated['address'],
+                'suburb' => $validated['suburb'] ?? null,
+                'state' => $validated['state'] ?? null,
+                'postcode' => $validated['postcode'] ?? null,
+                'latitude' => $validated['latitude'] ?? null,
+                'longitude' => $validated['longitude'] ?? null,
+                'pickup_zone_id' => $validated['pickup_zone_id'] ?? null,
+            ]);
+        } else {
+            $sender->update([
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'mobile' => $validated['mobile'],
+                'secondary_mobile' => $validated['secondary_mobile'] ?? $sender->secondary_mobile,
+                'address' => $validated['address'],
+                'suburb' => $validated['suburb'] ?? $sender->suburb,
+                'state' => $validated['state'] ?? $sender->state,
+                'postcode' => $validated['postcode'] ?? $sender->postcode,
+                'latitude' => $validated['latitude'] ?? $sender->latitude,
+                'longitude' => $validated['longitude'] ?? $sender->longitude,
+                'pickup_zone_id' => $validated['pickup_zone_id'] ?? $sender->pickup_zone_id,
+            ]);
+        }
+
+        $validated['user_id'] = null;
+        $validated['is_guest'] = true;
+
+        $booking = null;
+        $initializationKey = $validated['initialization_key'] ?? null;
+        $bookingId = $request->input('booking_id');
+
+        if ($initializationKey) {
+            $booking = Booking::where('initialization_key', $initializationKey)
+                ->where('is_guest', true)
+                ->whereIn('status', [BookingStatus::Pending, BookingStatus::Draft])
+                ->first();
+        }
+
+        if (! $booking && $bookingId) {
+            $booking = Booking::where('id', $bookingId)
+                ->where('is_guest', true)
+                ->first();
+        }
+
+        if ($booking) {
+            $booking = $this->bookingRepository->updateBooking($booking, $validated);
+        } else {
+            $booking = $this->bookingRepository->createBooking($validated, $sender);
+        }
+
+        $guestToken = $booking->guest_token ?: (string) Str::uuid();
+        $booking->update([
+            'guest_token' => $guestToken,
+            'is_guest' => true,
+            'initialization_key' => $initializationKey ?? $booking->initialization_key,
+        ]);
+
+        $invoiceSettings = $settingsService->getInvoiceSettings();
+        $response = [
+            'booking' => $booking->fresh()->load(['boxes.recipient', 'boxes.boxType', 'sender', 'invoice']),
+            'guest_token' => $guestToken,
+            'bankDetails' => [
+                'bank_name' => $invoiceSettings['bankName'] ?? 'Commonwealth Bank',
+                'bsb' => $invoiceSettings['bankBsb'] ?? '064-449',
+                'account_number' => $invoiceSettings['bankAccount'] ?? '1097 5991',
+                'company_name' => $invoiceSettings['companyName'] ?? config('app.name'),
+            ],
+        ];
+
+        // If Stripe is selected, prepare the intent
+        if (($validated['payment_method'] ?? '') === 'stripe') {
+            try {
+                $intent = $paymentService->createPaymentIntent($booking);
+                $response['clientSecret'] = $intent->client_secret;
+                $response['stripeKey'] = config('services.stripe.key');
+            } catch (\Exception $e) {
+                return response()->json([
+                    'error' => 'Could not initialize Stripe: ' . $e->getMessage(),
+                    'booking_id' => $booking->id,
+                ], 500);
+            }
+        }
+
+        return response()->json($response);
+    }
+
+    /**
      * Show booking confirmation for guest.
      */
-    public function confirmed(Request $request)
+    public function confirmed(Request $request, SettingsService $settingsService)
     {
         $token = $request->query('token');
 
@@ -116,17 +231,27 @@ class GuestBookingController extends Controller
             abort(404, 'Booking not found or link has expired.');
         }
 
+        $invoiceSettings = $settingsService->getInvoiceSettings();
+        $totalAmount = $booking->invoice?->amount !== null 
+            ? (float) $booking->invoice->amount 
+            : ($booking->boxes->isNotEmpty() ? (float) $booking->boxes->sum('price_charged') : null);
+
         return Inertia::render('guest/BookingConfirmed', [
             'booking' => [
                 'id' => $booking->id,
                 'reference_number' => $booking->reference_number,
+                'guest_token' => $booking->guest_token,
+                'declaration_form_status' => $booking->declaration_form_status,
+                'declaration_form_path' => $booking->declaration_form_path,
+                'needs_declaration' => $booking->needsDeclaration(),
+                'has_proof_of_payment' => ! empty($booking->proof_of_payment),
                 'preferred_date' => $booking->preferred_date?->format('M d, Y'),
                 'payment_method' => $booking->payment_method,
                 'payment_status' => $booking->payment_status instanceof \BackedEnum ? $booking->payment_status->value : $booking->payment_status,
                 'status' => $booking->status instanceof \BackedEnum ? $booking->status->value : $booking->status,
                 'created_at' => $booking->created_at?->toISOString(),
                 'boxes_count' => $booking->boxes->count(),
-                'total_amount' => $booking->invoice?->amount !== null ? (float) $booking->invoice->amount : null,
+                'total_amount' => $totalAmount,
                 'sender' => [
                     'first_name' => $booking->sender?->first_name,
                     'last_name' => $booking->sender?->last_name,
@@ -146,6 +271,52 @@ class GuestBookingController extends Controller
                     'price_charged' => (float) $box->price_charged,
                 ]),
             ],
+            'bankDetails' => [
+                'bankName' => $invoiceSettings['bankName'] ?? 'Commonwealth Bank',
+                'accountName' => $invoiceSettings['companyName'] ?? config('app.name'),
+                'bankBsb' => $invoiceSettings['bankBsb'] ?? '064-449',
+                'bankAccount' => $invoiceSettings['bankAccount'] ?? '1097 5991',
+            ],
         ]);
     }
+
+    /**
+     * Upload proof of payment for a guest booking.
+     */
+    public function uploadProofOfPayment(Request $request)
+    {
+        $request->validate([
+            'booking_id' => 'required|exists:bookings,id',
+            'token' => 'required|string',
+            'proof_of_payment' => [
+                'required',
+                'file',
+                'mimes:jpeg,png,jpg,pdf',
+                'max:5120', // 5MB max
+                new SecureFile,
+            ],
+        ]);
+
+        $booking = Booking::findOrFail($request->booking_id);
+
+        if (empty($booking->guest_token) || ! hash_equals($booking->guest_token, $request->input('token'))) {
+            abort(403, 'Unauthorized access or invalid guest token.');
+        }
+
+        if ($request->hasFile('proof_of_payment')) {
+            if ($booking->proof_of_payment) {
+                Storage::disk('public')->delete($booking->proof_of_payment);
+            }
+
+            $path = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
+            $booking->update(['proof_of_payment' => $path]);
+
+            return redirect()
+                ->route('guest.booking.confirmed', ['token' => $booking->guest_token])
+                ->with('success', 'Proof of payment uploaded successfully. Our team will verify it shortly.');
+        }
+
+        return redirect()->back()->with('error', 'Failed to upload proof of payment.');
+    }
 }
+

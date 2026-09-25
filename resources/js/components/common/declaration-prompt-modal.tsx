@@ -15,16 +15,21 @@ interface DeclarationPromptModalProps {
     isOpen: boolean;
     onClose: () => void;
     bookingId: number | string | null;
+    guestToken?: string;
 }
 
 export default function DeclarationPromptModal({
     isOpen,
     onClose,
     bookingId,
+    guestToken,
 }: DeclarationPromptModalProps) {
     const handleProceed = () => {
         if (bookingId) {
-            router.visit(`/track/declaration/${bookingId}`);
+            const url = guestToken
+                ? `/track/declaration/${bookingId}?token=${encodeURIComponent(guestToken)}`
+                : `/track/declaration/${bookingId}`;
+            router.visit(url);
         }
         onClose();
     };

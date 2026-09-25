@@ -122,9 +122,13 @@ class StoreBookingRequest extends FormRequest
             'pickup_zone_id' => ['nullable', 'exists:pickup_zones,id'],
             'payment_method' => ['required', 'string', 'in:cash,stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'request_empty_box' => ['nullable', 'boolean'],
+            'empty_box_count' => ['nullable', 'integer', 'min:0'],
+            'empty_box_fee' => ['nullable', 'numeric', 'min:0'],
 
             // Array of boxes, each containing recipient details and size
             'boxes' => ['required', 'array', 'min:1'],
+            'boxes.*.is_door_to_door' => ['nullable', 'boolean'],
             'boxes.*.recipient_id' => [
                 'nullable',
                 Rule::exists('recipients', 'id')->where(function ($query) use ($senderId) {

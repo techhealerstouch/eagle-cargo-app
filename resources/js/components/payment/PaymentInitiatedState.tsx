@@ -21,6 +21,8 @@ interface PaymentInitiatedStateProps {
     booking: Booking;
     backUrl?: string;
     backLabel?: string;
+    uploadUrl?: string;
+    token?: string;
     onProofSuccess?: () => void;
 }
 
@@ -28,6 +30,8 @@ export function PaymentInitiatedState({
     booking,
     backUrl = '/dashboard',
     backLabel = 'Return to My Bookings',
+    uploadUrl,
+    token,
     onProofSuccess,
 }: PaymentInitiatedStateProps) {
     const [isUpdatingProof, setIsUpdatingProof] = useState(false);
@@ -195,6 +199,8 @@ export function PaymentInitiatedState({
                     <div className="p-6 pt-0 border-t border-zinc-100 dark:border-zinc-800 animate-in fade-in duration-300">
                         <ProofUploadForm
                             bookingId={booking.id}
+                            uploadUrl={uploadUrl}
+                            token={token}
                             onSuccess={() => {
                                 setIsUpdatingProof(false);
                                 if (onProofSuccess) {
