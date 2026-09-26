@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AppLayout from '@/layouts/app-layout';
-import { humanize } from '@/lib/utils';
+import { cn, humanize } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
 
 interface Box {
@@ -51,6 +51,7 @@ interface Box {
         province: string;
     } | null;
     latest_update?: {
+        tracking_step_key?: string | null;
         is_admin_override: boolean;
         steps_bypassed: number;
     } | null;
@@ -77,14 +78,24 @@ const breadcrumbs: BreadcrumbItem[] = [
 ];
 
 const BOX_STATUS_CONFIG: Record<string, { label: string; badge: string }> = {
+    pending: { label: 'Pending', badge: 'bg-amber-50 text-amber-700 border border-amber-200' },
     empty_delivered: { label: 'Empty Box Delivered', badge: 'bg-indigo-50 text-indigo-700 border border-indigo-200' },
-    collected: { label: 'Collected from Sender', badge: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
-    loaded: { label: 'Loaded into Container', badge: 'bg-sky-50 text-sky-700 border border-sky-200' },
-    in_transit: { label: 'In Transit / Sea Freight', badge: 'bg-blue-50 text-blue-700 border border-blue-200' },
-    arrived: { label: 'Arrived Port of Manila', badge: 'bg-purple-50 text-purple-700 border border-purple-200' },
-    out_for_delivery: { label: 'Out for Local Delivery', badge: 'bg-amber-50 text-amber-700 border border-amber-200' },
-    delivered: { label: 'Delivered to Recipient', badge: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
-    cancelled: { label: 'Cancelled / Returned', badge: 'bg-red-50 text-red-700 border border-red-200' },
+    collected: { label: 'Collected', badge: 'bg-sky-50 text-sky-700 border border-sky-200' },
+    received_by_branch: { label: 'Received by Warehouse', badge: 'bg-indigo-50 text-indigo-700 border border-indigo-200' },
+    loaded: { label: 'Loaded to Container', badge: 'bg-sky-50 text-sky-700 border border-sky-200' },
+    loaded_to_container: { label: 'Loaded to Container', badge: 'bg-sky-50 text-sky-700 border border-sky-200' },
+    in_transit: { label: 'In Transit', badge: 'bg-blue-50 text-blue-700 border border-blue-200' },
+    arrived: { label: 'Arrived Port', badge: 'bg-purple-50 text-purple-700 border border-purple-200' },
+    for_checking_unloading: { label: 'Unloading / Sorting', badge: 'bg-purple-50 text-purple-700 border border-purple-200' },
+    unloaded_manila: { label: 'Unloaded Manila', badge: 'bg-purple-50 text-purple-700 border border-purple-200' },
+    for_delivery_scheduling: { label: 'Hub Scheduling', badge: 'bg-indigo-50 text-indigo-700 border border-indigo-200' },
+    en_route_roro: { label: 'En Route RoRo', badge: 'bg-blue-50 text-blue-700 border border-blue-200' },
+    out_for_delivery: { label: 'Out for Delivery', badge: 'bg-amber-50 text-amber-700 border border-amber-200' },
+    delivered: { label: 'Delivered', badge: 'bg-emerald-50 text-emerald-700 border border-emerald-200' },
+    damaged: { label: 'Damaged', badge: 'bg-rose-50 text-rose-700 border border-rose-200' },
+    held: { label: 'On Hold', badge: 'bg-rose-50 text-rose-700 border border-rose-200' },
+    held_bulging: { label: 'Held (Bulging)', badge: 'bg-rose-50 text-rose-700 border border-rose-200' },
+    cancelled: { label: 'Cancelled', badge: 'bg-red-50 text-red-700 border border-red-200' },
 };
 
 export default function BoxesIndex({
@@ -108,7 +119,129 @@ export default function BoxesIndex({
         trashed?: boolean | string;
     };
 }) {
-    const { auth } = usePage<any>().props;
+    const { auth, tracking_steps } = usePage<any>().props;
+
+    const getTransitProgress = (box: Box): {
+        label: string;
+        percent: number;
+        filledSegments: number;
+        barColor: string;
+    } => {
+        const status = (box.status || '').toLowerCase();
+        const stepKey = box.tracking_step_key || box.latest_update?.tracking_step_key;
+
+        if (status === 'cancelled') {
+            return {
+                label: 'Cancelled',
+                percent: 0,
+                filledSegments: 0,
+                barColor: 'bg-rose-500',
+            };
+        }
+
+        if (status === 'delivered') {
+            return {
+                label: 'Delivered',
+                percent: 100,
+                filledSegments: 5,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        const totalSteps = tracking_steps && tracking_steps.length > 0 ? tracking_steps.length : 12;
+
+        let matchedStep = stepKey && tracking_steps && Array.isArray(tracking_steps)
+            ? tracking_steps.find((s: any) => s.key === stepKey)
+            : null;
+
+        if (!matchedStep && tracking_steps && Array.isArray(tracking_steps)) {
+            matchedStep = tracking_steps.find((s: any) => s.system_status === status || s.key === status);
+        }
+
+        if (matchedStep) {
+            const order = Number(matchedStep.order) || 1;
+            const percent = Math.min(100, Math.max(5, Math.round((order / totalSteps) * 100)));
+            const filledSegments = Math.min(5, Math.max(1, Math.ceil(percent / 20)));
+
+            return {
+                label: matchedStep.label,
+                percent,
+                filledSegments,
+                barColor: percent >= 15 ? 'bg-emerald-500' : 'bg-amber-500',
+            };
+        }
+
+        if (status === 'pending' || !status) {
+            return {
+                label: 'Intake / Booking',
+                percent: 5,
+                filledSegments: 1,
+                barColor: 'bg-amber-500',
+            };
+        }
+
+        if (status === 'received_by_branch') {
+            return {
+                label: 'Received at Warehouse',
+                percent: 17,
+                filledSegments: 1,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        if (status === 'out_for_delivery') {
+            return {
+                label: 'Out for Delivery',
+                percent: 92,
+                filledSegments: 5,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        if (status === 'collected') {
+            return {
+                label: 'Collected from Sender',
+                percent: 8,
+                filledSegments: 1,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        if (status === 'loaded_to_container' || status === 'loaded') {
+            return {
+                label: 'Loaded to Container',
+                percent: 25,
+                filledSegments: 2,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        if (status === 'in_transit') {
+            return {
+                label: 'In Transit',
+                percent: 60,
+                filledSegments: 3,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        if (status === 'arrived') {
+            return {
+                label: 'Arrived Port of Manila',
+                percent: 75,
+                filledSegments: 4,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        return {
+            label: humanize(status),
+            percent: 5,
+            filledSegments: 1,
+            barColor: 'bg-amber-500',
+        };
+    };
+
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const [selectedBox, setSelectedBox] = useState<Box | null>(null);
     const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
@@ -327,6 +460,7 @@ export default function BoxesIndex({
                                         <th scope="col" className="px-4 py-3 font-semibold">Recipient</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Batch</th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Status</th>
+                                        <th scope="col" className="px-4 py-3 font-semibold">Transit Progress</th>
                                         <th scope="col" className="px-4 py-3 font-semibold text-right">Actions</th>
                                     </tr>
                                 </thead>
@@ -387,9 +521,39 @@ export default function BoxesIndex({
                                                 )}
                                             </td>
                                             <td className="px-4 py-3.5 whitespace-nowrap">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${BOX_STATUS_CONFIG[box.status]?.badge ?? 'bg-zinc-100 text-zinc-700 border border-zinc-200'}`}>
-                                                    {humanize(box.status)}
+                                                <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${BOX_STATUS_CONFIG[box.status]?.badge ?? 'bg-zinc-100 text-zinc-700 border border-zinc-200'}`}>
+                                                    {BOX_STATUS_CONFIG[box.status]?.label ?? humanize(box.status)}
                                                 </span>
+                                            </td>
+                                            <td className="px-4 py-3.5 whitespace-nowrap min-w-[150px]">
+                                                {(() => {
+                                                    const progress = getTransitProgress(box);
+                                                    return (
+                                                        <div className="w-36 space-y-1.5">
+                                                            <div className="flex items-center justify-between text-xs">
+                                                                <span className="font-medium text-zinc-700 truncate max-w-[95px]" title={progress.label}>
+                                                                    {progress.label}
+                                                                </span>
+                                                                <span className="font-bold text-zinc-900 text-xs">
+                                                                    {progress.percent}%
+                                                                </span>
+                                                            </div>
+                                                            <div className="grid grid-cols-5 gap-1.5">
+                                                                {[1, 2, 3, 4, 5].map((seg) => (
+                                                                    <div
+                                                                        key={seg}
+                                                                        className={cn(
+                                                                            "h-1.5 rounded-full transition-all duration-300",
+                                                                            seg <= progress.filledSegments
+                                                                                ? progress.barColor
+                                                                                : "bg-zinc-200"
+                                                                        )}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </td>
                                             <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                 <div className="flex justify-end items-center gap-1.5">

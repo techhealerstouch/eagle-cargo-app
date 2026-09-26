@@ -3,6 +3,7 @@ import { Package, Truck, Ship, Home, ShieldCheck } from 'lucide-react';
 import {
     classifyStepState,
     deriveDefaultStepType,
+    shouldHideEventDateTime,
     type TimelineStepState,
 } from '../TrackingTimeline.helpers';
 import type { NormalizedStep } from '@/types/logistics';
@@ -153,4 +154,55 @@ describe('TrackingTimeline classification helpers', () => {
         expect(deriveDefaultStepType('out_for_delivery', 'out_for_delivery')).toBe('ongoing');
         expect(deriveDefaultStepType('delivered', 'delivered')).toBe('checkpoint');
     });
+
+    describe('shouldHideEventDateTime', () => {
+        it('hides date and time for "Booking created and box registered."', () => {
+            expect(shouldHideEventDateTime('Booking created and box registered.')).toBe(true);
+            expect(
+                shouldHideEventDateTime('Booking created and box registered.', {
+                    description: 'Booking created and box registered.',
+                    status: 'pending',
+                })
+            ).toBe(true);
+        });
+
+        it('hides date and time for variations without period or case variations', () => {
+            expect(shouldHideEventDateTime('booking created and box registered')).toBe(true);
+            expect(
+                shouldHideEventDateTime('', {
+                    description: 'Booking Created and Box Registered',
+                })
+            ).toBe(true);
+        });
+
+        it('hides date and time for booking_created status or status label', () => {
+            expect(
+                shouldHideEventDateTime('', {
+                    status: 'booking_created',
+                })
+            ).toBe(true);
+            expect(
+                shouldHideEventDateTime('', {
+                    status_label: 'Booking Created',
+                })
+            ).toBe(true);
+        });
+
+        it('shows date and time for normal milestone and tracking events', () => {
+            expect(shouldHideEventDateTime('Box collected from sender and queued for warehouse sorting.')).toBe(false);
+            expect(
+                shouldHideEventDateTime('Vessel en route across ocean transit', {
+                    description: 'Vessel departure confirmed',
+                    status: 'in_transit',
+                })
+            ).toBe(false);
+            expect(
+                shouldHideEventDateTime('Box arrived at hub warehouse for inspection, weighing, and manifest packing.', {
+                    description: 'Received at Warehouse',
+                    status: 'received_by_branch',
+                })
+            ).toBe(false);
+        });
+    });
 });
+

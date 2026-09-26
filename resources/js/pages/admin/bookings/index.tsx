@@ -57,6 +57,7 @@ interface Booking {
     declaration_form_status: string;
     declaration_data?: any;
     box_count: number;
+    is_guest?: boolean;
     admin_notes?: string | null;
     created_at: string;
     runsheets?: {
@@ -122,6 +123,7 @@ export default function BookingsIndex({
         trashed?: boolean | string;
         payment_status?: string;
         declaration_form_status?: string;
+        customer_type?: string;
     };
 }) {
     const { post, processing, data: formData, setData } = useForm({
@@ -528,6 +530,17 @@ export default function BookingsIndex({
                                     { label: 'Physical Copy', value: 'physical_copy_received' },
                                 ]}
                             />
+                            <FilterSelect
+                                label="Customer Type"
+                                routeName="/admin/bookings"
+                                paramName="customer_type"
+                                queryParams={filters}
+                                placeholder="All Customers"
+                                options={[
+                                    { label: 'Guest Bookings', value: 'guest' },
+                                    { label: 'Registered Members', value: 'registered' },
+                                ]}
+                            />
                         </div>
                     </div>
 
@@ -588,6 +601,11 @@ export default function BookingsIndex({
                                                         <Link href={`/admin/bookings/${booking.id}`} className="font-mono text-xs font-semibold text-zinc-900 hover:text-brand-rust transition-colors">
                                                             {booking.reference_number}
                                                         </Link>
+                                                        {booking.is_guest && (
+                                                            <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-200 uppercase tracking-wide" title="Booked via Guest Checkout">
+                                                                Guest
+                                                            </span>
+                                                        )}
                                                         {isNew && (
                                                             <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
                                                                 New
@@ -600,7 +618,14 @@ export default function BookingsIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex flex-col">
-                                                        <span className="font-semibold text-zinc-900">{booking.sender.first_name} {booking.sender.last_name}</span>
+                                                        <div className="flex items-center gap-1.5">
+                                                            <span className="font-semibold text-zinc-900">{booking.sender.first_name} {booking.sender.last_name}</span>
+                                                            {booking.is_guest && (
+                                                                <span className="inline-flex items-center rounded px-1 text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">
+                                                                    Guest
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <div className="flex items-center gap-1.5 mt-0.5">
                                                             <span className="text-zinc-500 text-[11px] font-normal">
                                                                 {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}

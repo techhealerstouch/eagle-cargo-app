@@ -7,14 +7,28 @@ import Heading from '@/components/common/heading';
 import PaymentFlow from '@/components/payment/PaymentFlow';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
+import { Checkbox } from '@/components/ui/checkbox';
 import LocationPickerMap from '@/components/ui/LocationPickerMap';
 import PhoneInput from '@/components/ui/PhoneInput';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { SuburbSelect, type SuburbOption } from '@/components/ui/SuburbSelect';
 import { useAutoSave } from '@/hooks/use-auto-save';
 import AppLayout from '@/layouts/app-layout';
+import MarketingLayout from '@/layouts/marketing-layout';
 import { validatePhone, COUNTRIES } from '@/lib/countries';
 import { cn } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
+
+const AU_STATES = [
+    { code: 'NSW', name: 'New South Wales' },
+    { code: 'VIC', name: 'Victoria' },
+    { code: 'QLD', name: 'Queensland' },
+    { code: 'WA', name: 'Western Australia' },
+    { code: 'SA', name: 'South Australia' },
+    { code: 'TAS', name: 'Tasmania' },
+    { code: 'ACT', name: 'Australian Capital Territory' },
+    { code: 'NT', name: 'Northern Territory' },
+];
 
 const baseInputClass = 'h-12 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-100 dark:focus:ring-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-400';
 
@@ -104,26 +118,46 @@ function Field({
 
 
 interface PageProps {
+    isGuest?: boolean;
     areas?: any[];
     provinces?: any[];
     boxTypes?: any[];
     boxPrices?: any[];
+    pickupZones?: any[];
+    suburbs?: any[];
     savedRecipients?: any[];
     cloneSource?: any;
     editingBooking?: any;
     draftBooking?: any;
     sender?: any;
+    logistics?: any;
+    auth?: any;
 }
 
-export default function Book() {
-  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics } = usePage().props as any;
+export default function Book(props: PageProps = {}) {
+  const pageProps = (usePage()?.props as any) || {};
+  const isGuest = props.isGuest ?? (pageProps.isGuest ?? !pageProps.auth?.user);
+
+  const auth = props.auth ?? pageProps.auth;
+  const areas = props.areas ?? pageProps.areas ?? [];
+  const provinces = props.provinces ?? pageProps.provinces ?? [];
+  const boxTypes = props.boxTypes ?? pageProps.boxTypes ?? [];
+  const boxPrices = props.boxPrices ?? pageProps.boxPrices ?? [];
+  const pickupZones = props.pickupZones ?? pageProps.pickupZones ?? [];
+  const suburbs = props.suburbs ?? pageProps.suburbs ?? [];
+  const savedRecipients = isGuest ? [] : (props.savedRecipients ?? pageProps.savedRecipients ?? []);
+  const cloneSource = isGuest ? null : (props.cloneSource ?? pageProps.cloneSource);
+  const editingBooking = isGuest ? null : (props.editingBooking ?? pageProps.editingBooking);
+  const draftBooking = isGuest ? null : (props.draftBooking ?? pageProps.draftBooking);
+  const sender = isGuest ? null : (props.sender ?? pageProps.sender);
+  const logistics = props.logistics ?? pageProps.logistics;
 
   const senderCountry = editingBooking?.sender?.country || sender?.country || 'Australia';
   const senderCountryCode = COUNTRIES.find(c => c.name === senderCountry)?.code || 'AU';
 
   const [currentStep, setCurrentStep] = useState(1);
-  const [isEditingSender, setIsEditingSender] = useState(!sender || !sender.address);
-  const [, setIsLocating] = useState(false);
+  const [isEditingSender, setIsEditingSender] = useState(isGuest || !sender || !sender.address);
+  const [isLocating, setIsLocating] = useState(false);
   const [draftId, setDraftId] = useState<number | null>(draftBooking?.id || null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [initializingPayment, setInitializingPayment] = useState(false);
@@ -138,7 +172,7 @@ export default function Book() {
       return null;
     }
 
-    const storageKey = 'booking_initialization_key';
+    const storageKey = isGuest ? 'guest_booking_initialization_key' : 'booking_initialization_key';
     const existingKey = localStorage.getItem(storageKey);
 
     if (existingKey) {
@@ -156,7 +190,7 @@ export default function Book() {
   const hasAppliedQueryDefaults = useRef(false);
   const hasAppliedCloneSource = useRef(false);
   const hasAppliedEditSource = useRef(false);
-  const user = auth.user;
+  const user = auth?.user;
 
   const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Home', href: '/dashboard' },
@@ -165,7 +199,7 @@ export default function Book() {
 
   const getCurrentLocation = (type: 'sender' | 'recipient') => {
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser');
+      toast.error('Geolocation is not supported by your browser');
 
       return;
     }
@@ -179,13 +213,16 @@ export default function Book() {
           const coordsString = ` [GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}]`;
 
           if (type === 'sender') {
-            setData(currentData => ({
+            setData((currentData: any) => ({
               ...currentData,
+              latitude,
+              longitude,
               notes: (currentData.notes || '') + (currentData.notes ? '\n' : '') + `Pickup GPS Coordinates: ${latitude}, ${longitude}`
             }));
-            alert(`Location captured! Coordinates added to notes.`);
+            toast.success('Pickup GPS location captured!');
           } else if (type === 'recipient') {
             updatePrimaryRecipient('recipient_landmarks', (data.boxes[0].recipient_landmarks || '') + coordsString);
+            toast.success('Recipient GPS location captured!');
           }
         } catch (error) {
           console.error('Error getting address from coordinates', error);
@@ -195,7 +232,7 @@ export default function Book() {
       },
       (error) => {
         setIsLocating(false);
-        alert(`Unable to retrieve your location: ${error.message}`);
+        toast.error(`Unable to retrieve your location: ${error.message}`);
       },
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
     );
@@ -305,24 +342,29 @@ export default function Book() {
 
   const { data, setData, post, put, processing, errors, setError, clearErrors, transform } = useForm({
     // Sender Information
-    first_name: user ? user.name.split(' ')[0] : '',
-    last_name: user ? user.name.split(' ').slice(1).join(' ') : '',
-    email: user ? user.email : '',
-    mobile: sender?.mobile || '',
-    secondary_mobile: sender?.secondary_mobile || '',
-    address: sender?.address || '',
-    suburb: sender?.suburb || '',
-    state: sender?.state || '',
-    postcode: sender?.postcode || '',
-    latitude: sender?.latitude || null,
-    longitude: sender?.longitude || null,
-    pickup_zone_id: sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || '',
+    first_name: isGuest ? '' : (user ? (sender?.first_name || user.name?.split(' ')[0] || '') : ''),
+    last_name: isGuest ? '' : (user ? (sender?.last_name || user.name?.split(' ').slice(1).join(' ') || '') : ''),
+    email: isGuest ? '' : (user ? user.email : ''),
+    mobile: isGuest ? '' : (sender?.mobile || ''),
+    secondary_mobile: isGuest ? '' : (sender?.secondary_mobile || ''),
+    address: isGuest ? '' : (sender?.address || ''),
+    suburb: isGuest ? '' : (sender?.suburb || ''),
+    state: isGuest ? 'NSW' : (sender?.state || 'NSW'),
+    postcode: isGuest ? '' : (sender?.postcode || ''),
+    latitude: isGuest ? null : (sender?.latitude || null),
+    longitude: isGuest ? null : (sender?.longitude || null),
+    pickup_zone_id: isGuest ? '' : (sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || ''),
 
     // Shared Booking Data
     booking_type: editingBooking?.booking_type || draftBooking?.draft_data?.booking_type || 'home_pickup',
-    preferred_date: getInitialValidDate(sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || ''),
+    preferred_date: getInitialValidDate(isGuest ? '' : (sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || '')),
     payment_method: 'stripe',
     notes: '',
+
+    // Empty Box Delivery Request
+    request_empty_box: editingBooking?.empty_box_count > 0 || false,
+    empty_box_count: editingBooking?.empty_box_count || 1,
+    empty_box_fee: editingBooking?.empty_box_fee || 10.00,
 
     // Boxes & Their Recipients
     boxes: [
@@ -342,6 +384,7 @@ export default function Book() {
         recipient_longitude: null,
         area_id: '',
         box_type_id: '',
+        is_door_to_door: false,
         is_custom_size: false,
         custom_length: '',
         custom_width: '',
@@ -349,6 +392,23 @@ export default function Book() {
       }
     ],
   });
+
+  const handleSuburbChange = (suburbName: string, postcode?: string, suburbObj?: SuburbOption) => {
+    const foundSuburb = suburbObj || suburbs?.find((s: any) => (s?.name || s?.suburb || '').toLowerCase().trim() === suburbName.toLowerCase().trim());
+    const detectedZone = foundSuburb?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(suburbName);
+    const newPostcode = postcode || foundSuburb?.postcode || data.postcode;
+
+    setData((prev: any) => ({
+      ...prev,
+      suburb: suburbName,
+      postcode: newPostcode,
+      pickup_zone_id: detectedZone || prev.pickup_zone_id,
+      preferred_date: detectedZone ? getInitialValidDate(detectedZone) : prev.preferred_date,
+    }));
+    clearErrors('suburb');
+    if (newPostcode) clearErrors('postcode');
+    if (detectedZone) clearErrors('pickup_zone_id');
+  };
 
   const activeLogistics = useMemo(() => {
     if (!data?.pickup_zone_id) return logistics;
@@ -445,6 +505,8 @@ export default function Book() {
     preferred_date: data.preferred_date,
     notes: data.notes,
     boxes: data.boxes,
+    request_empty_box: data.request_empty_box,
+    empty_box_count: data.empty_box_count,
   };
 
   const handleAutoSaveSetData = useCallback((updatedData: any) => {
@@ -453,6 +515,8 @@ export default function Book() {
         preferred_date: currentData.preferred_date,
         notes: currentData.notes,
         boxes: currentData.boxes,
+        request_empty_box: currentData.request_empty_box,
+        empty_box_count: currentData.empty_box_count,
       };
 
       const nextDraft = typeof updatedData === 'function'
@@ -571,7 +635,7 @@ export default function Book() {
     }
   }, [draftId, hasSubmittedBooking, data.first_name, data.last_name, data.email, data.mobile, data.address, data.suburb, data.state, data.postcode, data.latitude, data.longitude, data.payment_method, hasMeaningfulDraftData]);
 
-  const canAutoSaveDraft = !editingBooking && !hasSubmittedBooking;
+  const canAutoSaveDraft = !isGuest && !editingBooking && !hasSubmittedBooking && !!user;
 
   const { clearSavedData, saveToServerNow } = useAutoSave<typeof bookingDraftData>(
     'booking_form_v2',
@@ -597,6 +661,8 @@ export default function Book() {
 
     setData((currentData: any) => ({
       ...currentData,
+      request_empty_box: dd.request_empty_box ?? currentData.request_empty_box,
+      empty_box_count: dd.empty_box_count ?? currentData.empty_box_count,
       preferred_date: dd.preferred_date || currentData.preferred_date,
       payment_method: dd.payment_method || currentData.payment_method,
       notes: dd.notes || currentData.notes,
@@ -802,6 +868,7 @@ export default function Book() {
       {
         ...master,
         box_type_id: '',
+        is_door_to_door: master.is_door_to_door || false,
         is_custom_size: false,
         custom_length: '',
         custom_width: '',
@@ -878,22 +945,30 @@ export default function Book() {
     const customCbmType = boxTypes?.find((bt: any) => bt.name?.toLowerCase().includes('cbm') || bt.name?.toLowerCase() === 'custom box');
     let rate = 0;
 
-    if (customCbmType && data.pickup_zone_id) {
-        const exactPriceRecord = boxPrices?.find(
+    if (customCbmType) {
+        const exactPriceRecord = data.pickup_zone_id ? boxPrices?.find(
             (p: any) => p.area_id.toString() === areaId.toString() && p.box_type_id.toString() === customCbmType.id.toString() && p.pickup_zone_id?.toString() === data.pickup_zone_id?.toString()
+        ) : null;
+        const fallbackPriceRecord = boxPrices?.find(
+            (p: any) => p.area_id.toString() === areaId.toString() && p.box_type_id.toString() === customCbmType.id.toString() && !p.pickup_zone_id
         );
-        if (exactPriceRecord) {
-            rate = parseFloat(exactPriceRecord.price);
+        const anyZonePriceRecord = boxPrices?.find(
+            (p: any) => p.area_id.toString() === areaId.toString() && p.box_type_id.toString() === customCbmType.id.toString()
+        );
+        const record = exactPriceRecord || fallbackPriceRecord || anyZonePriceRecord;
+        if (record) {
+            rate = parseFloat(record.price);
         }
     }
-
-    // Fallback removed as cbm_rate is no longer on the area model
 
     return rate;
   };
 
   const getBoxPrice = (box: any) => {
-    // Custom size path: CBM × area's CBM rate
+    const selectedArea = areas?.find((a: any) => a.id.toString() === box.area_id?.toString());
+    const doorToDoorFee = (box.is_door_to_door && selectedArea) ? parseFloat(selectedArea.door_to_door_fee || '0') : 0;
+
+    // Custom size path: CBM × area's CBM rate + doorToDoorFee
     if (box.is_custom_size) {
       const l = parseFloat(box.custom_length || '0');
       const w = parseFloat(box.custom_width  || '0');
@@ -911,13 +986,13 @@ export default function Book() {
 
       const cbm = (l * w * h) / 1_000_000;
 
-      return Math.round(cbm * cbmRate * 100) / 100;
+      return Math.round(cbm * cbmRate * 100) / 100 + doorToDoorFee;
     }
 
-    // Preset box path: price from area × box_type matrix
+    // Preset box path: price from area × box_type matrix + doorToDoorFee
     if (!box.area_id || !box.box_type_id) {
-return 0;
-}
+      return 0;
+    }
 
     const exactPriceRecord = boxPrices?.find(
       (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === box.box_type_id.toString() && p.pickup_zone_id?.toString() === data.pickup_zone_id?.toString()
@@ -927,9 +1002,13 @@ return 0;
       (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === box.box_type_id.toString() && !p.pickup_zone_id
     );
 
-    const priceRecord = exactPriceRecord || fallbackPriceRecord;
+    const anyZonePriceRecord = boxPrices?.find(
+      (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === box.box_type_id.toString()
+    );
 
-    return priceRecord ? parseFloat(priceRecord.price) : 0;
+    const priceRecord = exactPriceRecord || fallbackPriceRecord || anyZonePriceRecord;
+
+    return priceRecord ? parseFloat(priceRecord.price) + doorToDoorFee : 0;
   };
 
   const sanitizeRecipientId = (recipientId: any) => {
@@ -942,7 +1021,9 @@ return 0;
     return isValidRecipient ? recipientId : null;
   };
 
-  const totalEstimate = data.boxes.reduce((acc, box) => acc + getBoxPrice(box), 0);
+  const emptyBoxTotal = data.request_empty_box ? (Number(data.empty_box_count) || 1) * (Number(data.empty_box_fee) || 10) : 0;
+  const boxesTotal = data.boxes.reduce((acc: number, box: any) => acc + getBoxPrice(box), 0);
+  const totalEstimate = boxesTotal + emptyBoxTotal;
 
   const getFriendlyError = (key: string, message: string) => {
     let friendlyKey = key;
@@ -1191,8 +1272,8 @@ if (step === 2) {
         setTimeout(() => {
           const firstError = document.querySelector('.text-red-600');
 
-          if (firstError) {
-            firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (firstError && typeof (firstError as any).scrollIntoView === 'function') {
+            (firstError as any).scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
         }, 100);
 
@@ -1210,14 +1291,18 @@ if (step === 2) {
     // Step 1 -> Step 2
     if (currentStep === 1) {
       setCurrentStep(2);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       return;
     }
 
     // Step 2 -> Step 3 (Review Details)
     if (currentStep === 2) {
       setCurrentStep(3);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (typeof window.scrollTo === 'function') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
       return;
     }
 
@@ -1251,7 +1336,8 @@ if (step === 2) {
                 const match = document.cookie.match(new RegExp('(^|;\\s*)(XSRF-TOKEN)=([^;]*)'));
                 return match ? decodeURIComponent(match[3]) : '';
             };
-            const response = await fetch('/bookings/initialize', {
+            const endpoint = isGuest ? '/guest/bookings/initialize' : '/bookings/initialize';
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1302,7 +1388,11 @@ if (step === 2) {
             setDraftId(null);
             setPaymentData(result);
             clearSavedData();
-            localStorage.removeItem('booking_initialization_key');
+            if (result.guest_token) {
+                localStorage.setItem('guest_token', result.guest_token);
+            }
+            const storageKey = isGuest ? 'guest_booking_initialization_key' : 'booking_initialization_key';
+            localStorage.removeItem(storageKey);
             setCurrentStep(4);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (error: any) {
@@ -1385,7 +1475,9 @@ if (step === 2) {
       },
     };
 
-    if (editingBooking) {
+    if (isGuest) {
+        post('/guest/bookings', submitOptions);
+    } else if (editingBooking) {
         put(`/bookings/${editingBooking.id}`, submitOptions);
     } else if (draftId) {
         // Submit the draft — promotes it to pending
@@ -1397,18 +1489,21 @@ if (step === 2) {
 
 
 
+  const LayoutComponent = isGuest ? MarketingLayout : AppLayout;
+  const layoutProps = isGuest ? {} : { breadcrumbs };
+
   return (
-    <AppLayout breadcrumbs={breadcrumbs}>
-      <Head title={editingBooking ? 'Edit Booking' : 'Book a Pickup'} />
+    <LayoutComponent {...layoutProps}>
+      <Head title={editingBooking ? 'Edit Booking' : isGuest ? 'Book Balikbayan Box Pickup' : 'Book a Pickup'} />
 
       <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <Heading
-                    eyebrow="Booking Form"
-                    title={editingBooking ? `Edit Booking: ${editingBooking.reference_number}` : 'New Booking'}
-                    description={editingBooking ? 'Update the details for your active shipment.' : 'Enter your booking details and cargo information to schedule a pickup.'}
+                    eyebrow={isGuest ? "Send Balikbayan Box" : "Booking Form"}
+                    title={editingBooking ? `Edit Booking: ${editingBooking.reference_number}` : isGuest ? "Book a Pickup" : "New Booking"}
+                    description={editingBooking ? 'Update the details for your active shipment.' : isGuest ? 'Send a box to the Philippines with door-to-door tracking.' : 'Enter your booking details and cargo information to schedule a pickup.'}
                 />
-                {!editingBooking && (
+                {!isGuest && !editingBooking && (
                     <button
                         type="button"
                         onClick={handleSaveDraft}
@@ -1431,7 +1526,7 @@ if (step === 2) {
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-3">
                     <SectionHeader title="Sender Information" subtitle="Personal and contact details" />
-                    {data.address && (
+                    {!isGuest && data.address && sender?.address && (
                       <button
                         type="button"
                         onClick={() => setIsEditingSender(!isEditingSender)}
@@ -1442,25 +1537,7 @@ if (step === 2) {
                     )}
                   </div>
 
-                  {!data.address ? (
-                    <div className="rounded-2xl border border-red-100 dark:border-red-900/30 bg-red-50/50 dark:bg-red-950/20 p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                      <div className="flex gap-3">
-                        <AlertTriangle className="size-5 text-red-600 dark:text-red-400 mt-0.5 md:mt-0 shrink-0" />
-                        <div>
-                          <p className="text-sm font-semibold text-red-900 dark:text-red-200">No Pickup Address Found</p>
-                          <p className="text-xs text-red-700 dark:text-red-300 mt-1">
-                            You must configure a pickup address in your profile settings before you can book a shipment.
-                          </p>
-                        </div>
-                      </div>
-                      <a
-                        href="/settings/profile"
-                        className="inline-flex items-center justify-center h-10 px-4 rounded-xl bg-red-600 text-white font-semibold text-xs uppercase tracking-wider hover:bg-red-700 transition-all whitespace-nowrap"
-                      >
-                        Configure Pickup Address
-                      </a>
-                    </div>
-                  ) : !isEditingSender ? (
+                  {!isGuest && sender?.address && !isEditingSender ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <div className="space-y-1">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Full Name</p>
@@ -1481,26 +1558,26 @@ if (step === 2) {
                         </p>
                       </div>
                     </div>
-                  ) : (
+                  ) : !isGuest && sender?.address && isEditingSender ? (
                     <div className="grid grid-cols-1 gap-4">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field label="First Name" required error={errors.first_name}>
-                          <input title="First Name" placeholder="First Name" className={baseInputClass} value={data.first_name || ''} onChange={e => setData('first_name', e.target.value)} />
+                          <input title="First Name" placeholder="e.g. Maria" className={baseInputClass} value={data.first_name || ''} onChange={e => { setData('first_name', e.target.value); clearErrors('first_name'); }} />
                         </Field>
                         <Field label="Last Name" required error={errors.last_name}>
-                          <input title="Last Name" placeholder="Last Name" className={baseInputClass} value={data.last_name || ''} onChange={e => setData('last_name', e.target.value)} />
+                          <input title="Last Name" placeholder="e.g. Santos" className={baseInputClass} value={data.last_name || ''} onChange={e => { setData('last_name', e.target.value); clearErrors('last_name'); }} />
                         </Field>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <Field label="Contact Phone" required error={errors.mobile}>
-                          <PhoneInput value={data.mobile || ''} onChange={val => setData('mobile', val)} defaultCountryCode={senderCountryCode} />
+                          <PhoneInput value={data.mobile || ''} onChange={val => { setData('mobile', val); clearErrors('mobile'); }} defaultCountryCode={senderCountryCode} />
                         </Field>
                         <Field label="Secondary Phone" error={errors.secondary_mobile} hint="Optional">
                           <PhoneInput value={data.secondary_mobile || ''} onChange={val => setData('secondary_mobile', val)} defaultCountryCode={senderCountryCode} />
                         </Field>
                         <Field label="Email Address" required error={errors.email}>
-                          <input title="Email Address" placeholder="Email Address" className={baseInputClass} type="email" value={data.email || ''} onChange={e => setData('email', e.target.value)} />
+                          <input title="Email Address" placeholder="you@example.com" className={baseInputClass} type="email" value={data.email || ''} onChange={e => { setData('email', e.target.value); clearErrors('email'); }} />
                         </Field>
                       </div>
 
@@ -1516,6 +1593,125 @@ if (step === 2) {
                               <span className="font-semibold">Need to use a different pickup address?</span> To avoid data confusion, pickup address and GPS location coordinates must be updated in your settings. Please go to <a href="/settings/profile" className="underline font-bold hover:text-amber-950 dark:hover:text-amber-200">Settings</a> to change your pickup address or add a new pickup address.
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Guest or Sender without profile address: Full editable form */
+                    <div className="grid grid-cols-1 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <Field label="First Name" required error={errors.first_name}>
+                          <input title="First Name" placeholder="e.g. Maria" className={baseInputClass} value={data.first_name || ''} onChange={e => { setData('first_name', e.target.value); clearErrors('first_name'); }} />
+                        </Field>
+                        <Field label="Last Name" required error={errors.last_name}>
+                          <input title="Last Name" placeholder="e.g. Santos" className={baseInputClass} value={data.last_name || ''} onChange={e => { setData('last_name', e.target.value); clearErrors('last_name'); }} />
+                        </Field>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <Field label="Contact Phone" required error={errors.mobile}>
+                          <PhoneInput value={data.mobile || ''} onChange={val => { setData('mobile', val); clearErrors('mobile'); }} defaultCountryCode={senderCountryCode} />
+                        </Field>
+                        <Field label="Secondary Phone" error={errors.secondary_mobile} hint="Optional">
+                          <PhoneInput value={data.secondary_mobile || ''} onChange={val => setData('secondary_mobile', val)} defaultCountryCode={senderCountryCode} />
+                        </Field>
+                        <Field label="Email Address" required error={errors.email}>
+                          <input title="Email Address" placeholder="you@example.com" className={baseInputClass} type="email" value={data.email || ''} onChange={e => { setData('email', e.target.value); clearErrors('email'); }} />
+                        </Field>
+                      </div>
+
+                      <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 mt-2 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Pickup Address in Australia</p>
+                          <button
+                            type="button"
+                            onClick={() => getCurrentLocation('sender')}
+                            disabled={isLocating}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all cursor-pointer"
+                          >
+                            {isLocating ? <Loader2 className="size-3.5 animate-spin" /> : <MapPinned className="size-3.5 text-brand-rust" />}
+                            {isLocating ? 'Locating...' : 'Use My Current GPS'}
+                          </button>
+                        </div>
+
+                        <Field label="Street Address" required error={errors.address}>
+                          <input
+                            type="text"
+                            placeholder="e.g. Unit 4, 123 George Street"
+                            value={data.address || ''}
+                            onChange={e => { setData('address', e.target.value); clearErrors('address'); }}
+                            className={baseInputClass}
+                          />
+                        </Field>
+
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                          <Field label="Suburb" required error={errors.suburb}>
+                            <SuburbSelect
+                              suburbs={suburbs}
+                              value={data.suburb || ''}
+                              onChange={handleSuburbChange}
+                            />
+                          </Field>
+
+                          <Field label="State" required error={errors.state}>
+                            <select
+                              value={data.state || 'NSW'}
+                              onChange={e => { setData('state', e.target.value); clearErrors('state'); }}
+                              className={baseInputClass}
+                            >
+                              {AU_STATES.map((s) => (
+                                <option key={s.code} value={s.code}>
+                                  {s.code} - {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+
+                          <Field label="Postcode" required error={errors.postcode}>
+                            <input
+                              type="text"
+                              placeholder="e.g. 2000"
+                              value={data.postcode || ''}
+                              onChange={e => { setData('postcode', e.target.value); clearErrors('postcode'); }}
+                              className={baseInputClass}
+                            />
+                          </Field>
+                        </div>
+
+                        <div className="space-y-2 pt-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                              Pin Location on Map (Optional)
+                            </label>
+                            <span className="text-xs text-zinc-400">
+                              Click map to adjust pickup coordinates
+                            </span>
+                          </div>
+                          <LocationPickerMap
+                            className="h-64 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden"
+                            initialCenter={
+                              data.latitude && data.longitude
+                                ? [data.latitude, data.longitude]
+                                : [-33.8688, 151.2093]
+                            }
+                            onLocationSelect={(lat, lng, addr) => {
+                              setData((curr: any) => ({
+                                ...curr,
+                                latitude: lat,
+                                longitude: lng,
+                                ...(addr?.address ? { address: addr.address } : {}),
+                                ...(addr?.suburb ? { suburb: addr.suburb } : {}),
+                                ...(addr?.postcode ? { postcode: addr.postcode } : {}),
+                                ...(addr?.state ? { state: addr.state } : {}),
+                              }));
+                              if (addr?.suburb) {
+                                const detected = detectPickupZoneBySuburb(addr.suburb);
+                                if (detected) {
+                                  setData((curr: any) => ({ ...curr, pickup_zone_id: detected }));
+                                }
+                              }
+                            }}
+                          />
                         </div>
                       </div>
                     </div>
@@ -1696,7 +1892,7 @@ if (step === 2) {
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-3">
                     <SectionHeader title="Primary Recipient" subtitle="Who is receiving these boxes?" />
-                    {savedRecipients && savedRecipients.length > 0 && (
+                    {!isGuest && savedRecipients && savedRecipients.length > 0 && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 shrink-0 hidden sm:inline">Use Saved Contact:</span>
                         <select
@@ -1738,7 +1934,7 @@ if (step === 2) {
                       <input
                         title="Receiver First Name"
                         className={baseInputClass}
-                        placeholder="Receiver's first name"
+                        placeholder="Receiver's first name (e.g. Juan)"
                         value={data.boxes[0].recipient_first_name || ''}
                         disabled={!!data.boxes[0].recipient_id}
                         onChange={e => updatePrimaryRecipient('recipient_first_name', e.target.value)}
@@ -1748,7 +1944,7 @@ if (step === 2) {
                       <input
                         title="Receiver Last Name"
                         className={baseInputClass}
-                        placeholder="Receiver's last name"
+                        placeholder="Receiver's last name (e.g. Dela Cruz)"
                         value={data.boxes[0].recipient_last_name || ''}
                         disabled={!!data.boxes[0].recipient_id}
                         onChange={e => updatePrimaryRecipient('recipient_last_name', e.target.value)}
@@ -1760,7 +1956,7 @@ if (step === 2) {
                     <input
                       title="Recipient Address"
                       className={baseInputClass}
-                      placeholder="House number, street, barangay..."
+                      placeholder="House number, street, barangay... (e.g. Block 5 Lot 12)"
                       value={data.boxes[0].recipient_address || ''}
                       disabled={!!data.boxes[0].recipient_id}
                       onChange={e => updatePrimaryRecipient('recipient_address', e.target.value)}
@@ -1814,7 +2010,7 @@ if (step === 2) {
                     <Field label="City" required error={errors[`boxes.0.recipient_city` as keyof typeof errors]}>
                       <input
                         title="City"
-                        placeholder="City"
+                        placeholder="City (e.g. Pasig City)"
                         className={baseInputClass}
                         value={data.boxes[0].recipient_city || ''}
                         disabled={!!data.boxes[0].recipient_id}
@@ -1838,7 +2034,7 @@ if (step === 2) {
                     <Field label="Zip Code" required error={errors[`boxes.0.recipient_zip_code` as keyof typeof errors]}>
                       <input
                         title="Zip Code"
-                        placeholder="Zip Code"
+                        placeholder="Zip Code (e.g. 1600)"
                         className={baseInputClass}
                         value={data.boxes[0].recipient_zip_code || ''}
                         disabled={!!data.boxes[0].recipient_id}
@@ -1903,6 +2099,40 @@ if (step === 2) {
                       )}
                     </div>
                   </Field>
+
+                  {/* Door-to-Door Delivery Add-On */}
+                  {(() => {
+                    const selectedArea = areas?.find((a: any) => a.id.toString() === data.boxes[0]?.area_id?.toString());
+                    const fee = selectedArea ? parseFloat(selectedArea.door_to_door_fee || '0') : 0;
+
+                    return (
+                      <div className="flex items-start gap-3 p-4 rounded-2xl border border-amber-200/80 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/50 mt-4">
+                        <Checkbox
+                          id="door-to-door-primary"
+                          checked={!!data.boxes[0]?.is_door_to_door}
+                          onCheckedChange={(checked) => updatePrimaryRecipient('is_door_to_door', !!checked)}
+                          className="mt-0.5"
+                        />
+                        <div className="space-y-0.5 flex-1">
+                          <label htmlFor="door-to-door-primary" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer block">
+                            Door-to-Door Delivery Add-On{' '}
+                            {data.boxes[0]?.area_id ? (
+                              fee > 0 ? (
+                                <span className="text-amber-700 dark:text-amber-400 font-extrabold">(+${fee.toFixed(2)} per box)</span>
+                              ) : (
+                                <span className="text-emerald-600 dark:text-emerald-400 text-[10px] uppercase tracking-wider font-extrabold">(Included / Free)</span>
+                              )
+                            ) : (
+                              <span className="text-zinc-400 dark:text-zinc-500 text-[10px] font-normal">(Select Province first to calculate fee)</span>
+                            )}
+                          </label>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight">
+                            Request direct last-mile delivery to the recipient's home address. Applied to all boxes.
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </section>
 
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
@@ -1991,7 +2221,11 @@ if (step === 2) {
                                         (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === bt.id.toString() && !p.pickup_zone_id
                                       );
 
-                                      const priceRecord = exactPriceRecord || fallbackPriceRecord;
+                                      const anyZonePriceRecord = boxPrices?.find(
+                                        (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === bt.id.toString()
+                                      );
+
+                                      const priceRecord = exactPriceRecord || fallbackPriceRecord || anyZonePriceRecord;
                                       return priceRecord ? parseFloat(priceRecord.price) > 0 : false;
                                     })();
 
@@ -2182,6 +2416,62 @@ if (step === 2) {
                   >
                     <PlusCircle className="size-5" /> Add Another Box
                   </button>
+
+                  {/* Empty Box Delivery Service Add-On */}
+                  <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 dark:border-amber-900/40 pb-3">
+                      <div>
+                        <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">Empty Box Delivery Service</h4>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Need boxes in advance? Request empty balikbayan boxes delivered to your address before collection.</p>
+                      </div>
+                      <span className="inline-flex items-center self-start sm:self-auto rounded-full bg-amber-100/80 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider border border-amber-200/60 dark:border-amber-800/60">
+                        $10.00 each
+                      </span>
+                    </div>
+
+                    <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-200/60 bg-white/90 dark:bg-zinc-900/90 dark:border-amber-900/40">
+                      <Checkbox
+                        id="request-empty-box"
+                        checked={!!data.request_empty_box}
+                        onCheckedChange={(checked) => setData('request_empty_box', !!checked)}
+                        className="mt-0.5"
+                      />
+                      <div className="space-y-0.5 flex-1">
+                        <label htmlFor="request-empty-box" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer block">
+                          I need empty boxes delivered to my address before pickup
+                        </label>
+                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight">
+                          Our courier will drop off the boxes so you can pack your items comfortably prior to pickup day.
+                        </p>
+                      </div>
+                    </div>
+
+                    {data.request_empty_box && (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-amber-200/60 dark:border-amber-900/40">
+                        <div>
+                          <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Empty Box Quantity</p>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Specify number of empty boxes to be delivered</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setData('empty_box_count', Math.max(1, (data.empty_box_count || 1) - 1))}
+                            disabled={(data.empty_box_count || 1) <= 1}
+                            className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
+                          >-</button>
+                          <span className="font-extrabold text-sm min-w-8 text-center text-zinc-900 dark:text-zinc-100">{data.empty_box_count || 1}</span>
+                          <button
+                            type="button"
+                            onClick={() => setData('empty_box_count', (data.empty_box_count || 1) + 1)}
+                            className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
+                          >+</button>
+                          <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400 ml-1">
+                            (+${(((data.empty_box_count || 1) * 10)).toFixed(2)})
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </section>
               </form>
             )}
@@ -2316,6 +2606,11 @@ if (step === 2) {
                                   <span className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">
                                     {boxTypeName}
                                   </span>
+                                  {box.is_door_to_door && (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold">
+                                      Door-to-Door
+                                    </span>
+                                  )}
                                 </div>
                                 <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 text-base">
                                   ${price.toFixed(2)}
@@ -2379,8 +2674,15 @@ if (step === 2) {
 
                         <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
                           <span>Cargo Subtotal</span>
-                          <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">${totalEstimate.toFixed(2)}</span>
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">${boxesTotal.toFixed(2)}</span>
                         </div>
+
+                        {data.request_empty_box && (
+                          <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
+                            <span>Empty Box Delivery ({data.empty_box_count || 1} @ ${(Number(data.empty_box_fee) || 10).toFixed(2)})</span>
+                            <span className="font-semibold text-amber-700 dark:text-amber-400 font-mono">+${emptyBoxTotal.toFixed(2)}</span>
+                          </div>
+                        )}
 
                         <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-baseline">
                           <span className="font-bold text-zinc-900 dark:text-zinc-100">Total Estimate</span>
@@ -2432,6 +2734,11 @@ if (step === 2) {
                                                   ) : (
                                                     <span className="text-sm font-bold text-zinc-800">{box.box_type?.name || 'Standard Box'}</span>
                                                   )}
+                                                  {box.is_door_to_door && (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider w-fit">
+                                                      Door-to-Door
+                                                    </span>
+                                                  )}
                                               </div>
                                               <div className="text-right">
                                                 <span className="text-base font-mono font-bold text-zinc-900">${parseFloat(box.price_charged || '0').toFixed(2)}</span>
@@ -2453,6 +2760,30 @@ if (step === 2) {
                                       </div>
                                   </div>
                               ))}
+
+                              {((paymentData.booking.empty_box_count && Number(paymentData.booking.empty_box_count) > 0) || data.request_empty_box) && (
+                                <div className="flex items-center gap-4 p-4 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40">
+                                  <div className="h-12 w-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-amber-200 dark:border-amber-800 shrink-0 shadow-sm text-amber-700 dark:text-amber-400">
+                                    <Package className="size-5" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">Add-On Service</span>
+                                        <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                                          Empty Box Delivery ({paymentData.booking.empty_box_count || data.empty_box_count || 1} @ ${(Number(paymentData.booking.empty_box_fee) || Number(data.empty_box_fee) || 10).toFixed(2)})
+                                        </p>
+                                      </div>
+                                      <span className="text-base font-mono font-bold text-amber-700 dark:text-amber-400">
+                                        +${(((paymentData.booking.empty_box_count || data.empty_box_count || 1) * (Number(paymentData.booking.empty_box_fee) || Number(data.empty_box_fee) || 10))).toFixed(2)}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                      Delivery of empty boxes to pickup address
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
 
                               <div className="pt-6 mt-4 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
                                   {paymentData.booking.payment_status === 'paid' && (
@@ -2494,6 +2825,9 @@ if (step === 2) {
                             stripeKey={paymentData.stripeKey}
                             clientSecret={paymentData.clientSecret}
                             bankDetails={paymentData.bankDetails}
+                            role={isGuest ? 'guest' : 'sender'}
+                            backUrl={isGuest ? '/' : '/dashboard'}
+                            backLabel={isGuest ? 'Return to Home' : 'Return to My Bookings'}
                             onSuccess={() => {
                                 setPaymentData((prev: any) => ({
                                     ...prev,
@@ -2550,7 +2884,7 @@ if (step === 2) {
                   <Button
                     type="button"
                     onClick={nextStep}
-                    disabled={!data.address || !data.preferred_date || !data.first_name || !data.last_name || !data.mobile || !data.email}
+                    disabled={processing || initializingPayment}
                     className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
                   >
                     Continue <ArrowRight className="size-4" />
@@ -2587,6 +2921,6 @@ if (step === 2) {
           </div>
         </div>
 
-    </AppLayout>
+    </LayoutComponent>
   );
 }

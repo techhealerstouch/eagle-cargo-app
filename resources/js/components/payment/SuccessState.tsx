@@ -10,7 +10,7 @@ interface SuccessStateProps {
 }
 
 export function SuccessState({ booking, backUrl = '/dashboard', backLabel = 'Go to Dashboard' }: SuccessStateProps) {
-    const totalAmount = booking.boxes.reduce((acc, b) => acc + parseFloat(b.price_charged || '0'), 0);
+    const totalAmount = (booking.boxes || []).reduce((acc, b) => acc + parseFloat(String(b.price_charged || '0')), 0);
 
     return (
         <div className="p-8 text-center space-y-8 animate-in fade-in zoom-in duration-500">
@@ -24,7 +24,7 @@ export function SuccessState({ booking, backUrl = '/dashboard', backLabel = 'Go 
             <div className="space-y-3">
                 <h3 className="text-3xl font-bold text-zinc-900 tracking-tight">Payment confirmed!</h3>
                 <p className="text-zinc-500 max-w-sm mx-auto text-sm leading-relaxed">
-                    Your box is booked. {booking.boxes[0]?.recipient.first_name || 'Your recipient'} will receive it in 4-6 weeks.
+                    Your box is booked. {booking.boxes[0]?.recipient?.first_name || 'Your recipient'} will receive it in 4-6 weeks.
                 </p>
             </div>
 

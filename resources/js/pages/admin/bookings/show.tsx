@@ -74,9 +74,12 @@ interface Booking {
     declaration_form_status: string;
     declaration_form_path?: string | null;
     declaration_data?: any;
+    is_guest?: boolean;
     created_at: string;
     updated_at: string;
     sender: {
+        id?: number;
+        user_id?: number | null;
         first_name: string;
         last_name: string;
         email?: string;
@@ -186,6 +189,15 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                 }`}>
                                     {booking.booking_type === 'home_pickup' ? 'Home Pick-Up' : booking.booking_type === 'other' ? 'Other' : 'Drop-Off'}
                                 </div>
+                                {booking.is_guest ? (
+                                    <div className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200" title="Booked via Guest Checkout">
+                                        Guest Booking
+                                    </div>
+                                ) : (
+                                    <div className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200" title="Registered User Account">
+                                        Registered Member
+                                    </div>
+                                )}
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-sm">
                                 <span className="font-mono font-bold text-brand-rust tracking-tight uppercase">
@@ -300,9 +312,20 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                             <div className="divide-y divide-border">
                                 {/* Sender Details */}
                                 <div className="p-5">
-                                    <div className="flex items-center gap-2 mb-4">
-                                        <div className="size-1.5 rounded-full bg-brand-rust"></div>
-                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Shipper</p>
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex items-center gap-2">
+                                            <div className="size-1.5 rounded-full bg-brand-rust"></div>
+                                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Shipper</p>
+                                        </div>
+                                        {booking.is_guest ? (
+                                            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-200 uppercase tracking-wide">
+                                                {booking.sender?.user_id ? 'Guest (Account Linked)' : 'Guest (No Account)'}
+                                            </span>
+                                        ) : (
+                                            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-200 uppercase tracking-wide">
+                                                Registered Member
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="space-y-3">
                                         <div>

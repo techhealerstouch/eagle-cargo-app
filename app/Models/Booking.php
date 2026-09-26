@@ -39,6 +39,8 @@ class Booking extends Model
         'recipient_version_id',
         'snapshot_taken_at',
         'reference_number',
+        'guest_token',
+        'is_guest',
         'initialization_key',
         'service_type',
         'booking_type',
@@ -82,9 +84,10 @@ class Booking extends Model
         'empty_box_count' => 'integer',
         'empty_box_fee' => 'decimal:2',
         'attention_required' => 'boolean',
+        'is_guest' => 'boolean',
     ];
 
-    protected $appends = ['destination', 'recipient_name', 'delivery_progress', 'undelivered_boxes_count', 'boxes_without_serial_count'];
+    protected $appends = ['destination', 'recipient_name', 'delivery_progress', 'undelivered_boxes_count', 'boxes_without_serial_count', 'is_guest'];
 
     /**
      * Set the booking status with transition validation.
@@ -470,5 +473,65 @@ class Booking extends Model
     public function toHistoricalPayload(): array
     {
         return app(TransactionSnapshotService::class)->bookingHistoricalPayload($this);
+    }
+
+    /**
+     * Accessor for is_guest attribute with robust fallback detection.
+     */
+    public function getIsGuestAttribute(?bool $value): bool
+    {
+        if ($value !== null && $value) {
+            return true;
+        }
+
+        if (! empty($this->guest_token)) {
+            return true;
+        }
+
+        if ($this->relationLoaded('sender') && $this->sender && $this->sender->user_id === null) {
+            return true;
+        }
+
+        return (bool) $value;
+    }
+
+    /**
+     * Check if the booking originated from a guest checkout.
+     */
+    public function isGuest(): bool
+    {
+        return (bool) $this->is_guest;
+    }
+
+    /**
+     * Check if the booking is from a registered member account.
+     */
+    public function isRegistered(): bool
+    {
+        return ! $this->isGuest();
+    }
+
+    /**
+     * Scope a query to only include guest bookings.
+     */
+    public function scopeGuest($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('is_guest', true)
+                ->orWhereNotNull('guest_token')
+                ->orWhereHas('sender', fn ($sq) => $sq->whereNull('user_id'));
+        });
+    }
+
+    /**
+     * Scope a query to only include registered member bookings.
+     */
+    public function scopeRegistered($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('is_guest', false)
+                ->whereNull('guest_token')
+                ->whereHas('sender', fn ($sq) => $sq->whereNotNull('user_id'));
+        });
     }
 }

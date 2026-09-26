@@ -321,7 +321,7 @@ function DeclarationDocument({ booking, box, boxIndex, sender, cert, declaration
 
                 <Footer
                     left={<>Digital Signature ID: {booking.uuid?.split('-')[0] || '________________'}</>}
-                    right={<>{declarationSettings.brandName || 'Love Balikbayan Logistics System'} - Printed {new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' })} {new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })}</>}
+                    right={<>{declarationSettings.brandName || 'Eagle Cargo Logistics System'} - Printed {new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' })} {new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })}</>}
                 />
             </div>
 
@@ -377,7 +377,7 @@ function DeclarationDocument({ booking, box, boxIndex, sender, cert, declaration
                             I certify that I am the Consignor/Sender of the above goods and that this detailed packing list is the true and correct description of the goods contained in this box/parcel being sent to the Philippines. I certify that there are no undeclared, restricted, illegal, or banned items, including firearms, ammunition, illegal drugs, or combustible goods, included in this shipment.
                         </p>
                         <p className="text-[7.8px] leading-[1.35] text-zinc-600 text-justify mb-[5px]">
-                            I authorize <strong>LOVE BALIKBAYAN BOXES CARGO SERVICES</strong>, located in <strong>Victoria, Australia</strong>, to clear this shipment through Customs and acknowledge that duties, taxes, charges, penalties, and other expenses due on the shipment or incurred for its release must be paid. By signing, I agree to all Terms &amp; Conditions stated in this declaration.
+                            I authorize <strong>EAGLE CARGO</strong>, located in <strong>Victoria, Australia</strong>, to clear this shipment through Customs and acknowledge that duties, taxes, charges, penalties, and other expenses due on the shipment or incurred for its release must be paid. By signing, I agree to all Terms &amp; Conditions stated in this declaration.
                         </p>
 
                         {/* Signature row */}
@@ -452,7 +452,7 @@ function DeclarationDocument({ booking, box, boxIndex, sender, cert, declaration
                 <DeclarationTerms variant="print" />
 
                 <Footer
-                    left={declarationSettings.brandName || 'Love Balikbayan Logistics System'}
+                    left={declarationSettings.brandName || 'Eagle Cargo Logistics System'}
                     right={<>Printed {new Date().toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' })} {new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })}</>}
                 />
             </div>

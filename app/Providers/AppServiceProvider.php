@@ -223,6 +223,17 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('ops-scan', fn (Request $request): Limit => Limit::perMinute(120)
             ->by($this->rateLimitKey($request)));
 
+        RateLimiter::for('declaration-resend', function (Request $request): array {
+            $bookingId = (string) ($request->input('booking_id') ?? '');
+            $user = $request->user();
+            $userKey = $user ? 'user:'.$user->id : 'ip:'.$request->ip();
+
+            return [
+                Limit::perMinute(5)->by('declaration-resend-ip:'.$request->ip()),
+                Limit::perDay(3)->by('declaration-resend-limit:'.$userKey.':'.$bookingId),
+            ];
+        });
+
         RateLimiter::for('admin-mutations', fn (Request $request): Limit => Limit::perMinute(80)
             ->by($this->rateLimitKey($request)));
     }

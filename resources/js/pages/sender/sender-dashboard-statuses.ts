@@ -94,3 +94,131 @@ export const getSenderBookingStatusIndex = (boxStatus?: string, bookingStatus?: 
     return Math.max(getWeight(boxStatus), getWeight(bookingStatus));
 };
 
+export interface ContinuousProgressInfo {
+    label: string;
+    percent: number;
+    isDelivered: boolean;
+    barColor: string;
+}
+
+export const getContinuousProgressInfo = (
+    boxStatus?: string,
+    bookingStatus?: string
+): ContinuousProgressInfo => {
+    const getSingle = (status?: string): ContinuousProgressInfo => {
+        const raw = (status || '').toLowerCase().trim();
+
+        if (raw === 'delivered') {
+            return {
+                label: 'Delivered',
+                percent: 100,
+                isDelivered: true,
+                barColor: 'bg-emerald-500',
+            };
+        }
+
+        if (raw === 'out_for_delivery') {
+            return {
+                label: 'Out for Delivery',
+                percent: 90,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'for_delivery_scheduling' || raw === 'en_route_roro') {
+            return {
+                label: 'En Route to Local Hub',
+                percent: 80,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'for_checking_unloading' || raw === 'unloaded_manila') {
+            return {
+                label: 'Unloaded & Sorting',
+                percent: 75,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'arrived') {
+            return {
+                label: 'Arrived in Philippines',
+                percent: 70,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'in_transit' || raw === 'shipped') {
+            return {
+                label: 'In Transit',
+                percent: 60,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'loaded_to_container') {
+            return {
+                label: 'Loaded to Container',
+                percent: 45,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'received_by_branch' || raw === 'warehouse') {
+            return {
+                label: 'Received at Warehouse',
+                percent: 35,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'collected') {
+            return {
+                label: 'Picked Up',
+                percent: 25,
+                isDelivered: false,
+                barColor: 'bg-orange-500',
+            };
+        }
+
+        if (raw === 'held' || raw === 'held_bulging') {
+            return {
+                label: 'On Hold',
+                percent: 30,
+                isDelivered: false,
+                barColor: 'bg-amber-500',
+            };
+        }
+
+        if (raw === 'damaged') {
+            return {
+                label: 'Damaged (Inspecting)',
+                percent: 30,
+                isDelivered: false,
+                barColor: 'bg-amber-500',
+            };
+        }
+
+        return {
+            label: 'Intake / Booking',
+            percent: 5,
+            isDelivered: false,
+            barColor: 'bg-orange-500',
+        };
+    };
+
+    const boxInfo = getSingle(boxStatus);
+    const bookingInfo = getSingle(bookingStatus);
+
+    return boxInfo.percent >= bookingInfo.percent ? boxInfo : bookingInfo;
+};
+
+

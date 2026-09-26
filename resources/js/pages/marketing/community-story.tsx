@@ -10,12 +10,13 @@ export default function CommunityStory() {
         { title: 'Community Story', href: '/our-story' },
     ];
 
-    const { auth } = usePage<PageProps & { auth: Auth }>().props;
+    const { auth, settings } = usePage<PageProps & { auth: Auth; settings?: any }>().props;
     const Layout = !auth.user ? MarketingLayout : AppLayout;
+    const appName = settings?.appName || 'Eagle Cargo';
 
     return (
         <Layout {...(auth.user ? { breadcrumbs } : {})}>
-            <Head title="Our Community Story | Box Tracker" />
+            <Head title={`Our Community Story | ${appName}`} />
 
             {/* Split hero */}
             <section className="section-padding border-b border-brand-sand bg-brand-cream">
@@ -31,8 +32,8 @@ export default function CommunityStory() {
                             A cargo shipment isn't simply a collection of goods.
                             It represents the hard work, selflessness, and
                             undying love of Overseas Filipino Workers (OFWs)
-                            providing for their families miles away. At Box Tracker
-                            Cargo, we honor that sacrifice. Every box we lift,
+                            providing for their families miles away. At {appName},
+                            we honor that sacrifice. Every box we lift,
                             secure, and ship is a bridge between two hearts.
                         </p>
                     </div>

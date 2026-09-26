@@ -239,6 +239,7 @@ class TransactionSnapshotService
     {
         return [
             'id' => $sender?->id,
+            'user_id' => $sender?->user_id,
             'first_name' => $sender?->first_name,
             'last_name' => $sender?->last_name,
             'email' => $sender?->email,

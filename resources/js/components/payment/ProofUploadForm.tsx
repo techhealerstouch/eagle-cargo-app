@@ -1,34 +1,47 @@
 import { useForm } from '@inertiajs/react';
 import { Upload, RefreshCw, Loader2 } from 'lucide-react';
 import React, { useState } from 'react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 
 interface ProofUploadFormProps {
     bookingId: number;
+    uploadUrl?: string;
+    token?: string;
     onSuccess?: () => void;
 }
 
-export function ProofUploadForm({ bookingId, onSuccess }: ProofUploadFormProps) {
+export function ProofUploadForm({ bookingId, uploadUrl, token, onSuccess }: ProofUploadFormProps) {
     const [uploadPreview, setUploadPreview] = useState<string | null>(null);
 
-    const { data, setData, post, processing } = useForm<{ proof_of_payment: File | null }>({
+    const { data, setData, post, processing, reset } = useForm<{
+        proof_of_payment: File | null;
+        booking_id: number;
+        token?: string;
+    }>({
         proof_of_payment: null,
+        booking_id: bookingId,
+        token: token || '',
     });
 
     const handleUploadSubmit = (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (processing) {
-return;
-}
+        if (processing || !data.proof_of_payment) {
+            return;
+        }
 
-        post(`/bookings/${bookingId}/upload-proof`, {
+        const targetUrl = uploadUrl || `/bookings/${bookingId}/upload-proof`;
+
+        post(targetUrl, {
+            preserveScroll: true,
+            forceFormData: true,
             onSuccess: () => {
+                reset();
+                setUploadPreview(null);
                 if (onSuccess) {
-onSuccess();
-}
+                    onSuccess();
+                }
             },
         });
     };

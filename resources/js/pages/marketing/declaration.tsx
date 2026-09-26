@@ -1,4 +1,4 @@
-import { Head, useForm, Link } from '@inertiajs/react';
+import { Head, useForm, Link, usePage } from '@inertiajs/react';
 import { ArrowRight, CheckCircle2, ChevronLeft, FileText, Package2, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import SignaturePad from 'signature_pad';
@@ -6,10 +6,11 @@ import { toast } from 'sonner';
 
 import DeclarationTerms from '@/components/common/declaration-terms';
 import AppLayout from '@/layouts/app-layout';
+import MarketingLayout from '@/layouts/marketing-layout';
 import PhoneInput from '@/components/ui/PhoneInput';
 import { validatePhone, COUNTRIES } from '@/lib/countries';
 import declarationRoutes from '@/routes/track/declaration';
-import type { BreadcrumbItem } from '@/types';
+import type { BreadcrumbItem, SharedData } from '@/types';
 
 interface Booking {
     id: number;
@@ -31,6 +32,8 @@ interface DeclarationSettings {
 interface Props {
     booking: Booking;
     declarationSettings: DeclarationSettings;
+    isGuest?: boolean;
+    guestToken?: string;
 }
 
 const ALL_COUNTRIES = COUNTRIES.map(c => c.name).sort();
@@ -260,7 +263,16 @@ function Field({
     );
 }
 
-export default function DeclarationForm({ booking, declarationSettings }: Props) {
+export default function DeclarationForm({
+    booking,
+    declarationSettings,
+    isGuest = false,
+    guestToken,
+}: Props) {
+    const { auth } = usePage<SharedData>().props;
+    const isUserGuest = isGuest || !auth?.user;
+    const Layout = isUserGuest ? MarketingLayout : AppLayout;
+
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Track', href: '/track' },
         { title: 'Declaration', href: '#' },
@@ -287,6 +299,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
 
     const { data, setData, post, processing, errors, transform } = useForm<any>({
         booking_id: booking.id,
+        token: guestToken || '',
         declaration_data: {
             shipment: {
                 pickup_date: toDateInputValue(savedDeclaration.shipment?.pickup_date || booking.preferred_date),
@@ -740,6 +753,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
         transform((payload) => ({
             ...payload,
             declaration_data: nextDeclaration,
+            token: guestToken || '',
         }));
 
         post(declarationRoutes.save().url, {
@@ -755,7 +769,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
     const certification = data.declaration_data.certification;
 
     return (
-        <AppLayout breadcrumbs={breadcrumbs}>
+        <Layout {...(!isUserGuest ? { breadcrumbs } : {})}>
             <Head title={declarationSettings.headerText} />
 
             <div className="min-h-screen bg-zinc-50">
@@ -1123,7 +1137,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
                                 )}
 
                                 <section className="space-y-5 rounded-3xl border border-amber-300 bg-amber-50 p-6 md:p-8">
-                                    <SectionHeader title="For Office Use Only" subtitle="Do not sign. Love Balikbayan Box staff only." />
+                                    <SectionHeader title="For Office Use Only" subtitle="Do not sign. Eagle Cargo staff only." />
 
                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                         <Field label="Date Processed">
@@ -1138,7 +1152,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
                                         </Field>
 
                                         <div className="space-y-2">
-                                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Love Balikbayan Box Authorised Signature</label>
+                                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Eagle Cargo Authorised Signature</label>
                                             <div className="flex h-12 items-center rounded-xl border border-dashed border-zinc-300 bg-zinc-100 px-4 text-sm text-zinc-500">
                                                 For office use only
                                             </div>
@@ -1193,7 +1207,7 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
                                             onChange={(event) => setCertificationField('agree_terms', event.target.checked)}
                                         />
                                         <span className="text-sm text-zinc-700">
-                                            I agree to all Terms and Conditions, Disclaimer of Warranties, Limitation of Liability, and the Abandoned Goods Policy of Love Balikbayan Box.
+                                            I agree to all Terms and Conditions, Disclaimer of Warranties, Limitation of Liability, and the Abandoned Goods Policy of Eagle Cargo.
                                             I confirm I am of legal age and have read and understood this declaration in full.
                                         </span>
                                     </label>
@@ -1242,6 +1256,6 @@ export default function DeclarationForm({ booking, declarationSettings }: Props)
                     </form>
                 </div>
             </div>
-        </AppLayout>
+        </Layout>
     );
 }

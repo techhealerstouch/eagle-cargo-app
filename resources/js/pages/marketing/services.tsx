@@ -11,12 +11,13 @@ export default function Services() {
         { title: 'Our Services', href: '/services' },
     ];
 
-    const { auth } = usePage<PageProps & { auth: Auth }>().props;
+    const { auth, settings } = usePage<PageProps & { auth: Auth; settings?: any }>().props;
     const Layout = !auth.user ? MarketingLayout : AppLayout;
+    const appName = settings?.appName || 'Eagle Cargo';
 
     return (
         <Layout {...(auth.user ? { breadcrumbs } : {})}>
-            <Head title="Our Services | Box Tracker" />
+            <Head title={`Our Services | ${appName}`} />
             <div className="section-padding container-default">
                 <div className="mx-auto mb-16 max-w-3xl text-center">
                     <span className="eyebrow mb-4 inline-block">

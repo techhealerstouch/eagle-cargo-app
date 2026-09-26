@@ -45,12 +45,18 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
         tracking_number: (tracking_number || trackingData?.tracking_number || '').trim(),
     });
 
-    const [hasSearched, setHasSearched] = useState(!!trackingData);
+    const [hasSearched, setHasSearched] = useState(!!trackingData || !!(tracking_number && tracking_number.trim()));
     const [isCopied, setIsCopied] = useState(false);
     const [isHighlighted, setIsHighlighted] = useState(false);
     const [activeBoxTrackingNumber, setActiveBoxTrackingNumber] = useState<string>(
         trackingData?.tracking_number || ''
     );
+
+    useEffect(() => {
+        if (tracking_number || trackingData) {
+            setHasSearched(true);
+        }
+    }, [tracking_number, trackingData]);
 
     useEffect(() => {
         if (trackingData?.tracking_number) {
@@ -372,7 +378,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
     const isMultiBox = trackingData?.is_multi_box || trackingData?.is_booking_search || (trackingData?.all_boxes && trackingData.all_boxes.length > 1);
 
     return (
-        <Layout hideLogin {...(!isGuest ? { breadcrumbs } : {})}>
+        <Layout {...(!isGuest ? { breadcrumbs } : {})}>
             <Head title="Track Shipment" />
 
             <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-6 md:space-y-10 min-h-[600px]">
@@ -501,7 +507,13 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
 
                         {/* Action Required Alert */}
                         {trackingData.declaration_form_status === 'missing' && trackingData.status?.toLowerCase() !== 'cancelled' && (
-                            <DeclarationAlert bookingId={trackingData.booking_id} />
+                            <DeclarationAlert
+                                bookingId={trackingData.booking_id}
+                                canEdit={!!trackingData.can_edit_declaration}
+                                trackingNumber={trackingData.tracking_number || trackingData.booking_reference}
+                                senderEmailMasked={trackingData.sender_email_masked}
+                                resendsRemaining={trackingData.declaration_resends_remaining}
+                            />
                         )}
 
                         {/* Main Content: Timeline & Sidebar */}

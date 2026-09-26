@@ -21,6 +21,7 @@ use App\Http\Controllers\Admin\SenderController;
 use App\Http\Controllers\Admin\ShippingUpdateController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\BookingController;
+use App\Http\Controllers\GuestBookingController;
 use App\Http\Controllers\CourierController;
 use App\Http\Controllers\MockPaymentController;
 use App\Http\Controllers\Picker\EarningsController;
@@ -38,8 +39,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
 Route::get('/', function () {
-    return redirect()->route('login');
-});
+    return inertia('welcome');
+})->name('welcome');
 
 Route::get('/uploads/{path}', function (string $path) {
     $relativePath = ltrim($path, '/');
@@ -192,21 +193,65 @@ Route::get('/track/{tracking_number}', function (Request $request, $tracking_num
     return redirect()->route('track', array_merge(['tracking_number' => $tracking_number], $request->query()));
 });
 
+// Guest booking routes (public)
+Route::get('/guest/book', [GuestBookingController::class, 'create'])
+    ->middleware('throttle:public-tracking')
+    ->name('guest.book');
+Route::post('/guest/bookings', [GuestBookingController::class, 'store'])
+    ->middleware('throttle:booking-writes')
+    ->name('guest.bookings.store');
+Route::post('/guest/bookings/initialize', [GuestBookingController::class, 'initialize'])
+    ->middleware('throttle:booking-writes')
+    ->name('guest.bookings.initialize');
+Route::post('/guest/bookings/{booking}/stripe-intent', [StripePaymentController::class, 'createGuestIntent'])
+    ->middleware('throttle:payments')
+    ->name('guest.bookings.stripe-intent');
+Route::post('/guest/bookings/{booking}/stripe-verify', [StripePaymentController::class, 'verifyGuestPayment'])
+    ->middleware('throttle:payments')
+    ->name('guest.bookings.stripe-verify');
+Route::get('/guest/booking/confirmed', [GuestBookingController::class, 'confirmed'])
+    ->middleware('throttle:public-tracking')
+    ->name('guest.booking.confirmed');
+Route::post('/guest/booking/upload-proof', [GuestBookingController::class, 'uploadProofOfPayment'])
+    ->middleware('throttle:uploads')
+    ->name('guest.booking.upload-proof');
+
+// Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
+Route::inertia('/about', 'marketing/about')->name('about');
+Route::inertia('/services', 'marketing/services')->name('services');
+Route::inertia('/faq', 'marketing/faq')->name('faq');
+Route::get('/contact', function (\App\Services\SettingsService $settingsService) {
+    $general = $settingsService->getGeneralSettings();
+    $invoice = $settingsService->getInvoiceSettings();
+
+    return inertia('marketing/contact', [
+        'contactInfo' => [
+            'phone' => $general['contactPhone'] ?: '+61 406 828 471',
+            'email' => $general['supportEmail'] ?: 'support@eaglecargo.com.au',
+            'address' => $invoice['address'] ?: "6 Ivan St, Arundel QLD 4214, Australia",
+            'hours' => 'Monday – Saturday: 8:00 AM – 6:00 PM AEST',
+        ],
+    ]);
+})->name('contact');
+Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
+Route::inertia('/our-story', 'marketing/community-story')->name('our-story');
+Route::inertia('/shipping-updates', 'marketing/shipping-updates')->name('shipping-updates');
+
+// Declaration routes (accessible by authenticated owners or guests with secure token)
+Route::get('/declaration-form/blank', [BookingController::class, 'downloadBlankDeclaration'])->name('declaration.blank');
+Route::get('/track/declaration/{booking}', [TrackingController::class, 'showDeclarationForm'])->name('track.declaration.form');
+Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'viewDeclaration'])->name('track.declaration.view');
+Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
+Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
+Route::post('/track/declaration/resend-email', [TrackingController::class, 'resendDeclarationEmail'])->middleware('throttle:declaration-resend')->name('track.declaration.resend-email');
+
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('/home', 'welcome')->name('home');
     Route::get('/notifications', function () {
         return inertia('notifications/index');
     })->name('notifications.index');
-    Route::inertia('/about', 'marketing/about')->name('about');
-    Route::inertia('/services', 'marketing/services')->name('services');
-    Route::inertia('/faq', 'marketing/faq')->name('faq');
-    Route::get('/contact', function () {
-        return inertia('marketing/contact');
-    })->name('contact');
-    Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
 
     Route::get('/book', [BookingController::class, 'create'])->name('book');
-    Route::get('/declaration-form/blank', [BookingController::class, 'downloadBlankDeclaration'])->name('declaration.blank');
     Route::post('/bookings', [BookingController::class, 'store'])->middleware('throttle:booking-writes')->name('bookings.store');
     Route::post('/bookings/initialize', [BookingController::class, 'initialize'])->middleware('throttle:booking-writes')->name('bookings.initialize');
     Route::post('/bookings/draft', [BookingController::class, 'saveDraft'])->middleware('throttle:booking-writes')->name('bookings.draft');
@@ -221,12 +266,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/bookings/{booking}/edit', [BookingController::class, 'edit'])->name('bookings.edit');
     Route::put('/bookings/{booking}', [BookingController::class, 'update'])->middleware('throttle:booking-writes')->name('bookings.update');
     Route::delete('/bookings/{booking}', [BookingController::class, 'destroy'])->middleware('throttle:booking-writes')->name('bookings.destroy');
-    Route::inertia('/our-story', 'marketing/community-story')->name('our-story');
-    Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
-    Route::get('/track/declaration/{booking}', [TrackingController::class, 'showDeclarationForm'])->name('track.declaration.form');
-    Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'viewDeclaration'])->name('track.declaration.view');
-    Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
-    Route::inertia('/shipping-updates', 'marketing/shipping-updates')->name('shipping-updates');
 
     Route::get('/dashboard', [SenderDashboardController::class, 'index'])->name('dashboard');
     Route::get('/bookings', [SenderDashboardController::class, 'bookings'])->name('sender.bookings');
@@ -304,7 +343,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('payments/{payment}/confirm', [PaymentController::class, 'confirm'])->middleware('throttle:admin-mutations')->name('payments.confirm');
         Route::post('payments/{payment}/reject', [PaymentController::class, 'reject'])->middleware('throttle:admin-mutations')->name('payments.reject');
         Route::resource('enquiries', EnquiryController::class)->only(['index', 'show', 'update', 'destroy']);
-        Route::resource('shipping-updates', ShippingUpdateController::class);
+        Route::match(['get', 'post'], 'users/check-email', [UserController::class, 'checkEmail'])->name('users.check-email');
         Route::post('users/{id}/restore', [UserController::class, 'restore'])->middleware('throttle:admin-mutations')->name('users.restore');
         Route::resource('users', UserController::class)->withTrashed();
         Route::post('serial-numbers/bulk-void', [App\Http\Controllers\Admin\SerialNumberController::class, 'bulkVoid'])->name('serial-numbers.bulk-void');

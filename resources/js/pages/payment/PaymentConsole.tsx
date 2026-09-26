@@ -19,9 +19,13 @@ interface Booking {
     payment_status?: string;
     boxes: Box[];
     proof_of_payment?: string;
+    payment_reference?: string | null;
     sender?: { first_name: string; last_name: string; email?: string; mobile?: string; address?: string; };
     payment_method?: string;
     preferred_date?: string;
+    declaration_data?: any;
+    declaration_form_path?: string | null;
+    declaration_form_status?: string;
 }
 export interface Invoice {
     id: number;

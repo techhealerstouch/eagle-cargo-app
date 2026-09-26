@@ -49,7 +49,7 @@ class BoxRepository implements BoxRepositoryInterface
         Box $box,
         string $status,
         ?string $notes,
-        int $courierId,
+        ?int $courierId = null,
         ?int $areaMilestoneId = null,
         ?UploadedFile $deliveryProof = null,
         ?string $trackingPhase = null,
@@ -134,13 +134,15 @@ class BoxRepository implements BoxRepositoryInterface
                 $description = $notes ?: ($statusEnum ? "Status updated to {$statusEnum->label()}." : 'Status updated.');
             }
 
-            $this->assertDeliveryEvidence(
-                box: $lockedBox,
-                targetStatus: $statusEnum,
-                deliveryProofPath: $deliveryProofPath,
-                signaturePath: $signaturePath,
-                overrideReason: $deliveryOverrideReason,
-            );
+            if (! $bypassValidation) {
+                $this->assertDeliveryEvidence(
+                    box: $lockedBox,
+                    targetStatus: $statusEnum,
+                    deliveryProofPath: $deliveryProofPath,
+                    signaturePath: $signaturePath,
+                    overrideReason: $deliveryOverrideReason,
+                );
+            }
 
             if ($statusEnum === BoxStatus::Delivered && $deliveryOverrideReason) {
                 $description = trim($description."\nAdmin proof override: {$deliveryOverrideReason}");

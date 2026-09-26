@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
-import { Save, ArrowLeft, ArrowRight, User, ShieldCheck, Mail, Phone, MapPin, ChevronDown, Send, Map } from 'lucide-react';
+import { Save, ArrowLeft, ArrowRight, User, ShieldCheck, Mail, Phone, MapPin, ChevronDown, Send, Map, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,9 @@ import type { BreadcrumbItem } from '@/types';
 import CommissionCalculatorForm from '@/components/admin/users/commission-calculator-form';
 import FormStepperHeader, { StepItem } from '@/components/admin/users/form-stepper-header';
 import PhoneInput from '@/components/ui/PhoneInput';
+import { useEmailValidator } from '@/hooks/use-email-validator';
+import { toast } from 'sonner';
+
 
 const ROLE_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
     sender: { label: 'CUSTOMER (SENDER)', bg: 'bg-blue-50/80', text: 'text-blue-700', border: 'border-blue-200' },
@@ -49,6 +52,9 @@ export default function UsersCreate({
     const [rawJsonMode, setRawJsonMode] = useState(false);
     const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
     const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
+    const emailValidator = useEmailValidator({
+        endpoint: '/admin/users/check-email',
+    });
 
     // Visual commission rate state
     const [commissionForm, setCommissionForm] = useState({
@@ -118,8 +124,31 @@ export default function UsersCreate({
         return Object.keys(newErrors).length === 0;
     };
 
-    const handleNext = () => {
-        if (!validateStep(currentStep)) return;
+    const handleNext = async () => {
+        if (!validateStep(currentStep)) {
+            if (currentStep === 1) {
+                if (!data.name.trim() && !data.email.trim()) {
+                    toast.error('Please enter Full Name and Email Address to continue.');
+                } else if (!data.name.trim()) {
+                    toast.error('Full Name is required.');
+                } else if (!data.email.trim()) {
+                    toast.error('Email Address is required.');
+                }
+            } else if (currentStep === 3 && data.role === 'picker' && !data.pickup_zone_id) {
+                toast.error('Assigned Pickup Zone is required for the Picker role.');
+            } else {
+                toast.error('Please complete all required fields to continue.');
+            }
+            return;
+        }
+
+        if (currentStep === 1) {
+            const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
+            if (!isEmailAvailable) {
+                toast.error(emailValidator.message || 'Cannot proceed: This email address is already registered or invalid.');
+                return;
+            }
+        }
 
         if (currentStep === 2 && !isTerritoryRole) {
             setCurrentStep(4); // Skip territory step for non-picker/courier roles
@@ -136,9 +165,19 @@ export default function UsersCreate({
         }
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!validateStep(currentStep)) return;
+        if (!validateStep(currentStep)) {
+            toast.error('Please fill in all required fields before creating the account.');
+            return;
+        }
+
+        const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
+        if (!isEmailAvailable) {
+            setCurrentStep(1);
+            toast.error(emailValidator.message || 'Cannot create account: Email address is already registered.');
+            return;
+        }
 
         let finalRates: any = null;
         if (data.role === 'picker') {
@@ -146,7 +185,7 @@ export default function UsersCreate({
                 try {
                     finalRates = JSON.parse(data.commission_rates);
                 } catch (err) {
-                    alert('Invalid JSON in Commission Rates');
+                    toast.error('Invalid JSON format in Commission Rates.');
                     return;
                 }
             } else {
@@ -175,7 +214,15 @@ export default function UsersCreate({
             send_welcome_email: sendWelcomeEmail,
         }));
 
-        post('/admin/users');
+        post('/admin/users', {
+            onError: (errs) => {
+                const firstError = Object.values(errs)[0];
+                toast.error(firstError || 'Failed to create user account. Please check the form.');
+            },
+            onSuccess: () => {
+                toast.success('User account created successfully.');
+            },
+        });
     };
 
     const currentRoleBadge = ROLE_CONFIG[data.role] || ROLE_CONFIG['courier'];
@@ -222,7 +269,22 @@ export default function UsersCreate({
                     <FormStepperHeader
                         steps={steps}
                         currentStep={currentStep}
-                        onStepClick={(stepId) => setCurrentStep(stepId)}
+                        onStepClick={async (stepId) => {
+                            if (stepId > currentStep) {
+                                if (!validateStep(currentStep)) {
+                                    toast.error('Please complete the current step before advancing.');
+                                    return;
+                                }
+                                if (currentStep === 1) {
+                                    const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
+                                    if (!isEmailAvailable) {
+                                        toast.error(emailValidator.message || 'Cannot proceed: Email address is not available.');
+                                        return;
+                                    }
+                                }
+                            }
+                            setCurrentStep(stepId);
+                        }}
                     />
 
                     <form onSubmit={handleSubmit} className="space-y-8">
@@ -270,15 +332,53 @@ export default function UsersCreate({
                                             <Input
                                                 id="email"
                                                 type="email"
-                                                className="h-12 rounded-xl border-border bg-card pl-11 pr-4 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all shadow-2xs"
+                                                className={`h-12 rounded-xl border bg-card pl-11 pr-11 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 transition-all shadow-2xs ${
+                                                    emailValidator.isChecking
+                                                        ? 'border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20'
+                                                        : emailValidator.status === 'valid'
+                                                          ? 'border-emerald-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
+                                                          : emailValidator.status === 'invalid' || emailValidator.status === 'error'
+                                                            ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
+                                                            : 'border-border focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust'
+                                                }`}
                                                 value={data.email}
-                                                onChange={(e) => setData('email', e.target.value)}
+                                                onChange={(e) => {
+                                                    setData('email', e.target.value);
+                                                    emailValidator.checkEmail(e.target.value);
+                                                }}
+                                                onBlur={() => {
+                                                    if (data.email.trim()) {
+                                                        emailValidator.validateEmailAsync(data.email);
+                                                    }
+                                                }}
                                                 placeholder="user@example.com"
                                                 maxLength={255}
                                                 required
                                             />
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
+                                                {emailValidator.isChecking && (
+                                                    <Loader2 className="size-4 animate-spin text-amber-500" />
+                                                )}
+                                                {!emailValidator.isChecking && emailValidator.status === 'valid' && (
+                                                    <CheckCircle2 className="size-4 text-emerald-500" />
+                                                )}
+                                                {!emailValidator.isChecking && (emailValidator.status === 'invalid' || emailValidator.status === 'error') && (
+                                                    <AlertCircle className="size-4 text-red-500" />
+                                                )}
+                                            </div>
                                         </div>
-                                        {(errors.email || stepErrors.email) && (
+                                        {/* Status messages */}
+                                        {emailValidator.status === 'valid' && emailValidator.message && (
+                                            <p className="text-[11px] font-bold text-emerald-600 ml-0.5 uppercase tracking-wider flex items-center gap-1.5">
+                                                <span>✓</span> {emailValidator.message}
+                                            </p>
+                                        )}
+                                        {(emailValidator.status === 'invalid' || emailValidator.status === 'error') && emailValidator.message && (
+                                            <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">
+                                                {emailValidator.message}
+                                            </p>
+                                        )}
+                                        {!(emailValidator.status === 'invalid' || emailValidator.status === 'error') && (errors.email || stepErrors.email) && (
                                             <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">
                                                 {errors.email || stepErrors.email}
                                             </p>

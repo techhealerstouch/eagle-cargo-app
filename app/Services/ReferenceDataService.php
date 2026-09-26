@@ -7,6 +7,7 @@ use App\Models\BoxPrice;
 use App\Models\BoxType;
 use App\Models\PickupZone;
 use App\Models\Province;
+use App\Models\Suburb;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 
@@ -47,6 +48,8 @@ class ReferenceDataService
     private const ACTIVE_PROVINCES_KEY = 'reference.provinces.active';
 
     private const ACTIVE_PICKUP_ZONES_KEY = 'reference.pickup_zones.active.v2';
+
+    private const ACTIVE_SUBURBS_KEY = 'reference.suburbs.active';
 
     /**
      * Default destination areas that will be auto-created if none exist.
@@ -240,6 +243,16 @@ class ReferenceDataService
         });
     }
 
+    public function activeSuburbs(): Collection
+    {
+        return Cache::rememberForever(self::ACTIVE_SUBURBS_KEY, function () {
+            return Suburb::where('is_active', true)
+                ->select('id', 'name', 'postcode', 'pickup_zone_id')
+                ->orderBy('name')
+                ->get();
+        });
+    }
+
     /**
      * Look up the price for a specific pickup_zone × area × box_type combination.
      *
@@ -324,6 +337,7 @@ class ReferenceDataService
         Cache::forget(self::BOX_PRICES_KEY);
         Cache::forget(self::ACTIVE_PROVINCES_KEY);
         Cache::forget(self::ACTIVE_PICKUP_ZONES_KEY);
+        Cache::forget(self::ACTIVE_SUBURBS_KEY);
     }
 
     /**

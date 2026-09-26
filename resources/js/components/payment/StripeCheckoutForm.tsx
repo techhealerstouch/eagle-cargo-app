@@ -5,10 +5,14 @@ import { Button } from '@/components/ui/button';
 
 export function StripeCheckoutForm({
     bookingId,
+    verifyUrl,
+    token,
     onSuccess,
     onLoadError,
 }: {
     bookingId: number;
+    verifyUrl?: string;
+    token?: string;
     onSuccess?: () => void;
     onLoadError?: (message?: string) => void;
 }) {
@@ -68,7 +72,8 @@ export function StripeCheckoutForm({
 
                         return match ? decodeURIComponent(match[3]) : '';
                     };
-                    await fetch(`/bookings/${bookingId}/stripe-verify`, {
+                    const targetVerifyUrl = verifyUrl || `/bookings/${bookingId}/stripe-verify`;
+                    await fetch(targetVerifyUrl, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -76,7 +81,10 @@ export function StripeCheckoutForm({
                             'Accept': 'application/json',
                             'X-Requested-With': 'XMLHttpRequest',
                         },
-                        body: JSON.stringify({ payment_intent: paymentIntent.id }),
+                        body: JSON.stringify({
+                            payment_intent: paymentIntent.id,
+                            ...(token ? { token } : {}),
+                        }),
                     });
                 } catch (e) {
                     console.error('Verification call failed', e);

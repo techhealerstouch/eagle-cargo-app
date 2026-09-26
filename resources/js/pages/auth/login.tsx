@@ -12,6 +12,7 @@ import { store } from '@/routes/login';
 import { request } from '@/routes/password';
 import AppLogoIcon from '@/components/layout/app-logo-icon';
 import BrandLogoImage from '@/components/layout/brand-logo-image';
+import MarketingLayout from '@/layouts/marketing-layout';
 import type { SharedData } from '@/types';
 
 type Props = {
@@ -28,10 +29,11 @@ export default function Login({
     const { settings } = usePage<SharedData>().props;
 
     return (
-        <div className="flex min-h-svh flex-col items-center justify-center bg-zinc-50/50 p-6 font-sans md:p-10">
+        <MarketingLayout>
             <Head title="Log in" />
-            <div className="w-full max-w-md">
-                {/* Header */}
+            <div className="flex min-h-[calc(100vh-14rem)] flex-col items-center justify-center py-12 px-4 sm:px-6 md:px-8 font-sans">
+                <div className="w-full max-w-md">
+                    {/* Header */}
                 <div className="mb-8 flex flex-col items-center gap-4">
                     <Link
                         href="/"
@@ -180,11 +182,22 @@ export default function Login({
                                         </TextLink>
                                     </div>
                                 )}
+
+                                <div className="mt-4 border-t border-zinc-100 pt-4 text-center font-sans text-xs text-zinc-500">
+                                    Just want to send a package?{' '}
+                                    <Link
+                                        href="/guest/book"
+                                        className="font-bold text-brand-rust hover:underline inline-flex items-center gap-1"
+                                    >
+                                        Book as Guest &rarr;
+                                    </Link>
+                                </div>
                             </>
                         )}
                     </Form>
                 </div>
             </div>
         </div>
+        </MarketingLayout>
     );
 }

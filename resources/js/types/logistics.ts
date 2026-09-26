@@ -58,10 +58,16 @@ export interface TrackingData {
     total_boxes_count?: number;
     all_boxes: TrackingBox[];
     declaration_form_status?: 'missing' | 'submitted';
+    can_edit_declaration?: boolean;
+    sender_email_masked?: string | null;
+    declaration_resends_remaining?: number;
+    shipped_at?: string | null;
     current_milestone_id?: number;
     area_milestones?: Array<{ id: number; name: string; is_final: boolean }>;
     eta_date?: string | null;
     eta_message?: string | null;
+    estimate_delivery_date?: string | null;
+    estimate_delivery_message?: string | null;
     batch?: {
         batch_number: string;
         status?: string;

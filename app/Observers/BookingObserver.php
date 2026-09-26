@@ -96,6 +96,34 @@ if ($newStatus === BookingStatus::Confirmed) {
                 $booking->saveQuietly();
             }
 
+            // Handle Collected side effects — cascade to pending child boxes
+            if ($newStatus === BookingStatus::Collected) {
+                $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
+                $booking->boxes()->where('status', BoxStatus::Pending)->get()->each(function ($box) use ($boxRepo) {
+                    $boxRepo->updateStatus(
+                        box: $box,
+                        status: BoxStatus::Collected->value,
+                        notes: 'Collected as part of booking collection',
+                        courierId: \Illuminate\Support\Facades\Auth::id()
+                    );
+                });
+            }
+
+            // Handle Delivered side effects — cascade to undelivered child boxes
+            if ($newStatus === BookingStatus::Delivered) {
+                $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
+                $booking->boxes()->whereNotIn('status', [BoxStatus::Delivered, BoxStatus::Cancelled])->get()->each(function ($box) use ($boxRepo) {
+                    $boxRepo->updateStatus(
+                        box: $box,
+                        status: BoxStatus::Delivered->value,
+                        notes: 'Delivered as part of booking completion',
+                        courierId: \Illuminate\Support\Facades\Auth::id(),
+                        deliveryOverrideReason: 'Marked delivered via booking status update',
+                        bypassValidation: true
+                    );
+                });
+            }
+
             // Handle Cancellation side effects (Items 2, 54)
             if ($newStatus === BookingStatus::Cancelled) {
                 // Cancel all child boxes individually to trigger BoxObserver events

@@ -4,7 +4,7 @@ import { formatDate } from '@/lib/logistics-utils';
 import { cn, humanize } from '@/lib/utils';
 import { getFriendlyStepDescription } from '@/lib/logistics-theme';
 import type { TrackingTimelineItem, NormalizedStep } from '@/types/logistics';
-import { classifyStepState, type TimelineStepState } from './TrackingTimeline.helpers';
+import { classifyStepState, shouldHideEventDateTime, type TimelineStepState } from './TrackingTimeline.helpers';
 
 interface TrackingTimelineProps {
     timeline: TrackingTimelineItem[];
@@ -211,6 +211,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                     step.statusKey,
                                                     step.description
                                                 );
+                                                const hideDateTime = shouldHideEventDateTime(description, event);
 
                                                 return (
                                                     <div
@@ -229,9 +230,11 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                             )}>
                                                                 {description}
                                                             </p>
-                                                            <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
-                                                                <Clock className="size-2.5" /> {formatDate(event.date)}
-                                                            </span>
+                                                            {!hideDateTime && (
+                                                                <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
+                                                                    <Clock className="size-2.5" /> {formatDate(event.date)}
+                                                                </span>
+                                                            )}
                                                         </div>
 
                                                         {event.location && (
@@ -268,6 +271,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                             event.status_label || event.status || '',
                                             event.description
                                         );
+                                        const hideDateTime = shouldHideEventDateTime(description, event);
 
                                         return (
                                             <div
@@ -278,9 +282,11 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                     <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 leading-relaxed">
                                                         {description}
                                                     </p>
-                                                    <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
-                                                        <Clock className="size-2.5" /> {formatDate(event.date)}
-                                                    </span>
+                                                    {!hideDateTime && (
+                                                        <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
+                                                            <Clock className="size-2.5" /> {formatDate(event.date)}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {event.location && (
                                                     <div className="flex items-center gap-1.5 text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
