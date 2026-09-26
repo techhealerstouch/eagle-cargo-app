@@ -59,6 +59,8 @@ export interface TrackingData {
     all_boxes: TrackingBox[];
     declaration_form_status?: 'missing' | 'submitted';
     can_edit_declaration?: boolean;
+    sender_email_masked?: string | null;
+    declaration_resends_remaining?: number;
     shipped_at?: string | null;
     current_milestone_id?: number;
     area_milestones?: Array<{ id: number; name: string; is_final: boolean }>;

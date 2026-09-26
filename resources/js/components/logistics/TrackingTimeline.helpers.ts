@@ -102,3 +102,27 @@ export function classifyStepState(options: ClassifyStepOptions): TimelineStepSta
     // 5. Future steps
     return 'upcoming';
 }
+
+/**
+ * Helper to determine if date/time should be temporarily hidden for specific system events.
+ * Specifically hides date/time for "Booking created and box registered".
+ */
+export function shouldHideEventDateTime(
+    description?: string,
+    event?: { description?: string | null; status?: string | null; status_label?: string | null }
+): boolean {
+    const desc = (description || '').toLowerCase();
+    const rawDesc = (event?.description || '').toLowerCase();
+    const status = (event?.status || '').toLowerCase();
+    const statusLabel = (event?.status_label || '').toLowerCase();
+
+    return (
+        desc.includes('booking created and box registered') ||
+        rawDesc.includes('booking created and box registered') ||
+        (desc.includes('booking created') && desc.includes('box registered')) ||
+        (rawDesc.includes('booking created') && rawDesc.includes('box registered')) ||
+        status === 'booking_created' ||
+        statusLabel === 'booking created'
+    );
+}
+

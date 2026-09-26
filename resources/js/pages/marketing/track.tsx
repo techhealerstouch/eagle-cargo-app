@@ -510,6 +510,9 @@ export default function Track({ trackingData, tracking_number, trackingSteps }: 
                             <DeclarationAlert
                                 bookingId={trackingData.booking_id}
                                 canEdit={!!trackingData.can_edit_declaration}
+                                trackingNumber={trackingData.tracking_number || trackingData.booking_reference}
+                                senderEmailMasked={trackingData.sender_email_masked}
+                                resendsRemaining={trackingData.declaration_resends_remaining}
                             />
                         )}
 

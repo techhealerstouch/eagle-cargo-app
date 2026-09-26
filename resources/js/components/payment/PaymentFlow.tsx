@@ -126,7 +126,7 @@ export default function PaymentFlow({
         }
     }, []);
 
-    const totalAmount = booking.boxes.reduce((acc, box) => acc + parseFloat(box.price_charged || '0'), 0);
+    const totalAmount = (booking.boxes || []).reduce((acc, box) => acc + parseFloat(String(box.price_charged || '0')), 0);
     const resolvedManualAmountCap = Math.max(0, manualAmountCapProp ?? manualAmount ?? totalAmount);
     const resolvedManualAmount = Math.max(0, manualAmount ?? resolvedManualAmountCap);
 

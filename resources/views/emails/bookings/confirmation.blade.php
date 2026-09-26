@@ -24,7 +24,9 @@
     $isGuest = empty($sender?->user_id);
     $trackingNumber = $booking->boxes->first()?->tracking_number ?? $booking->reference_number;
     $trackingUrl = route('track', ['tracking_number' => $trackingNumber]);
-    $paymentUrl = $isGuest ? $trackingUrl : route('bookings.pay', $booking);
+    $paymentUrl = $isGuest && !empty($booking->guest_token)
+        ? route('guest.booking.confirmed', ['token' => $booking->guest_token])
+        : route('bookings.pay', $booking);
     $declarationUrl = route('track.declaration.form', array_filter([
         'booking' => $booking->id,
         'token' => $booking->guest_token,
@@ -41,7 +43,11 @@ Thanks for booking with {{ config('app.name') }}. We have received your balikbay
 **Booking reference:** {{ $reference }}  
 **Pickup date:** {{ $pickupDate }}  
 **Booking status:** {{ str($status ?? 'pending')->replace('_', ' ')->title() }}  
-**Payment:** {{ str($paymentStatus ?? 'pending')->replace('_', ' ')->title() }} via {{ $paymentMethod }}  
+@if ($paymentStatus === 'paid')
+**Payment:** Paid via {{ $paymentMethod }}  
+@else
+**Payment:** {{ str($paymentStatus ?? 'pending')->replace('_', ' ')->title() }}  
+@endif
 **Estimated total:** {{ $amount }}
 </x-mail::panel>
 
@@ -90,11 +96,6 @@ Fill Out Customs Declaration
 </x-mail::panel>
 @endif
 
-@if ($isGuest)
-<x-mail::button :url="$trackingUrl">
-Track Your Box
-</x-mail::button>
-@else
 @if (($paymentStatus ?? null) !== 'paid')
 <x-mail::button :url="$paymentUrl">
 Complete Payment
@@ -104,6 +105,9 @@ Complete Payment
 Track Your Box
 </x-mail::button>
 @endif
+
+@if (($paymentStatus ?? null) !== 'paid')
+You can also track your shipment anytime: [Track Your Box]({{ $trackingUrl }}).
 @endif
 
 @if ($isGuest)

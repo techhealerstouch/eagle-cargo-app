@@ -243,6 +243,7 @@ Route::get('/track/declaration/{booking}', [TrackingController::class, 'showDecl
 Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'viewDeclaration'])->name('track.declaration.view');
 Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
 Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
+Route::post('/track/declaration/resend-email', [TrackingController::class, 'resendDeclarationEmail'])->middleware('throttle:declaration-resend')->name('track.declaration.resend-email');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('/home', 'welcome')->name('home');

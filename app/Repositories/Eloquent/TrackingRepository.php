@@ -2,12 +2,16 @@
 
 namespace App\Repositories\Eloquent;
 
+use App\Enums\Role;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\User;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
 use App\Services\TrackingCacheService;
 use App\Services\TrackingStepService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\RateLimiter;
 
 class TrackingRepository implements TrackingRepositoryInterface
 {
@@ -135,6 +139,7 @@ class TrackingRepository implements TrackingRepositoryInterface
 
     private function formatTrackingResponse(Box $primaryBox, Booking $booking, bool $isBookingSearch): array
     {
+        $booking->loadMissing('sender');
         $allBoxes = $booking->boxes->map(fn (Box $b) => $this->formatSingleBoxData($b))->toArray();
 
         $area = $primaryBox->recipient?->area;
@@ -177,14 +182,16 @@ class TrackingRepository implements TrackingRepositoryInterface
             'payment_status' => $booking->payment_status,
             'declaration_form_status' => $booking->declaration_form_status,
             'can_edit_declaration' => (function () use ($booking) {
-                $user = auth()->user();
+                /** @var User|null $user */
+                $user = Auth::user();
                 if (! $user) {
                     return false;
                 }
-                $isAdmin = in_array($user->role, [\App\Enums\Role::Admin, \App\Enums\Role::SuperAdmin], true);
-                $isOwner = $user->role === \App\Enums\Role::Sender && $booking->sender_id === $user->sender?->id;
+                $isAdmin = in_array($user->role, [Role::Admin, Role::SuperAdmin], true);
+                $isOwner = $user->role === Role::Sender && $booking->sender_id === $user->sender?->id;
                 return $isAdmin || $isOwner;
             })(),
+            'sender_email_masked' => $this->maskEmail($booking->sender?->email),
             'eta_date' => $primaryBox->eta_date,
             'eta_message' => $primaryBox->eta_message,
             'estimate_delivery_date' => $primaryBox->estimate_delivery_date,
@@ -321,5 +328,50 @@ class TrackingRepository implements TrackingRepositoryInterface
         }
 
         return $updated;
+    }
+
+    /**
+     * Mask an email address for privacy-safe display (e.g. j***e@domain.com)
+     */
+    public function maskEmail(?string $email): ?string
+    {
+        if (! $email || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+
+        [$username, $domain] = explode('@', $email, 2);
+        $len = strlen($username);
+
+        if ($len <= 2) {
+            $maskedUser = substr($username, 0, 1) . '*';
+        } else {
+            $maskedUser = substr($username, 0, 1) . str_repeat('*', min(4, $len - 2)) . substr($username, -1);
+        }
+
+        return $maskedUser . '@' . $domain;
+    }
+
+    /**
+     * Get the number of remaining declaration email resends allowed for today (max 3 per day).
+     */
+    public function getRemainingDeclarationResends(Booking $booking): int
+    {
+        $booking->loadMissing('sender');
+
+        /** @var User|null $user */
+        $user = Auth::user();
+        $userKey = $user
+            ? 'user:' . $user->id
+            : ($booking->sender?->email
+                ? 'email:' . strtolower(trim($booking->sender->email))
+                : 'booking:' . $booking->id);
+
+        $rateLimitUserKey = 'declaration_resend_daily:' . $userKey;
+        $rateLimitBookingKey = 'declaration_resend_daily:booking:' . $booking->id;
+
+        $userRemaining = RateLimiter::remaining($rateLimitUserKey, 3);
+        $bookingRemaining = RateLimiter::remaining($rateLimitBookingKey, 3);
+
+        return max(0, min($userRemaining, $bookingRemaining));
     }
 }

@@ -12,6 +12,7 @@ use App\Services\PaymentService;
 use App\Services\ReferenceDataService;
 use App\Services\SettingsService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -215,7 +216,7 @@ class GuestBookingController extends Controller
     /**
      * Show booking confirmation for guest.
      */
-    public function confirmed(Request $request, SettingsService $settingsService)
+    public function confirmed(Request $request, SettingsService $settingsService, PaymentService $paymentService)
     {
         $token = $request->query('token');
 
@@ -236,6 +237,19 @@ class GuestBookingController extends Controller
             ? (float) $booking->invoice->amount 
             : ($booking->boxes->isNotEmpty() ? (float) $booking->boxes->sum('price_charged') : null);
 
+        $clientSecret = null;
+        $stripeKey = config('services.stripe.key');
+        $isPaid = ($booking->payment_status instanceof \BackedEnum ? $booking->payment_status->value : $booking->payment_status) === 'paid';
+
+        if (! $isPaid && $totalAmount > 0) {
+            try {
+                $intent = $paymentService->createPaymentIntent($booking);
+                $clientSecret = $intent->client_secret;
+            } catch (\Exception $e) {
+                Log::warning('Could not create Stripe intent for guest confirmation page: ' . $e->getMessage());
+            }
+        }
+
         return Inertia::render('guest/BookingConfirmed', [
             'booking' => [
                 'id' => $booking->id,
@@ -245,6 +259,8 @@ class GuestBookingController extends Controller
                 'declaration_form_path' => $booking->declaration_form_path,
                 'needs_declaration' => $booking->needsDeclaration(),
                 'has_proof_of_payment' => ! empty($booking->proof_of_payment),
+                'payment_reference' => $booking->payment_reference,
+                'proof_of_payment' => $booking->proof_of_payment,
                 'preferred_date' => $booking->preferred_date?->format('M d, Y'),
                 'payment_method' => $booking->payment_method,
                 'payment_status' => $booking->payment_status instanceof \BackedEnum ? $booking->payment_status->value : $booking->payment_status,
@@ -264,19 +280,33 @@ class GuestBookingController extends Controller
                     'postcode' => $booking->sender?->postcode,
                 ],
                 'boxes' => $booking->boxes->map(fn ($box) => [
-                    'box_type' => $box->boxType?->name ?? 'Custom Box',
+                    'box_type' => [
+                        'name' => $box->boxType?->name ?? 'Custom Box',
+                    ],
+                    'recipient' => [
+                        'first_name' => $box->recipient?->first_name ?? '',
+                        'last_name' => $box->recipient?->last_name ?? '',
+                        'city' => $box->recipient?->city ?? '',
+                        'province' => $box->recipient?->province ?? '',
+                    ],
                     'recipient_name' => $box->recipient?->name ?? trim(($box->recipient?->first_name ?? '') . ' ' . ($box->recipient?->last_name ?? '')),
                     'destination' => $box->destination ?? trim(($box->recipient?->city ?? '') . ', ' . ($box->recipient?->province ?? '')),
                     'tracking_number' => $box->tracking_number,
-                    'price_charged' => (float) $box->price_charged,
+                    'price_charged' => (string) $box->price_charged,
                 ]),
             ],
             'bankDetails' => [
                 'bankName' => $invoiceSettings['bankName'] ?? 'Commonwealth Bank',
+                'bank_name' => $invoiceSettings['bankName'] ?? 'Commonwealth Bank',
                 'accountName' => $invoiceSettings['companyName'] ?? config('app.name'),
+                'company_name' => $invoiceSettings['companyName'] ?? config('app.name'),
                 'bankBsb' => $invoiceSettings['bankBsb'] ?? '064-449',
+                'bsb' => $invoiceSettings['bankBsb'] ?? '064-449',
                 'bankAccount' => $invoiceSettings['bankAccount'] ?? '1097 5991',
+                'account_number' => $invoiceSettings['bankAccount'] ?? '1097 5991',
             ],
+            'stripeKey' => $stripeKey,
+            'clientSecret' => $clientSecret,
         ]);
     }
 
