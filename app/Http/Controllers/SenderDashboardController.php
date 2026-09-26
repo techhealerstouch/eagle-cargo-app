@@ -60,7 +60,7 @@ class SenderDashboardController extends Controller
             return redirect()->route('warehouse.dashboard');
         }
 
-        $sender = $user->sender()->with('recipients.area')->first();
+        $sender = $user->sender()->with(['recipients.area', 'pickupZone'])->first();
         $activeBoxStatuses = array_map(fn (BoxStatus $status) => $status->value, [
             BoxStatus::Collected,
             BoxStatus::ReceivedByWarehouse,
@@ -169,6 +169,8 @@ class SenderDashboardController extends Controller
             'areas' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeAreas()),
             'boxTypes' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeBoxTypes()),
             'boxPrices' => Inertia::lazy(fn () => app(ReferenceDataService::class)->boxPrices()),
+            'pickupZones' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activePickupZones()),
+            'provinces' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeProvinces()->load('area:id,name,door_to_door_fee')),
             'pageTitle' => 'Dashboard',
             'breadcrumbs' => [
                 ['title' => 'Home', 'href' => route('dashboard')],

@@ -15,6 +15,8 @@ export default function Dashboard({
     areas = [],
     boxTypes = [],
     boxPrices = [],
+    pickupZones = [],
+    provinces = [],
     stats = { total: 0, active: 0, pending: 0, delivered: 0, contacts: 0 },
     bookingsRequiringAction = [],
     pageTitle = 'Dashboard',
@@ -24,23 +26,99 @@ export default function Dashboard({
     const defaultBreadcrumbs: BreadcrumbItem[] = breadcrumbs.length > 0 ? breadcrumbs : [{ title: 'Home', href: '/dashboard' }];
 
     useEffect(() => {
-        if (areas.length === 0 || boxTypes.length === 0) {
+        if (areas.length === 0 || boxTypes.length === 0 || pickupZones.length === 0 || provinces.length === 0) {
             setIsCalcLoading(true);
             router.reload({
-                only: ['areas', 'boxTypes', 'boxPrices'],
+                only: ['areas', 'boxTypes', 'boxPrices', 'pickupZones', 'provinces'],
                 onFinish: () => setIsCalcLoading(false)
             });
         }
     }, []);
 
     const [calcBoxType, setCalcBoxType] = useState('');
-    const [calcArea, setCalcArea] = useState('');
+    const [calcProvince, setCalcProvince] = useState('');
+    const [calcPickupZone, setCalcPickupZone] = useState(() => sender?.pickup_zone_id?.toString() || '');
+    const [calcDoorToDoor, setCalcDoorToDoor] = useState(false);
     const [activeTab, setActiveTab] = useState<'active' | 'pending' | 'delivered'>('active');
     const [searchQuery, setSearchQuery] = useState('');
 
-    const estimatedPrice = boxPrices?.find((p: any) =>
-        p.area_id.toString() === calcArea && p.box_type_id.toString() === calcBoxType
-    )?.price;
+    useEffect(() => {
+        if (!calcPickupZone && sender?.pickup_zone_id) {
+            setCalcPickupZone(sender.pickup_zone_id.toString());
+        }
+    }, [sender?.pickup_zone_id, calcPickupZone]);
+
+    // Format province names for human readability (convert ALL CAPS to Title Case)
+    const formatProvinceName = (name: string) => {
+        if (!name) return '';
+        if (name === name.toUpperCase()) {
+            return name.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+        }
+        return name;
+    };
+
+    // Sort provinces alphabetically for easy user selection
+    const sortedProvinces = useMemo(() => {
+        if (!provinces || !Array.isArray(provinces)) return [];
+        return [...provinces].sort((a: any, b: any) =>
+            (a.name || '').localeCompare(b.name || '')
+        );
+    }, [provinces]);
+
+    // Resolve selected province and its mapped shipping area
+    const selectedProvince = useMemo(() => {
+        if (!calcProvince) return null;
+        return sortedProvinces.find((p: any) =>
+            p.id?.toString() === calcProvince ||
+            p.name?.toLowerCase() === calcProvince.toLowerCase()
+        ) ?? null;
+    }, [sortedProvinces, calcProvince]);
+
+    const effectiveAreaId = useMemo(() => {
+        return selectedProvince?.area_id?.toString() || selectedProvince?.area?.id?.toString() || '';
+    }, [selectedProvince]);
+
+    const selectedArea = useMemo(() => {
+        if (selectedProvince?.area) return selectedProvince.area;
+        if (!effectiveAreaId) return null;
+        return areas?.find((a: any) => a.id?.toString() === effectiveAreaId) ?? null;
+    }, [selectedProvince, effectiveAreaId, areas]);
+
+    // Door-to-door fee from the resolved area
+    const doorToDoorFee = useMemo(() => {
+        if (!selectedArea?.door_to_door_fee) return 0;
+        const fee = Number(selectedArea.door_to_door_fee);
+        return fee > 0 ? fee : 0;
+    }, [selectedArea]);
+
+    // Full 3-dimensional price lookup: pickup_zone × area × box_type
+    const matchedPrice = useMemo(() => {
+        if (!effectiveAreaId || !calcBoxType || !calcPickupZone) return null;
+        // Exact match on all three dimensions
+        const exact = boxPrices?.find((p: any) =>
+            p.area_id?.toString() === effectiveAreaId &&
+            p.box_type_id?.toString() === calcBoxType &&
+            p.pickup_zone_id?.toString() === calcPickupZone
+        );
+        if (exact) return exact;
+        // Fallback: area × box_type without pickup_zone_id
+        return boxPrices?.find((p: any) =>
+            p.area_id?.toString() === effectiveAreaId &&
+            p.box_type_id?.toString() === calcBoxType &&
+            !p.pickup_zone_id
+        ) ?? boxPrices?.find((p: any) =>
+            p.area_id?.toString() === effectiveAreaId &&
+            p.box_type_id?.toString() === calcBoxType
+        ) ?? null;
+    }, [boxPrices, effectiveAreaId, calcBoxType, calcPickupZone]);
+
+    const estimatedPrice = useMemo(() => {
+        if (!matchedPrice) return null;
+        const base = Number(matchedPrice.price);
+        if (base <= 0) return null;
+        const total = base + (calcDoorToDoor ? doorToDoorFee : 0);
+        return total.toFixed(2);
+    }, [matchedPrice, calcDoorToDoor, doorToDoorFee]);
 
     const filteredHistory = useMemo(() => {
         let items = (history || []).filter((b: any) => b.status.toUpperCase() !== 'DRAFT');
@@ -476,7 +554,24 @@ export default function Dashboard({
                                 </div>
                                 Price Calculator
                             </h3>
-                            <div className="space-y-4">
+                            <div className="space-y-3.5">
+                                {/* Pickup Zone */}
+                                <div>
+                                    <label htmlFor="calc-pickup-zone" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 block">Pickup Area (Australia)</label>
+                                    <select
+                                        id="calc-pickup-zone"
+                                        className="w-full h-10 px-3 text-xs font-medium rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900 focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust text-zinc-900 dark:text-white transition-all cursor-pointer"
+                                        value={calcPickupZone}
+                                        onChange={(e) => setCalcPickupZone(e.target.value)}
+                                    >
+                                        <option value="">Select Pickup Zone...</option>
+                                        {pickupZones?.map((z: any) => (
+                                            <option key={z.id} value={z.id}>{z.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Box Type */}
                                 <div>
                                     <label htmlFor="calc-box-type" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 block">Box Type</label>
                                     <select
@@ -487,26 +582,72 @@ export default function Dashboard({
                                     >
                                         <option value="">Select Package...</option>
                                         {boxTypes?.filter((bt: any) => !bt.name?.toLowerCase().includes('cbm') && bt.name?.toLowerCase() !== 'custom box').map((bt: any) => (
-                                            <option key={bt.id} value={bt.id}>{bt.name}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label htmlFor="calc-area" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 block">Destination</label>
-                                    <select
-                                        id="calc-area"
-                                        className="w-full h-10 px-3 text-xs font-medium rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900 focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust text-zinc-900 dark:text-white transition-all cursor-pointer"
-                                        value={calcArea}
-                                        onChange={(e) => setCalcArea(e.target.value)}
-                                    >
-                                        <option value="">Select Region...</option>
-                                        {areas?.map((a: any) => (
-                                            <option key={a.id} value={a.id}>{a.name}</option>
+                                            <option key={bt.id} value={bt.id}>
+                                                {bt.name}{bt.dimensions ? ` (${bt.dimensions})` : ''}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
 
-                                <div className="pt-2">
+                                {/* Destination Province */}
+                                <div>
+                                    <label htmlFor="calc-province" className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mb-1.5 block">Destination Province (Philippines)</label>
+                                    <select
+                                        id="calc-province"
+                                        className="w-full h-10 px-3 text-xs font-medium rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900 focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust text-zinc-900 dark:text-white transition-all cursor-pointer"
+                                        value={calcProvince}
+                                        onChange={(e) => { setCalcProvince(e.target.value); setCalcDoorToDoor(false); }}
+                                    >
+                                        <option value="">Select Province...</option>
+                                        {sortedProvinces.map((p: any) => (
+                                            <option key={p.id} value={p.id}>{formatProvinceName(p.name)}</option>
+                                        ))}
+                                    </select>
+                                    {selectedProvince && selectedArea && (
+                                        <div className="mt-2 flex items-center justify-between px-2.5 py-1 rounded-lg bg-zinc-100/70 dark:bg-zinc-800/50 border border-zinc-200/50 dark:border-zinc-800 text-[11px] text-zinc-600 dark:text-zinc-400">
+                                            <span className="flex items-center gap-1.5">
+                                                <MapPin className="size-3 text-brand-rust shrink-0" />
+                                                <span>Zone: <strong className="text-zinc-800 dark:text-zinc-200 font-semibold">{selectedArea.name}</strong></span>
+                                            </span>
+                                            {doorToDoorFee > 0 && (
+                                                <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                                                    D2D available
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Door-to-Door Toggle — only show when a province is selected and its area has a D2D fee */}
+                                {selectedProvince && doorToDoorFee > 0 && (
+                                    <div
+                                        className={cn(
+                                            "flex items-center justify-between px-3.5 py-2.5 rounded-xl border transition-all cursor-pointer select-none",
+                                            calcDoorToDoor
+                                                ? "bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700"
+                                                : "bg-zinc-50/50 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
+                                        )}
+                                        onClick={() => setCalcDoorToDoor(!calcDoorToDoor)}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <Truck className={cn("size-3.5", calcDoorToDoor ? "text-amber-600 dark:text-amber-400" : "text-zinc-400")} />
+                                            <span className={cn("text-xs font-semibold", calcDoorToDoor ? "text-amber-700 dark:text-amber-300" : "text-zinc-600 dark:text-zinc-400")}>
+                                                Door-to-Door Delivery
+                                            </span>
+                                        </div>
+                                        <span className={cn(
+                                            "text-xs font-bold px-2 py-0.5 rounded-full",
+                                            calcDoorToDoor
+                                                ? "bg-amber-200/60 dark:bg-amber-800/40 text-amber-700 dark:text-amber-300"
+                                                : "bg-zinc-200/60 dark:bg-zinc-800 text-zinc-500"
+                                        )}>
+                                            +${doorToDoorFee.toFixed(2)}
+                                        </span>
+                                    </div>
+                                )}
+
+                                {/* Result */}
+                                <div className="pt-1">
                                     {isCalcLoading ? (
                                         <div className="py-6 flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800">
                                             <Loader2 className="size-4 text-brand-rust animate-spin mb-2" />
@@ -514,10 +655,23 @@ export default function Dashboard({
                                         </div>
                                     ) : estimatedPrice ? (
                                         <div className="text-center bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 p-5 rounded-xl shadow-md relative overflow-hidden group">
-                                            <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">Door-to-Door Estimate</span>
+                                            {/* Price breakdown */}
+                                            <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider">
+                                                {calcDoorToDoor ? 'Door-to-Door Estimate' : 'Shipping Estimate'}
+                                            </span>
                                             <div className="text-3xl font-extrabold text-white tracking-tight mt-1">${estimatedPrice}</div>
+
+                                            {/* Breakdown details */}
+                                            {calcDoorToDoor && doorToDoorFee > 0 && matchedPrice && (
+                                                <div className="mt-2 flex items-center justify-center gap-3 text-[10px] text-zinc-500">
+                                                    <span>Base: ${Number(matchedPrice.price).toFixed(2)}</span>
+                                                    <span className="text-zinc-700">•</span>
+                                                    <span className="text-amber-400">D2D: +${doorToDoorFee.toFixed(2)}</span>
+                                                </div>
+                                            )}
+
                                             <Link
-                                                href={`/book?box_type_id=${calcBoxType}&area_id=${calcArea}`}
+                                                href={`/book?box_type_id=${calcBoxType}&area_id=${effectiveAreaId}&pickup_zone_id=${calcPickupZone}&province=${encodeURIComponent(selectedProvince?.name || '')}`}
                                                 className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-brand-rust text-white py-2.5 text-xs font-bold hover:bg-brand-rust/90 transition-all active:scale-95 shadow-sm"
                                                 prefetch
                                             >
@@ -526,7 +680,15 @@ export default function Dashboard({
                                         </div>
                                     ) : (
                                         <div className="py-6 text-[10px] font-bold text-zinc-400 dark:text-zinc-500 text-center uppercase tracking-wider bg-zinc-50/80 dark:bg-zinc-900/40 rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800">
-                                            Select box & destination to compute quote
+                                            {!calcPickupZone && !calcBoxType && !calcProvince
+                                                ? 'Select pickup zone, box & province'
+                                                : !calcPickupZone
+                                                    ? 'Select a pickup zone to see rates'
+                                                    : !calcBoxType
+                                                        ? 'Select a box type'
+                                                        : !calcProvince
+                                                            ? 'Select a destination province'
+                                                            : 'No rate configured for this route'}
                                         </div>
                                     )}
                                 </div>
