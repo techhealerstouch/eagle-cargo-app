@@ -1,6 +1,6 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
 import { format } from 'date-fns';
-import { Package, MapPinned, X, PlusCircle, CheckCircle, ArrowRight, Wallet, Save, AlertTriangle, ShieldCheck, CalendarIcon, Loader2, Ruler, Lock } from 'lucide-react';
+import { Package, MapPinned, X, PlusCircle, CheckCircle, ArrowRight, Wallet, Save, AlertTriangle, ShieldCheck, CalendarIcon, Loader2, Ruler, Lock, ChevronDown } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import Heading from '@/components/common/heading';
@@ -32,7 +32,9 @@ const AU_STATES = [
 
 const baseInputClass = 'h-12 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-100 dark:focus:ring-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-400';
 
-function StepIndicator({ step }: { step: number }) {
+function StepIndicator({ step, onStepClick }: { step: number; onStepClick?: (step: number) => void }) {
+    const [isMobileExpanded, setIsMobileExpanded] = useState(false);
+
     const steps = [
         { id: 1, label: 'Sender & Pickup' },
         { id: 2, label: 'Boxes & Recipients' },
@@ -40,43 +42,171 @@ function StepIndicator({ step }: { step: number }) {
         { id: 4, label: 'Payment & Confirmation' },
     ];
 
-    return (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {steps.map((item) => {
-                const isActive = step === item.id;
-                const isDone = step > item.id;
+    const currentStepItem = steps.find((s) => s.id === step) || steps[0];
 
-                return (
-                    <div
-                        key={item.id}
-                        className={`rounded-2xl border p-4 transition-all ${
-                            isActive
-                                ? 'border-brand-rust/30 bg-brand-rust/5 dark:bg-brand-rust/10'
-                                : isDone
-                                    ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700/50'
-                                    : 'border-zinc-200 bg-white dark:bg-zinc-900 dark:border-zinc-800'
-                        }`}
-                    >
-                        <div className="flex items-center gap-3">
-                            <div
-                                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
-                                    isDone
-                                        ? 'bg-emerald-500 text-white'
-                                        : isActive
-                                            ? 'bg-brand-rust text-white'
-                                            : 'bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
-                                }`}
-                            >
-                                {isDone ? <CheckCircle className="size-4" /> : item.id}
-                            </div>
-                            <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Step {item.id} of 4</p>
-                                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{item.label}</p>
-                            </div>
+    return (
+        <div className="space-y-2">
+            {/* Mobile View (< sm): Ultra-compact 54px progress bar that saves screen real estate */}
+            <div className="sm:hidden rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 shadow-xs">
+                <div className="flex items-center justify-between gap-2 mb-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-rust text-white text-xs font-bold shadow-xs">
+                            {step}
+                        </div>
+                        <div className="min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-brand-rust dark:text-orange-400 block leading-tight">
+                                Step {step} of 4
+                            </span>
+                            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate leading-tight mt-0.5">
+                                {currentStepItem.label}
+                            </p>
                         </div>
                     </div>
-                );
-            })}
+
+                    <button
+                        type="button"
+                        onClick={() => setIsMobileExpanded((prev) => !prev)}
+                        className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0"
+                        aria-expanded={isMobileExpanded}
+                    >
+                        <span>{isMobileExpanded ? 'Hide' : 'All steps'}</span>
+                        <ChevronDown className={cn("size-3 transition-transform duration-200", isMobileExpanded && "rotate-180")} />
+                    </button>
+                </div>
+
+                {/* 4 Segmented Progress Bar */}
+                <div className="grid grid-cols-4 gap-1.5">
+                    {steps.map((item) => {
+                        const isActive = step === item.id;
+                        const isDone = step > item.id;
+
+                        return (
+                            <button
+                                key={item.id}
+                                type="button"
+                                disabled={!isDone || !onStepClick}
+                                onClick={() => isDone && onStepClick?.(item.id)}
+                                className={cn(
+                                    "h-1.5 rounded-full transition-all duration-300",
+                                    isDone
+                                        ? "bg-emerald-500 hover:opacity-80 cursor-pointer"
+                                        : isActive
+                                            ? "bg-brand-rust"
+                                            : "bg-zinc-200 dark:bg-zinc-800 cursor-default"
+                                )}
+                                title={`Step ${item.id}: ${item.label}`}
+                            />
+                        );
+                    })}
+                </div>
+
+                {/* Expandable Step Details on Mobile */}
+                {isMobileExpanded && (
+                    <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
+                        {steps.map((item) => {
+                            const isActive = step === item.id;
+                            const isDone = step > item.id;
+
+                            return (
+                                <button
+                                    key={item.id}
+                                    type="button"
+                                    disabled={!isDone || !onStepClick}
+                                    onClick={() => {
+                                        if (isDone && onStepClick) {
+                                            onStepClick(item.id);
+                                            setIsMobileExpanded(false);
+                                        }
+                                    }}
+                                    className={cn(
+                                        "w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left transition-all",
+                                        isActive
+                                            ? "bg-brand-rust/10 border border-brand-rust/20"
+                                            : isDone
+                                                ? "hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                                                : "opacity-45 cursor-default"
+                                    )}
+                                >
+                                    <div className="flex items-center gap-2.5">
+                                        <div
+                                            className={cn(
+                                                "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold shrink-0",
+                                                isDone
+                                                    ? "bg-emerald-500 text-white"
+                                                    : isActive
+                                                        ? "bg-brand-rust text-white"
+                                                        : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                                            )}
+                                        >
+                                            {isDone ? <CheckCircle className="size-3" /> : item.id}
+                                        </div>
+                                        <span
+                                            className={cn(
+                                                "text-xs",
+                                                isActive
+                                                    ? "font-bold text-brand-rust dark:text-orange-400"
+                                                    : isDone
+                                                        ? "font-semibold text-zinc-900 dark:text-zinc-100"
+                                                        : "text-zinc-500 dark:text-zinc-400"
+                                            )}
+                                        >
+                                            {item.label}
+                                        </span>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-zinc-400 shrink-0">
+                                        {isDone ? 'Completed' : isActive ? 'Current' : `Step ${item.id}`}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
+            </div>
+
+            {/* Desktop / Tablet View (sm: and up) */}
+            <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {steps.map((item) => {
+                    const isActive = step === item.id;
+                    const isDone = step > item.id;
+
+                    return (
+                        <div
+                            key={item.id}
+                            onClick={() => isDone && onStepClick?.(item.id)}
+                            className={cn(
+                                "rounded-2xl border p-4 transition-all",
+                                isActive
+                                    ? "border-brand-rust/30 bg-brand-rust/5 dark:bg-brand-rust/10"
+                                    : isDone
+                                        ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700/50"
+                                        : "border-zinc-200 bg-white dark:bg-zinc-900 dark:border-zinc-800",
+                                isDone && onStepClick && "cursor-pointer hover:shadow-xs"
+                            )}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div
+                                    className={cn(
+                                        "flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold",
+                                        isDone
+                                            ? "bg-emerald-500 text-white"
+                                            : isActive
+                                                ? "bg-brand-rust text-white"
+                                                : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                                    )}
+                                >
+                                    {isDone ? <CheckCircle className="size-4" /> : item.id}
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                                        Step {item.id} of 4
+                                    </p>
+                                    <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{item.label}</p>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
         </div>
     );
 }
@@ -721,18 +851,22 @@ export default function Book(props: PageProps = {}) {
     const params = new URLSearchParams(window.location.search);
     const boxTypeId = params.get('box_type_id');
     const areaId = params.get('area_id');
+    const pickupZoneId = params.get('pickup_zone_id');
+    const province = params.get('province');
 
-    if (!boxTypeId && !areaId) {
+    if (!boxTypeId && !areaId && !pickupZoneId && !province) {
       return;
     }
 
     hasAppliedQueryDefaults.current = true;
     setData((currentData) => ({
       ...currentData,
+      pickup_zone_id: pickupZoneId || currentData.pickup_zone_id || '',
       boxes: [{
         ...(currentData.boxes[0] ?? {}),
-        box_type_id: boxTypeId || '',
-        area_id: areaId || '',
+        box_type_id: boxTypeId || currentData.boxes[0]?.box_type_id || '',
+        area_id: areaId || currentData.boxes[0]?.area_id || '',
+        recipient_province: province || currentData.boxes[0]?.recipient_province || '',
       }],
     }));
   }, [setData]);
@@ -1496,7 +1630,7 @@ if (step === 2) {
     <LayoutComponent {...layoutProps}>
       <Head title={editingBooking ? 'Edit Booking' : isGuest ? 'Book Balikbayan Box Pickup' : 'Book a Pickup'} />
 
-      <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-6">
+      <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-4 md:space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <Heading
                     eyebrow={isGuest ? "Send Balikbayan Box" : "Booking Form"}
@@ -1516,7 +1650,7 @@ if (step === 2) {
                 )}
             </div>
 
-            <StepIndicator step={currentStep} />
+            <StepIndicator step={currentStep} onStepClick={setCurrentStep} />
 
             <div className="space-y-8">
 

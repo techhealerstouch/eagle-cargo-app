@@ -190,7 +190,7 @@ function StepIndicator({ step }: { step: number }) {
     ];
 
     return (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3">
             {steps.map((item) => {
                 const isActive = step === item.id;
                 const isDone = step > item.id;
@@ -198,27 +198,27 @@ function StepIndicator({ step }: { step: number }) {
                 return (
                     <div
                         key={item.id}
-                        className={`rounded-2xl border p-4 transition-all ${isActive
-                                ? 'border-sky-500 bg-sky-50'
+                        className={`rounded-2xl border p-2.5 sm:p-4 transition-all ${isActive
+                                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/20'
                                 : isDone
-                                    ? 'border-emerald-300 bg-emerald-50'
-                                    : 'border-zinc-200 bg-white'
+                                    ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20'
+                                    : 'border-zinc-200 bg-white dark:bg-zinc-900'
                             }`}
                     >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3">
                             <div
-                                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${isDone
+                                className={`flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full text-xs sm:text-sm font-bold ${isDone
                                         ? 'bg-emerald-500 text-white'
                                         : isActive
                                             ? 'bg-sky-500 text-white'
                                             : 'bg-zinc-200 text-zinc-600'
                                     }`}
                             >
-                                {isDone ? <CheckCircle2 className="size-4" /> : item.id}
+                                {isDone ? <CheckCircle2 className="size-3.5 sm:size-4" /> : item.id}
                             </div>
-                            <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Step {item.id} of 2</p>
-                                <p className="text-sm font-semibold text-zinc-900">{item.label}</p>
+                            <div className="min-w-0">
+                                <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-zinc-500 truncate">Step {item.id} of 2</p>
+                                <p className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{item.label}</p>
                             </div>
                         </div>
                     </div>
