@@ -3,7 +3,10 @@
     "name": "laravel/react-starter-kit",
     "type": "project",
     "description": "The skeleton application for the Laravel framework.",
-    "keywords": ["laravel", "framework"],
+    "keywords": [
+        "laravel",
+        "framework"
+    ],
     "license": "MIT",
     "require": {
         "php": "^8.2",
@@ -20,7 +23,8 @@
         "spatie/laravel-sluggable": "^3.8",
         "spiral/roadrunner-cli": "2.6.0",
         "spiral/roadrunner-http": "3.3.0",
-        "stripe/stripe-php": "^20.1"
+        "stripe/stripe-php": "^20.1",
+        "maatwebsite/excel": "*"
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",

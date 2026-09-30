@@ -2,6 +2,16 @@
 
 namespace App\Http\Controllers\Admin;
 
+use Maatwebsite\Excel\Facades\Excel;
+
+use App\Services\AuditLogService;
+
+use App\Notifications\SenderCredentialsNotification;
+
+use App\Imports\SendersImport;
+
+use App\Exports\SendersExport;
+
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreSenderRequest;
 use App\Http\Requests\Admin\UpdateSenderRequest;
@@ -205,4 +215,230 @@ class SenderController extends Controller
 
         return $query->orderBy($sort, $direction);
     }
+
+
+
+    public function sendCredentials(Request $request, Sender $sender)
+    {
+        if (!$sender->email) {
+            return back()->with('error', 'Sender does not have an email address.');
+        }
+
+        $plainPassword = \Illuminate\Support\Str::password(10, letters: true, numbers: true, symbols: false);
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($sender, $plainPassword) {
+            if (!$sender->user) {
+                $user = \App\Models\User::firstOrCreate(
+                    ['email' => $sender->email],
+                    [
+                        'name' => $sender->first_name . ' ' . $sender->last_name,
+                        'password' => \Illuminate\Support\Facades\Hash::make($plainPassword),
+                        'role' => \App\Enums\Role::Sender,
+                        'email_verified_at' => now(),
+                    ]
+                );
+                $sender->update(['user_id' => $user->id]);
+            } else {
+                $sender->user->update([
+                    'password' => \Illuminate\Support\Facades\Hash::make($plainPassword),
+                    'email_verified_at' => $sender->user->email_verified_at ?? now(),
+                ]);
+            }
+        });
+
+        $user = $sender->fresh()->user;
+
+        try {
+            $token = \Illuminate\Support\Facades\Password::createToken($user);
+            $resetUrl = url(route('password.reset', [
+                'token' => $token,
+                'email' => $user->getEmailForPasswordReset(),
+            ], false));
+        } catch (\Throwable $e) {
+            $resetUrl = null;
+        }
+
+        $user->notify(new \App\Notifications\SenderCredentialsNotification($user, $plainPassword, $resetUrl));
+
+        return back()->with('success', "Account credentials have been generated and sent to {$user->email}.");
+    }
+
+
+
+    public function bulkSendCredentials(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Sender::query();
+            $query = $this->applyFilters($query, $request);
+            $senders = $query->with('user')->get();
+        } else {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $senders = Sender::whereIn('id', array_filter($ids))->with('user')->get();
+        }
+
+        $sentCount = 0;
+        $failedCount = 0;
+
+        foreach ($senders as $sender) {
+            if (!$sender->email) {
+                $failedCount++;
+                continue;
+            }
+
+            try {
+                $plainPassword = \Illuminate\Support\Str::password(10, letters: true, numbers: true, symbols: false);
+
+                \Illuminate\Support\Facades\DB::transaction(function () use ($sender, $plainPassword) {
+                    if (!$sender->user) {
+                        $user = \App\Models\User::firstOrCreate(
+                            ['email' => $sender->email],
+                            [
+                                'name' => $sender->first_name . ' ' . $sender->last_name,
+                                'password' => \Illuminate\Support\Facades\Hash::make($plainPassword),
+                                'role' => \App\Enums\Role::Sender,
+                                'email_verified_at' => now(),
+                            ]
+                        );
+                        $sender->update(['user_id' => $user->id]);
+                    } else {
+                        $sender->user->update([
+                            'password' => \Illuminate\Support\Facades\Hash::make($plainPassword),
+                            'email_verified_at' => $sender->user->email_verified_at ?? now(),
+                        ]);
+                    }
+                });
+
+                $user = $sender->fresh()->user;
+
+                try {
+                    $token = \Illuminate\Support\Facades\Password::createToken($user);
+                    $resetUrl = url(route('password.reset', [
+                        'token' => $token,
+                        'email' => $user->getEmailForPasswordReset(),
+                    ], false));
+                } catch (\Throwable $e) {
+                    $resetUrl = null;
+                }
+
+                $user->notify(new \App\Notifications\SenderCredentialsNotification($user, $plainPassword, $resetUrl));
+                $sentCount++;
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('Failed to bulk send credentials: ' . $e->getMessage(), [
+                    'sender_id' => $sender->id,
+                ]);
+                $failedCount++;
+            }
+        }
+
+        $message = "Welcome credentials sent to {$sentCount} sender(s).";
+        if ($failedCount > 0) {
+            $message .= " {$failedCount} sender(s) failed or had no email.";
+        }
+
+        return back()->with('success', $message);
+    }
+
+
+
+    public function bulkHold(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'is_held' => 'required|boolean',
+            'hold_reason' => 'nullable|string|max:500',
+        ]);
+
+        $query = Sender::query();
+        
+        if ($request->boolean('select_all')) {
+            $query = $this->applyFilters($query, $request);
+        } else {
+            $query->whereIn('id', $validated['ids']);
+        }
+
+        $userIds = $query->pluck('user_id')->filter()->toArray();
+
+        if (!empty($userIds)) {
+            \App\Models\User::whereIn('id', $userIds)->update([
+                'is_held' => $validated['is_held'],
+                'hold_reason' => $validated['is_held'] ? ($validated['hold_reason'] ?? null) : null,
+            ]);
+        }
+
+        $status = $validated['is_held'] ? 'held' : 'unheld';
+        return back()->with('success', "Selected sender accounts have been {$status}.")->with('bulk_result', ['updated' => count($userIds)]);
+    }
+
+
+
+    public function exportExcel(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'nullable|string',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Sender::query();
+            $query = $this->applyFilters($query, $request);
+            $senders = $query->get();
+        } elseif ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $senders = Sender::whereIn('id', array_filter($ids))->get();
+        } else {
+            $query = Sender::query();
+            $query = $this->applyFilters($query, $request);
+            $senders = $query->get();
+        }
+
+        app(AuditLogService::class)->logExportEvent('excel', 'Senders list exported as Excel (.xlsx)', [
+            'count' => $senders->count(),
+        ]);
+
+        return Excel::download(new SendersExport($senders), 'senders_export_'.now()->format('Ymd_His').'.xlsx');
+    }
+
+
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new SendersExport(null, true), 'senders_import_template.xlsx');
+    }
+
+
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new SendersImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
+    }
+
 }

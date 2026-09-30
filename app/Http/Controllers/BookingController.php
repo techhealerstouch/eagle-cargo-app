@@ -2,6 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\GuestBookingAccessService;
+use App\Notifications\BankTransferDetails;
+
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
@@ -14,7 +17,6 @@ use App\Models\User;
 use App\Notifications\PartialCancellationRequested;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Rules\SecureFile;
-use App\Services\PaymentService;
 use App\Services\ReferenceDataService;
 use App\Services\SettingsService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -30,6 +32,7 @@ class BookingController extends Controller
     public function __construct(
         private BookingRepositoryInterface $bookings,
         private ReferenceDataService $referenceData,
+        private GuestBookingAccessService $guestAccess,
     ) {}
 
     public function create(Request $request)
@@ -570,5 +573,131 @@ class BookingController extends Controller
             $q->where('status', \App\Enums\InvoiceStatus::Unpaid)
                 ->where('is_cancellation_fee', true);
         })->exists();
+    }
+
+
+
+    public function guestPay(Request $request, Booking $booking, SettingsService $settingsService)
+    {
+        $this->guestAccess->authorize($request, $booking, GuestBookingAccessService::PAYMENT);
+
+        if (! $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::PAYMENT)) {
+            abort(403, 'Email verification is required before payment.');
+        }
+
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return redirect($this->guestAccess->confirmationUrl($booking))
+                ->with('success', 'This booking has already been paid.');
+        }
+
+        $booking->load('boxes');
+        if ($booking->boxes->sum('price_charged') <= 0) {
+            return redirect($this->guestAccess->confirmationUrl($booking))
+                ->with('error', 'Cannot proceed to payment because the booking total is $0. Please contact support.');
+        }
+
+        return Inertia::render('payment/PaymentConsole', [
+            'booking' => $booking->load('sender', 'boxes.recipient', 'boxes.boxType')->makeHidden('guest_token'),
+            'stripeKey' => config('services.stripe.key'),
+            'role' => 'guest',
+            'guestAccessQuery' => '?'.$request->getQueryString(),
+            'backUrl' => $this->guestAccess->confirmationUrl($booking),
+        ]);
+    }
+
+
+
+    public function guestUploadProofOfPayment(Request $request, Booking $booking, PaymentService $paymentService)
+    {
+        $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::PAYMENT);
+
+        // Guard: Prevent proof upload on already-paid bookings
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return redirect()->back()->with('info', 'This booking has already been paid. No proof of payment is needed.');
+        }
+
+        // Run file and reference validation
+        $request->validate([
+            'proof_of_payment' => [
+                $booking->proof_of_payment || $request->filled('payment_reference') ? 'nullable' : 'required',
+                'file',
+                'mimes:jpeg,png,jpg,pdf',
+                'max:5120', // 5MB max
+                new SecureFile,
+            ],
+            'payment_reference' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $updateData = [];
+
+        if ($request->hasFile('proof_of_payment')) {
+            if ($booking->proof_of_payment) {
+                Log::info('Guest proof of payment file overwritten. booking_id='.$booking->id.' old_file_path='.$booking->proof_of_payment.' ip='.request()->ip());
+                Storage::disk('public')->delete($booking->proof_of_payment);
+            }
+
+            $path = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
+            if (! $path) {
+                Log::error('Failed to store guest proof of payment file. booking_id='.$booking->id);
+
+                return redirect()->back()->with('error', 'Failed to save proof of payment file to server storage. Please check permissions and try again.');
+            }
+
+            $updateData['proof_of_payment'] = $path;
+            Log::info('Guest proof of payment file uploaded successfully. booking_id='.$booking->id.' new_file_path='.$path.' ip='.request()->ip());
+        }
+
+        if ($request->has('payment_reference')) {
+            $ref = trim((string) $request->input('payment_reference'));
+            $updateData['payment_reference'] = $ref !== '' ? $ref : null;
+        }
+
+        if (! empty($updateData)) {
+            $updateData['is_payment_read'] = false;
+            $booking->update($updateData);
+
+            $paymentService->initializeOfflinePayment($booking, [
+                'reference_number' => $updateData['payment_reference'] ?? $booking->payment_reference,
+                'payment_method' => $booking->payment_method ?? 'bank_transfer',
+            ]);
+
+            return redirect()->back()->with('success', 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.');
+        }
+
+        return redirect()->back()->with('error', 'Please provide a proof file or transaction reference number.');
+    }
+
+
+    public function requestBankTransferDetails(Request $request, Booking $booking)
+    {
+        $user = Auth::user();
+
+        if ($user) {
+            if (! $user->sender || $booking->sender_id !== $user->sender->id) {
+                abort(403, 'Unauthorized.');
+            }
+        } else {
+            $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::PAYMENT);
+        }
+
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return response()->json([
+                'error' => 'This booking has already been paid.',
+            ], 422);
+        }
+
+        if ($booking->payment_method !== 'bank_transfer') {
+            $booking->update(['payment_method' => 'bank_transfer']);
+        }
+
+        $notifiable = $booking->sender?->user ?? $booking->sender;
+        if ($notifiable) {
+            $notifiable->notify(new BankTransferDetails($booking));
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => __('messages.notifications.bank_transfer_details.sent_toast'),
+        ]);
     }
 }

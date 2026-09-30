@@ -2,6 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use Maatwebsite\Excel\Facades\Excel;
+
+use App\Services\AuditLogService;
+
+use App\Imports\RecipientsImport;
+
+use App\Exports\RecipientsExport;
+
 use App\Http\Controllers\Controller;
 use App\Models\Area;
 use App\Models\Recipient;
@@ -119,4 +127,74 @@ class RecipientController extends Controller
 
         return redirect()->back()->with('success', 'Recipient deleted.');
     }
+
+
+
+    public function exportExcel(Request $request)
+    {
+        $query = Recipient::with(['sender', 'area']);
+
+        if ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $query->whereIn('id', array_filter($ids));
+        } else {
+            $query->when($request->search, function ($q, $search) {
+                $q->where(function ($qq) use ($search) {
+                    $qq->where('name', 'like', "%{$search}%")
+                        ->orWhere('city', 'like', "%{$search}%")
+                        ->orWhere('province', 'like', "%{$search}%")
+                        ->orWhereHas('sender', function ($sq) use ($search) {
+                            $sq->where('first_name', 'like', "%{$search}%")
+                                ->orWhere('last_name', 'like', "%{$search}%")
+                                ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"]);
+                        });
+                });
+            })->when($request->sender_id, function ($q, $sender_id) {
+                $q->where('sender_id', $sender_id);
+            });
+        }
+
+        $recipients = $query->latest()->get();
+
+        app(AuditLogService::class)->logExportEvent('excel', 'Recipients list exported as Excel (.xlsx)', [
+            'count' => $recipients->count(),
+        ]);
+
+        return Excel::download(new RecipientsExport($recipients), 'recipients_export_'.now()->format('Ymd_His').'.xlsx');
+    }
+
+
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new RecipientsExport(null, true), 'recipients_import_template.xlsx');
+    }
+
+
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new RecipientsImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
+    }
+
 }

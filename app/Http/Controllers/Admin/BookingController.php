@@ -2,6 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use Maatwebsite\Excel\Facades\Excel;
+
+use App\Services\AuditLogService;
+
+use App\Imports\BookingsImport;
+
+use App\Exports\BookingsExport;
+
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
@@ -1140,4 +1148,61 @@ class BookingController extends Controller
 
         return $query->orderBy($sort, $direction)->orderBy('id', 'desc');
     }
+
+
+
+    public function exportExcel(Request $request)
+    {
+        $query = Booking::with(['sender', 'boxes.recipient', 'runsheets.courier', 'runsheets.picker']);
+
+        if ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $query->whereIn('id', array_filter($ids));
+        } else {
+            $query = $this->applyFilters($query, $request);
+        }
+
+        $bookings = $query->get();
+
+        app(AuditLogService::class)->logExportEvent('excel', 'Bookings list exported as Excel (.xlsx)', [
+            'count' => $bookings->count(),
+        ]);
+
+        return Excel::download(new BookingsExport($bookings), 'bookings_export_'.now()->format('Ymd_His').'.xlsx');
+    }
+
+
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new BookingsExport(null, true), 'bookings_import_template.xlsx');
+    }
+
+
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new BookingsImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
+    }
+
 }

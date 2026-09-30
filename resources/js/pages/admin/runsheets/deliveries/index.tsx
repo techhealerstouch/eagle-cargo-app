@@ -1,5 +1,5 @@
 import { Head, Link, usePage, router } from '@inertiajs/react';
-import { ClipboardList, Plus, Pencil, Phone, Eye, CheckCircle2, Truck, X, Check } from 'lucide-react';
+import { ClipboardList, Plus, Pencil, Phone, Eye, CheckCircle2, Truck, X, Check, Calendar as CalendarIcon, List } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import FilterSelect from '@/components/common/filter-select';
@@ -40,10 +40,10 @@ interface Runsheet {
 type RunsheetPagination = PaginationData & { data: Runsheet[] };
 
 const STATUS_COLORS: Record<string, string> = {
-    draft: 'bg-muted text-muted-foreground border border-border',
-    assigned: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',
-    in_progress: 'bg-amber-500/10 text-amber-600 border border-amber-500/20',
-    completed: 'bg-green-500/10 text-green-600 border border-green-500/20',
+    draft: 'bg-muted text-muted-foreground border border-border dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700',
+    assigned: 'bg-blue-50/50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800',
+    in_progress: 'bg-amber-50/50 text-amber-700 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800',
+    completed: 'bg-emerald-50/50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800',
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -83,31 +83,45 @@ export default function DeliveriesIndex({
                         title="Delivery Runsheets"
                         description="Manage delivery schedules, courier assignments, and route completion."
                     />
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <div className="inline-flex rounded-xl bg-muted/60 p-1 border shadow-xs">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-background text-foreground shadow-xs">
+                                <List className="w-3.5 h-3.5 text-brand-rust" />
+                                <span>Table View</span>
+                            </span>
+                            <Link
+                                href="/admin/runsheets/deliveries/calendar"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                                <CalendarIcon className="w-3.5 h-3.5" />
+                                <span>Calendar View</span>
+                            </Link>
+                        </div>
+
                         <Link
                             href="/admin/runsheets/create?type=delivery"
-                            className="bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-rose-600/10 transition-all font-sans"
+                            className="bg-brand-rust text-white hover:bg-brand-rust/90 flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-brand-rust/10 transition-all font-sans"
                         >
-                            <Truck className="size-4" />
+                            <Plus className="size-4" />
                             New Delivery
                         </Link>
                     </div>
                 </div>
 
                 {incomingDeliveriesCount > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3 text-amber-800">
-                        <div className="bg-amber-100 p-2 rounded-lg">
-                            <Truck className="size-5 text-amber-600" />
+                    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-center gap-3 text-amber-800 dark:text-amber-300">
+                        <div className="bg-amber-100 dark:bg-amber-900/50 p-2 rounded-lg">
+                            <Truck className="size-5 text-amber-600 dark:text-amber-400" />
                         </div>
                         <div className="flex-1">
                             <h3 className="text-sm font-bold">Incoming Deliveries</h3>
-                            <p className="text-xs text-amber-700/80 mt-0.5">
+                            <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-0.5">
                                 There {incomingDeliveriesCount === 1 ? 'is' : 'are'} {incomingDeliveriesCount} incoming {incomingDeliveriesCount === 1 ? 'delivery' : 'deliveries'} at the Manila Warehouse ready to be assigned.
                             </p>
                         </div>
                         <Link
                             href="/admin/runsheets/create?type=delivery"
-                            className="text-xs font-bold bg-amber-600 text-white hover:bg-amber-700 px-4 py-2 rounded-lg transition-colors"
+                            className="text-xs font-bold bg-brand-rust text-white hover:bg-brand-rust/90 px-4 py-2 rounded-lg transition-colors"
                         >
                             Create Runsheet
                         </Link>
@@ -117,17 +131,12 @@ export default function DeliveriesIndex({
                 <div className="flex flex-col gap-6">
                     <div className="flex flex-col gap-4 p-2 md:flex-row md:items-end md:justify-between">
                         <div className="flex flex-1 flex-wrap items-end gap-3">
-                            <div className="flex flex-col gap-1.5 flex-1 max-w-sm">
-                                <span className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-brand-rust/70 px-1">
-                                    <span className="h-px w-2 bg-brand-rust/20"></span>
-                                    Courier Search
-                                </span>
-                                <SearchFilter
-                                    routeName="/admin/runsheets/deliveries"
-                                    queryParams={filters}
-                                    placeholder="Search area or courier..."
-                                />
-                            </div>
+                            <SearchFilter
+                                label="Courier Search"
+                                routeName="/admin/runsheets/deliveries"
+                                queryParams={filters}
+                                placeholder="Search area or courier..."
+                            />
                             <FilterSelect
                                 label="Status"
                                 routeName="/admin/runsheets/deliveries"
@@ -150,12 +159,12 @@ export default function DeliveriesIndex({
                     />
                 </div>
 
-                <div className="rounded-xl border border-zinc-200/80 bg-white overflow-hidden shadow-2xs">
+                <div className="card overflow-hidden shadow-xs">
                     {runsheets.data.length > 0 ? (
                         <div className="overflow-x-auto w-full">
                             <table className="w-full text-left border-collapse">
                                 <thead>
-                                    <tr className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold text-zinc-600">
+                                    <tr className="border-b border-border bg-brand-warm/10 dark:bg-brand-warm/20 text-xs font-semibold text-brand-text-mid">
                                         <th className="px-4 py-3 font-semibold">Scheduled Date</th>
                                         <th className="px-4 py-3 font-semibold">Area</th>
                                         <th className="px-4 py-3 font-semibold">Box Tracking</th>
@@ -174,46 +183,46 @@ export default function DeliveriesIndex({
                                         <th className="px-4 py-3 text-right font-semibold">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-zinc-100 text-xs font-normal">
+                                <tbody className="divide-y divide-border text-xs font-normal">
                                     {runsheets.data.map((rs) => {
                                         const assignee = rs.courier;
                                         const assigneeMobile = rs.courier?.courier?.mobile;
                                         const displayMobile = assigneeMobile?.trim() || null;
 
                                         return (
-                                            <tr key={rs.id} className="hover:bg-zinc-50/60 transition-colors">
-                                                <td className="px-4 py-3.5 font-semibold text-zinc-900">
+                                            <tr key={rs.id} className="hover:bg-brand-cream/20 dark:hover:bg-brand-warm/20 transition-colors">
+                                                <td className="px-4 py-3.5 font-semibold text-brand-text">
                                                     {new Date(rs.scheduled_date).toLocaleDateString()}
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-600">
+                                                <td className="px-4 py-3.5 text-brand-text-mid">
                                                     {rs.area_description}
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex flex-wrap gap-1 max-w-xs">
                                                         {rs.boxes?.slice(0, 3).map((box: any) => (
-                                                            <Link
+                                                             <Link
                                                                 key={box.id}
                                                                 href={`/admin/bookings/${box.id}`}
-                                                                className="text-[11px] font-mono text-zinc-700 hover:text-brand-rust transition-colors"
+                                                                className="text-[11px] font-mono text-brand-text-mid hover:text-brand-rust transition-colors"
                                                             >
                                                                 {box.tracking_number || `BK-${box.id}`}
                                                             </Link>
                                                         ))}
                                                         {rs.boxes && rs.boxes.length > 3 && (
-                                                            <span className="text-[11px] text-zinc-400">
+                                                            <span className="text-[11px] text-brand-text-light/60">
                                                                 +{rs.boxes.length - 3} more
                                                             </span>
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-900 font-medium">
-                                                    {assignee?.name ?? <span className="text-zinc-400 italic">Unassigned</span>}
+                                                <td className="px-4 py-3.5 text-brand-text font-medium">
+                                                    {assignee?.name ?? <span className="text-brand-text-light/60 italic">Unassigned</span>}
                                                 </td>
-                                                <td className="px-4 py-3.5 font-mono text-xs text-zinc-500">
+                                                <td className="px-4 py-3.5 font-mono text-xs text-brand-text-mid">
                                                     {displayMobile || '—'}
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[rs.status] ?? 'bg-zinc-100 text-zinc-700'}`}>
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[rs.status] ?? 'bg-muted text-muted-foreground border-border'}`}>
                                                         {humanize(rs.status)}
                                                     </span>
                                                 </td>
@@ -222,14 +231,14 @@ export default function DeliveriesIndex({
                                                         <Link
                                                             href={`/admin/runsheets/deliveries/${rs.id}`}
                                                             title="View Runsheet"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Eye className="size-3.5" />
                                                         </Link>
                                                         <Link
                                                             href={`/admin/runsheets/deliveries/${rs.id}/edit`}
                                                             title="Edit Runsheet"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-brand-rust hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Pencil className="size-3.5" />
                                                         </Link>
@@ -256,7 +265,7 @@ export default function DeliveriesIndex({
                             </p>
                             <Link
                                 href="/admin/runsheets/create?type=delivery"
-                                className="bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-rose-600/10 transition-all font-sans"
+                                className="bg-brand-rust text-white hover:bg-brand-rust/90 flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-brand-rust/10 transition-all font-sans"
                             >
                                 <Plus className="size-4" />
                                 Create Delivery Runsheet

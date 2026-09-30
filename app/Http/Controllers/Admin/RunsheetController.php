@@ -8,14 +8,20 @@ use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
+use App\Enums\SerialNumberStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\StoreRunsheetRequest;
 use App\Http\Requests\Admin\UpdateRunsheetRequest;
+use App\Models\Area;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\PickupZone;
 use App\Models\Runsheet;
+use App\Models\SerialNumber;
 use App\Models\User;
 use App\Services\RunsheetService;
+use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -28,7 +34,7 @@ class RunsheetController extends Controller
 
     public function index(Request $request)
     {
-        return redirect()->route('admin.runsheets.pickups');
+        return redirect($this->adminReturnUrl('admin.runsheets.pickups'));
     }
 
     public function pickups(Request $request)
@@ -84,6 +90,330 @@ class RunsheetController extends Controller
             'filters' => $request->only(['search', 'status', 'sort', 'direction']),
             'incomingDeliveriesCount' => $incomingDeliveriesCount,
         ]);
+    }
+
+    public function pickupCalendar(Request $request)
+    {
+        $pickers = User::where('role', Role::Picker)
+            ->with('picker:id,user_id,mobile')
+            ->orderBy('name')
+            ->get(['id', 'name', 'email']);
+
+        $pickupZones = PickupZone::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
+
+        $start = $request->input('start', now()->startOfMonth()->subDays(7)->toDateString());
+        $end = $request->input('end', now()->endOfMonth()->addDays(7)->toDateString());
+
+        $initialData = $this->getDispatchCalendarData(
+            type: 'pickup',
+            start: $start,
+            end: $end,
+            driverId: $request->input('driver_id') ? (int) $request->input('driver_id') : null,
+            zoneId: $request->input('zone_id') ? (int) $request->input('zone_id') : null,
+            areaId: null,
+        );
+
+        return Inertia::render('admin/runsheets/pickups/calendar', [
+            'initialData' => $initialData,
+            'pickers' => $pickers,
+            'pickupZones' => $pickupZones,
+            'filters' => $request->only(['start', 'end', 'driver_id', 'zone_id']),
+        ]);
+    }
+
+    public function deliveryCalendar(Request $request)
+    {
+        $couriers = User::where('role', Role::Courier)
+            ->with('courier:id,user_id,mobile,area_id')
+            ->orderBy('name')
+            ->get(['id', 'name', 'email']);
+
+        $areas = Area::query()
+            ->where('is_active', true)
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $start = $request->input('start', now()->startOfMonth()->subDays(7)->toDateString());
+        $end = $request->input('end', now()->endOfMonth()->addDays(7)->toDateString());
+
+        $initialData = $this->getDispatchCalendarData(
+            type: 'delivery',
+            start: $start,
+            end: $end,
+            driverId: $request->input('driver_id') ? (int) $request->input('driver_id') : null,
+            zoneId: null,
+            areaId: $request->input('area_id') ? (int) $request->input('area_id') : null,
+        );
+
+        return Inertia::render('admin/runsheets/deliveries/calendar', [
+            'initialData' => $initialData,
+            'couriers' => $couriers,
+            'areas' => $areas,
+            'filters' => $request->only(['start', 'end', 'driver_id', 'area_id']),
+        ]);
+    }
+
+    public function dispatchCalendarFeed(Request $request)
+    {
+        $type = $request->input('type', 'all');
+        $start = $request->input('start', now()->startOfMonth()->subDays(7)->toDateString());
+        $end = $request->input('end', now()->endOfMonth()->addDays(7)->toDateString());
+        $driverId = $request->input('driver_id') ? (int) $request->input('driver_id') : null;
+        $zoneId = $request->input('zone_id') ? (int) $request->input('zone_id') : null;
+        $areaId = $request->input('area_id') ? (int) $request->input('area_id') : null;
+
+        $data = $this->getDispatchCalendarData($type, $start, $end, $driverId, $zoneId, $areaId);
+
+        return response()->json($data);
+    }
+
+    private function getDispatchCalendarData(
+        string $type,
+        string $start,
+        string $end,
+        ?int $driverId = null,
+        ?int $zoneId = null,
+        ?int $areaId = null
+    ): array {
+        $startDate = Carbon::parse($start)->startOfDay();
+        $endDate = Carbon::parse($end)->endOfDay();
+
+        // 1. Runsheets
+        $runsheetQuery = Runsheet::query()
+            ->whereBetween('scheduled_date', [$startDate, $endDate])
+            ->with([
+                'picker:id,name,email,role',
+                'picker.picker:id,user_id,mobile',
+                'courier:id,name,email,role',
+                'courier.courier:id,user_id,mobile,area_id',
+                'bookings.sender.pickupZone',
+                'bookings.boxes.boxType',
+                'boxes.booking.sender',
+                'boxes.recipient.area',
+                'boxes.boxType',
+            ]);
+
+        if ($type === 'pickup') {
+            $runsheetQuery->where('type', RunsheetType::Pickup);
+        } elseif ($type === 'delivery') {
+            $runsheetQuery->where('type', RunsheetType::Delivery);
+        }
+
+        if ($driverId) {
+            $runsheetQuery->where(function ($q) use ($driverId) {
+                $q->where('picker_id', $driverId)->orWhere('courier_id', $driverId);
+            });
+        }
+
+        $rawRunsheets = $runsheetQuery->orderBy('scheduled_date')->get();
+
+        $formattedRunsheets = $rawRunsheets->map(function ($rs) {
+            $isPickup = $rs->type === RunsheetType::Pickup;
+            $driverUser = $isPickup ? $rs->picker : $rs->courier;
+            $driverProfile = $isPickup ? $driverUser?->picker : $driverUser?->courier;
+            $driverData = $driverUser ? [
+                'id' => $driverUser->id,
+                'name' => $driverUser->name,
+                'email' => $driverUser->email,
+                'mobile' => $driverProfile?->mobile,
+                'role' => $driverUser->role instanceof Role ? $driverUser->role->value : (string) $driverUser->role,
+            ] : null;
+
+            if ($isPickup) {
+                $stopsCount = $rs->bookings->count();
+                $allBoxes = $rs->bookings->flatMap->boxes;
+                $totalBoxes = $allBoxes->count();
+                $completedBoxes = $allBoxes->where('status', '!=', BoxStatus::Pending)->count();
+                $progressPct = $totalBoxes > 0 ? (int) round(($completedBoxes / $totalBoxes) * 100) : 0;
+
+                $items = $rs->bookings->map(fn ($b) => [
+                    'id' => $b->id,
+                    'reference_number' => $b->reference_number,
+                    'customer_name' => $b->sender ? trim($b->sender->first_name . ' ' . $b->sender->last_name) : 'Customer',
+                    'phone' => $b->sender?->mobile,
+                    'address' => implode(', ', array_filter([$b->sender?->address, $b->sender?->suburb, $b->sender?->state])),
+                    'suburb' => $b->sender?->suburb,
+                    'box_count' => $b->boxes->count(),
+                    'payment_status' => $b->payment_status instanceof PaymentStatus ? $b->payment_status->value : (string) $b->payment_status,
+                    'status' => $b->status instanceof BookingStatus ? $b->status->value : (string) $b->status,
+                ]);
+            } else {
+                $stopsCount = $rs->boxes->pluck('booking_id')->unique()->count();
+                $totalBoxes = $rs->boxes->count();
+                $completedBoxes = $rs->boxes->where('status', BoxStatus::Delivered)->count();
+                $progressPct = $totalBoxes > 0 ? (int) round(($completedBoxes / $totalBoxes) * 100) : 0;
+
+                $items = $rs->boxes->map(fn ($box) => [
+                    'id' => $box->id,
+                    'tracking_number' => $box->tracking_number,
+                    'customer_name' => $box->recipient ? trim($box->recipient->first_name . ' ' . $box->recipient->last_name) : 'Recipient',
+                    'phone' => $box->recipient?->mobile,
+                    'address' => implode(', ', array_filter([$box->recipient?->address, $box->recipient?->city, $box->recipient?->province])),
+                    'area' => $box->recipient?->area?->name,
+                    'status' => $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status,
+                ]);
+            }
+
+            return [
+                'id' => $rs->id,
+                'type' => $rs->type instanceof RunsheetType ? $rs->type->value : (string) $rs->type,
+                'scheduled_date' => $rs->scheduled_date ? Carbon::parse($rs->scheduled_date)->format('Y-m-d') : null,
+                'timeslot' => $rs->timeslot,
+                'area_description' => $rs->area_description,
+                'status' => $rs->status instanceof RunsheetStatus ? $rs->status->value : (string) $rs->status,
+                'driver' => $driverData,
+                'total_stops' => $stopsCount,
+                'total_boxes' => $totalBoxes,
+                'completed_boxes' => $completedBoxes,
+                'progress_pct' => $progressPct,
+                'items' => $items,
+            ];
+        });
+
+        // 2. Pending Items
+        $pendingItems = collect();
+
+        // 2a. Pickup Pending Bookings
+        if ($type === 'pickup' || $type === 'all') {
+            $pickupBookings = Booking::query()
+                ->where('status', BookingStatus::Confirmed)
+                ->whereBetween('preferred_date', [$startDate, $endDate])
+                ->whereHas('boxes', function ($q) {
+                    $q->where('status', BoxStatus::Pending);
+                })
+                ->with([
+                    'sender.pickupZone',
+                    'boxes.boxType',
+                    'runsheets' => function ($rq) {
+                        $rq->where('type', RunsheetType::Pickup)
+                            ->whereIn('status', RunsheetStatus::activeValues());
+                    },
+                ]);
+
+            if ($zoneId) {
+                $pickupBookings->where(function ($q) use ($zoneId) {
+                    $q->where('pickup_zone_id', $zoneId)
+                      ->orWhereHas('sender', fn ($sq) => $sq->where('pickup_zone_id', $zoneId));
+                });
+            }
+
+            $pickupPending = $pickupBookings->get()->map(function ($booking) {
+                $activeRunsheet = $booking->runsheets->first();
+                $dateStr = $booking->preferred_date ? Carbon::parse($booking->preferred_date)->format('Y-m-d') : null;
+
+                return [
+                    'type' => 'pickup',
+                    'id' => $booking->id,
+                    'reference_number' => $booking->reference_number,
+                    'date' => $dateStr,
+                    'customer_name' => $booking->sender ? trim($booking->sender->first_name . ' ' . $booking->sender->last_name) : 'Customer',
+                    'phone' => $booking->sender?->mobile,
+                    'address' => implode(', ', array_filter([$booking->sender?->address, $booking->sender?->suburb, $booking->sender?->state])),
+                    'suburb' => $booking->sender?->suburb,
+                    'pickup_zone_id' => $booking->pickup_zone_id ?? $booking->sender?->pickup_zone_id,
+                    'pickup_zone_name' => $booking->sender?->pickupZone?->name ?? 'Zone',
+                    'box_count' => $booking->boxes->count(),
+                    'box_types' => $booking->boxes->map(fn ($b) => $b->boxType?->name ?: 'Standard Box')->unique()->values()->all(),
+                    'payment_status' => $booking->payment_status instanceof PaymentStatus ? $booking->payment_status->value : (string) $booking->payment_status,
+                    'runsheet_id' => $activeRunsheet?->id,
+                    'is_assigned' => $activeRunsheet !== null,
+                    'runsheet_status' => $activeRunsheet?->status instanceof RunsheetStatus ? $activeRunsheet->status->value : (string) $activeRunsheet?->status,
+                ];
+            });
+
+            $pendingItems = $pendingItems->concat($pickupPending);
+        }
+
+        // 2b. Delivery Eligible Boxes
+        if ($type === 'delivery' || $type === 'all') {
+            $deliveryBoxes = $this->deliveryEligibleBoxesQuery()
+                ->with(['recipient.area', 'booking.sender', 'boxType'])
+                ->when($areaId, function ($q) use ($areaId) {
+                    $q->whereHas('recipient', fn ($rq) => $rq->where('area_id', $areaId));
+                })
+                ->limit(100)
+                ->get()
+                ->map(function ($box) {
+                    return [
+                        'type' => 'delivery',
+                        'id' => $box->id,
+                        'reference_number' => $box->tracking_number,
+                        'date' => $box->updated_at ? Carbon::parse($box->updated_at)->format('Y-m-d') : now()->toDateString(),
+                        'customer_name' => $box->recipient ? trim($box->recipient->first_name . ' ' . $box->recipient->last_name) : 'Recipient',
+                        'phone' => $box->recipient?->mobile,
+                        'address' => implode(', ', array_filter([$box->recipient?->address, $box->recipient?->city, $box->recipient?->province])),
+                        'area_id' => $box->recipient?->area_id,
+                        'area_name' => $box->recipient?->area?->name ?? 'Unassigned Area',
+                        'box_count' => 1,
+                        'box_types' => [$box->boxType?->name ?: 'Standard Box'],
+                        'payment_status' => 'paid',
+                        'runsheet_id' => null,
+                        'is_assigned' => false,
+                        'runsheet_status' => null,
+                    ];
+                });
+
+            $pendingItems = $pendingItems->concat($deliveryBoxes);
+        }
+
+        // 3. Daily Summaries
+        $dailySummaries = [];
+        $period = CarbonPeriod::create($startDate, $endDate);
+        foreach ($period as $date) {
+            $dStr = $date->format('Y-m-d');
+            $dayRunsheets = $formattedRunsheets->where('scheduled_date', $dStr)->values();
+            $dayPendingItems = $pendingItems->where('date', $dStr)->values();
+
+            $unassignedItems = $dayPendingItems->where('is_assigned', false);
+            $unassignedCount = $unassignedItems->count();
+            $unassignedBoxes = $unassignedItems->sum('box_count');
+
+            $runsheetStops = $dayRunsheets->sum('total_stops');
+            $runsheetBoxes = $dayRunsheets->sum('total_boxes');
+
+            $dailySummaries[$dStr] = [
+                'date' => $dStr,
+                'total_stops' => $runsheetStops + $unassignedCount,
+                'total_boxes' => $runsheetBoxes + $unassignedBoxes,
+                'unassigned_count' => $unassignedCount,
+                'unassigned_boxes' => $unassignedBoxes,
+                'active_runsheets_count' => $dayRunsheets->whereIn('status', ['assigned', 'in_progress'])->count(),
+                'completed_runsheets_count' => $dayRunsheets->where('status', 'completed')->count(),
+                'runsheets_count' => $dayRunsheets->count(),
+            ];
+        }
+
+        // 4. Metrics
+        $totalUnassigned = $pendingItems->where('is_assigned', false)->count();
+        $totalUnassignedBoxes = $pendingItems->where('is_assigned', false)->sum('box_count');
+        $totalRunsheetStops = $formattedRunsheets->sum('total_stops');
+        $totalRunsheetBoxes = $formattedRunsheets->sum('total_boxes');
+        $totalCompletedBoxes = $formattedRunsheets->sum('completed_boxes');
+        $allTotalBoxes = $totalRunsheetBoxes + $totalUnassignedBoxes;
+        $completionRate = $allTotalBoxes > 0 ? (int) round(($totalCompletedBoxes / $allTotalBoxes) * 100) : 0;
+
+        $metrics = [
+            'upcoming_stops' => $totalRunsheetStops + $totalUnassigned,
+            'total_boxes' => $allTotalBoxes,
+            'unassigned_count' => $totalUnassigned,
+            'active_runsheets_count' => $formattedRunsheets->whereIn('status', ['assigned', 'in_progress'])->count(),
+            'completed_runsheets_count' => $formattedRunsheets->where('status', 'completed')->count(),
+            'total_runsheets_count' => $formattedRunsheets->count(),
+            'completion_rate' => $completionRate,
+        ];
+
+        return [
+            'type' => $type,
+            'start' => $start,
+            'end' => $end,
+            'runsheets' => $formattedRunsheets->values()->all(),
+            'pending_items' => $pendingItems->values()->all(),
+            'daily_summaries' => $dailySummaries,
+            'metrics' => $metrics,
+        ];
     }
 
     private function applyFilters($query, Request $request)
@@ -142,7 +472,7 @@ class RunsheetController extends Controller
         return $this->createPickup($request);
     }
 
-    public function createPickup(Request $request = null)
+    public function createPickup(?Request $request = null)
     {
         $pickers = User::where('role', Role::Picker)
             ->with('picker:id,user_id,mobile')
@@ -168,20 +498,29 @@ class RunsheetController extends Controller
 
         $pickupEligibleBookingsQuery = $this->pickupEligibleBookingsQuery();
 
-        if (!empty($bookingIds)) {
-            $specificBookings = Booking::whereIn('id', $bookingIds)->with('sender')->get();
+        if (! empty($bookingIds)) {
+            $specificBookings = Booking::whereIn('id', $bookingIds)->with(['sender.pickupZone', 'boxes'])->get();
             $otherBookings = $pickupEligibleBookingsQuery->whereNotIn('id', $bookingIds)->limit(150)->get();
             $pickupEligibleBookings = $specificBookings->concat($otherBookings);
         } else {
             $pickupEligibleBookings = $pickupEligibleBookingsQuery->limit(150)->get();
         }
 
-        $recommendedStartingSerial = \App\Models\SerialNumber::where('status', \App\Enums\SerialNumberStatus::Available->value)
+        $recommendedStartingSerial = SerialNumber::where('status', SerialNumberStatus::Available->value)
             ->orderBy('id', 'asc')
             ->first()?->serial_number;
 
+        $pickupZones = PickupZone::query()
+            ->where('is_active', true)
+            ->with(['suburbs' => function ($q) {
+                $q->where('is_active', true)->select('id', 'name', 'pickup_zone_id');
+            }])
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
+
         return Inertia::render('admin/runsheets/pickups/create', [
             'pickers' => $pickers,
+            'pickupZones' => $pickupZones,
             'runsheetTypes' => collect(RunsheetType::cases())
                 ->map(fn (RunsheetType $type) => [
                     'name' => $type->name,
@@ -324,11 +663,20 @@ class RunsheetController extends Controller
             ]);
         }
 
-        $runsheet->load(['bookings.sender']);
+        $runsheet->load(['bookings.sender.pickupZone']);
+
+        $pickupZones = PickupZone::query()
+            ->where('is_active', true)
+            ->with(['suburbs' => function ($q) {
+                $q->where('is_active', true)->select('id', 'name', 'pickup_zone_id');
+            }])
+            ->orderBy('name')
+            ->get(['id', 'name', 'code']);
 
         return Inertia::render('admin/runsheets/pickups/edit', [
             'runsheet' => $runsheet,
             'pickers' => $pickers,
+            'pickupZones' => $pickupZones,
             'pickupEligibleBookings' => $pickupEligibleBookings,
         ]);
     }
@@ -384,9 +732,7 @@ class RunsheetController extends Controller
             ? 'admin.runsheets.pickups'
             : 'admin.runsheets.deliveries';
 
-        $returnUrl = $request->input('return_to') ?? session("admin_return_url.{$redirectRoute}") ?? session('admin_return_url') ?? route($redirectRoute);
-
-        return redirect($returnUrl)->with('success', 'Runsheet updated successfully.');
+        return redirect($this->adminReturnUrl($redirectRoute))->with('success', 'Runsheet updated successfully.');
     }
 
     public function attachBookings(Runsheet $runsheet, Request $request)
@@ -545,7 +891,7 @@ class RunsheetController extends Controller
                     $query->where('runsheets.id', '!=', $editingRunsheet->id);
                 }
             })
-            ->with(['sender', 'boxes']);
+            ->with(['sender.pickupZone', 'boxes']);
     }
 
     private function deliveryEligibleBoxesQuery(?Runsheet $editingRunsheet = null)

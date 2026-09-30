@@ -694,4 +694,250 @@ $this->batchService->refreshAndEvaluateById($batchId);
 
         return response()->json($batch);
     }
+
+
+    public function loadBatch(Request $request)
+    {
+        $request->validate([
+            'batch_id' => 'required|exists:batches,id',
+            'tracking_numbers' => 'required|array|min:1',
+            'tracking_numbers.*' => 'required|string',
+            'tracking_step_key' => 'nullable|string',
+        ]);
+
+        $batchId = (int) $request->batch_id;
+        $trackingStepKey = $request->input('tracking_step_key', 'loading_container');
+        $batch = Batch::findOrFail($batchId);
+
+        $loaded = [];
+        $errors = [];
+
+        foreach ($request->tracking_numbers as $trackingNumber) {
+            $trackingNumber = trim($trackingNumber);
+            if (empty($trackingNumber)) {
+                continue;
+            }
+
+            try {
+                $box = $this->processLoadBox($trackingNumber, $batchId, $trackingStepKey);
+                $loaded[] = $box->tracking_number;
+            } catch (ValidationException $e) {
+                $firstError = collect($e->errors())->flatten()->first() ?? $e->getMessage();
+                $errors[] = [
+                    'tracking_number' => $trackingNumber,
+                    'message' => $firstError,
+                ];
+            } catch (\Throwable $e) {
+                $errors[] = [
+                    'tracking_number' => $trackingNumber,
+                    'message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        $batch->refresh();
+        $successCount = count($loaded);
+        $errorCount = count($errors);
+
+        $message = "Synced {$successCount} " . ($successCount === 1 ? 'box' : 'boxes') . " into batch {$batch->batch_number}.";
+        if ($errorCount > 0) {
+            $message .= " {$errorCount} " . ($errorCount === 1 ? 'box failed' : 'boxes failed') . '.';
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'success' => $errorCount === 0,
+                'message' => $message,
+                'loaded' => $loaded,
+                'errors' => $errors,
+                'batch' => [
+                    'id' => $batch->id,
+                    'batch_number' => $batch->batch_number,
+                    'current_boxes' => $batch->boxes()->count(),
+                ],
+            ]);
+        }
+
+        if ($errorCount > 0 && $successCount === 0) {
+            return back()->with('error', $message)->with('sync_errors', $errors);
+        }
+
+        return back()->with('success', $message)->with('sync_errors', $errors);
+    }
+
+
+    private function processLoadBox(string $trackingNumber, int $batchId, string $trackingStepKey = 'loading_container'): Box
+    {
+        $box = $this->boxRepo->findByIdentifier($trackingNumber);
+
+        if (! $box) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Box [{$trackingNumber}] not found.",
+            ]);
+        }
+
+        if ($box->batch_id !== null && $box->batch_id != $batchId) {
+            $existingBatch = Batch::find($box->batch_id);
+            $targetBatch = Batch::find($batchId);
+
+            DataIntegrityWarning::updateOrCreate(
+                [
+                    'type' => 'duplicate_batch_scan',
+                    'record_type' => Box::class,
+                    'record_id' => $box->id,
+                    'is_resolved' => false,
+                ],
+                [
+                    'severity' => 'error',
+                    'message' => "Duplicate batch scan attempt: Box {$box->tracking_number} is already assigned to Batch ".($existingBatch?->batch_number ?? $box->batch_id).'. Scanned for Batch '.($targetBatch?->batch_number ?? $batchId).'.',
+                    'metadata' => [
+                        'tracking_number' => $box->tracking_number,
+                        'existing_batch_id' => $box->batch_id,
+                        'existing_batch_number' => $existingBatch?->batch_number,
+                        'target_batch_id' => $batchId,
+                        'target_batch_number' => $targetBatch?->batch_number,
+                        'scanned_by' => Auth::id(),
+                        'alert' => true,
+                    ],
+                ]
+            );
+
+            throw ValidationException::withMessages([
+                'tracking_number' => "DUPLICATE SCAN ALERT: Box {$box->tracking_number} is already registered in Batch ".($existingBatch?->batch_number ?? $box->batch_id).'.',
+            ]);
+        }
+
+        if ($box->status !== BoxStatus::ReceivedByWarehouse) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Box {$box->tracking_number} is not eligible to be loaded into a container. Current status is '{$box->status->label()}' ({$box->status->value}), but box must be in 'Received by Warehouse' status.",
+            ]);
+        }
+
+        if (in_array($box->booking->status, [BookingStatus::Cancelled, BookingStatus::Pending, BookingStatus::Draft])) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Cannot load box {$box->tracking_number}. Booking is in '{$box->booking->status->label()}' status and must be confirmed first.",
+            ]);
+        }
+
+        if ($box->booking->payment_status !== PaymentStatus::Paid) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Payment not confirmed for box {$box->tracking_number}. Cannot load unpaid box to container.",
+            ]);
+        }
+
+        if ($box->booking->needsDeclaration()) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Customs declaration is missing for box {$box->tracking_number}. Cannot load box to container.",
+            ]);
+        }
+
+        $invoice = $box->booking->invoice;
+        if (! $invoice || $invoice->status === InvoiceStatus::Voided) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "No valid invoice found for box {$box->tracking_number}. Generate an invoice before loading to container.",
+            ]);
+        }
+
+        if (! $box->recipient_id) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "No recipient assigned to box {$box->tracking_number}. Cannot load to container.",
+            ]);
+        }
+
+        $recipient = $box->recipient;
+        if (! $recipient->city || ! $recipient->province) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Recipient address is incomplete for box {$box->tracking_number} (missing city or province).",
+            ]);
+        }
+
+        if (! $recipient->phone_number) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Recipient phone number is missing for box {$box->tracking_number}.",
+            ]);
+        }
+
+        if ($box->price_charged === null || (float) $box->price_charged <= 0) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Price is not set or zero for box {$box->tracking_number}.",
+            ]);
+        }
+
+        if ($recipient->sender_id !== $box->booking->sender_id) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Recipient does not belong to booking sender for box {$box->tracking_number}.",
+            ]);
+        }
+
+        $allSteps = $this->trackingStepService->getSteps();
+        $stepConfig = collect($allSteps)->firstWhere('key', $trackingStepKey);
+
+        if (! $stepConfig || ! in_array('warehouse', $stepConfig['allowed_roles'] ?? [])) {
+            throw ValidationException::withMessages([
+                'tracking_step_key' => "Invalid or unauthorized tracking step: {$trackingStepKey}",
+            ]);
+        }
+
+        if ($trackingStepKey !== 'loading_container') {
+            throw ValidationException::withMessages([
+                'tracking_step_key' => 'Cannot use a receive step for load action.',
+            ]);
+        }
+
+        $systemStatus = $stepConfig['system_status'] ?? $box->status->value;
+        $trackingLabel = $stepConfig['label'] ?? 'Loaded to Container';
+        $targetStatus = BoxStatus::tryFrom($systemStatus);
+
+        if ($targetStatus && $box->status !== $targetStatus && ! $box->status->canTransitionTo($targetStatus)) {
+            throw ValidationException::withMessages([
+                'tracking_number' => "Cannot transition box status from '{$box->status->label()}' to '{$targetStatus->label()}'. The box is not eligible for this operation.",
+            ]);
+        }
+
+        DB::transaction(function () use ($box, $batchId, $systemStatus, $trackingLabel, $trackingStepKey) {
+            // Lock the batch inside the transaction to prevent race conditions
+            $batch = Batch::query()
+                ->whereIn('status', [BatchStatus::Open->value, BatchStatus::Loading->value])
+                ->whereKey($batchId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Capacity check with fresh locked data
+            $capacityError = $this->batchService->checkCapacity($batch, 1);
+            if ($capacityError) {
+                throw ValidationException::withMessages([
+                    'batch_id' => $capacityError,
+                ]);
+            }
+
+            $this->boxRepo->updateStatus(
+                $box,
+                $systemStatus,
+                $trackingLabel.": {$batch->batch_number}",
+                Auth::id(),
+                null,
+                null,
+                $trackingStepKey
+            );
+
+            $oldBatchId = $box->batch_id;
+            $box->update(['batch_id' => $batch->id]);
+
+            // If moving from another batch, refresh the old one
+            if ($oldBatchId && $oldBatchId !== $batch->id) {
+                $this->batchService->refreshAndEvaluateById($oldBatchId);
+            }
+
+            // Refresh batch metrics inside the transaction
+            $this->batchService->refreshAndEvaluateById($batch->id);
+
+            // Auto-transition batch to Loading if it was Open
+            if ($batch->fresh()->status === BatchStatus::Open) {
+                $batch->update(['status' => BatchStatus::Loading]);
+            }
+        });
+
+        return $box;
+    }
+
 }

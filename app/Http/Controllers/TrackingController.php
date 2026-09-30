@@ -349,4 +349,44 @@ class TrackingController extends Controller
 
         return back()->with('success', $successMsg);
     }
+
+
+
+    public function verifyEmailToAccessDeclaration(Request $request, Booking $booking)
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        if ($booking->declaration_form_status === 'submitted') {
+            return response()->json([
+                'message' => 'Customs declaration has already been submitted for this booking.',
+            ], 422);
+        }
+
+        if ($booking->status === 'cancelled') {
+            return response()->json([
+                'message' => 'This booking has been cancelled.',
+            ], 422);
+        }
+
+        $booking->loadMissing('sender');
+        $senderEmail = strtolower(trim($booking->sender?->email ?? ''));
+        $inputEmail = strtolower(trim($request->input('email')));
+
+        if (! $senderEmail || ! hash_equals($senderEmail, $inputEmail)) {
+            return response()->json([
+                'message' => 'The email address provided does not match the sender of this booking. Please check for typos.',
+            ], 422);
+        }
+
+        // Authorize this session for 60 minutes
+        $this->guestAccess->markVerified($request, $booking, GuestBookingAccessService::DECLARATION, 60);
+
+        return response()->json([
+            'message' => 'Email verified! Opening customs declaration form...',
+            'redirect_url' => $this->guestAccess->declarationUrl($booking),
+        ]);
+    }
+
 }
