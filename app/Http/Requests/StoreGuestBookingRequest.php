@@ -20,20 +20,8 @@ class StoreGuestBookingRequest extends FormRequest
                 'last_name' => $parts[1] ?? '',
             ]);
         }
-        if ($this->filled('sender_email') && ! $this->filled('email')) {
-            $this->merge(['email' => $this->input('sender_email')]);
-        }
-        if ($this->filled('sender_phone') && ! $this->filled('mobile')) {
-            $this->merge(['mobile' => $this->input('sender_phone')]);
-        }
         if ($this->filled('mobile')) {
             $this->merge(['mobile' => preg_replace('/[\s\-\(\)]+/', '', $this->input('mobile'))]);
-        }
-        if ($this->filled('secondary_mobile')) {
-            $this->merge(['secondary_mobile' => preg_replace('/[\s\-\(\)]+/', '', $this->input('secondary_mobile'))]);
-        }
-        if ($this->filled('sender_address') && ! $this->filled('address')) {
-            $this->merge(['address' => $this->input('sender_address')]);
         }
 
         $boxes = $this->input('boxes');
@@ -85,10 +73,10 @@ class StoreGuestBookingRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // Optional honeypot for spam bots
+            // Bot honeypot field — should always be empty
             'website' => ['nullable', 'max:0'],
 
-            // Sender details
+            // Guest Sender details
             'first_name' => ['required', 'string', 'max:255'],
             'last_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255'],
@@ -102,11 +90,7 @@ class StoreGuestBookingRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:50',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        (new Phone('secondary contact phone'))->validate($attribute, $value, $fail);
-                    }
-                },
+                new Phone('secondary phone'),
             ],
             'address' => ['required', 'string', 'max:500'],
             'suburb' => ['required', 'string', 'max:100'],
@@ -114,24 +98,31 @@ class StoreGuestBookingRequest extends FormRequest
             'postcode' => ['required', 'string', 'max:10'],
             'latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'longitude' => ['nullable', 'numeric', 'between:-180,180'],
-
-            // Booking details
-            'booking_id' => ['nullable', 'integer', 'exists:bookings,id'],
-            'initialization_key' => ['nullable', 'string', 'max:100'],
-            'booking_type' => ['nullable', 'string', 'max:50'],
-            'preferred_date' => ['required', 'date', new ValidPickupDate(null)],
             'pickup_zone_id' => ['nullable', 'exists:pickup_zones,id'],
-            'payment_method' => ['required', 'string', 'in:cash,stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],
+
+            // Pickup & payment details
+            'preferred_date' => [
+                'required',
+                'date',
+                new ValidPickupDate(
+                    null,
+                    $this->filled('pickup_zone_id') ? (int) $this->input('pickup_zone_id') : null
+                ),
+            ],
+            'booking_type' => ['nullable', 'string', Rule::in(['drop_off', 'home_pickup', 'other'])],
+            'payment_method' => ['nullable', 'string', 'in:cash,stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],
+            'initialization_key' => ['nullable', 'string', 'max:100'],
+            'booking_id' => ['nullable', 'integer'],
             'notes' => ['nullable', 'string', 'max:1000'],
-            'request_empty_box' => ['nullable', 'boolean'],
+            'promo_code' => ['nullable', 'string', 'max:50'],
             'empty_box_count' => ['nullable', 'integer', 'min:0'],
             'empty_box_fee' => ['nullable', 'numeric', 'min:0'],
 
-            // Boxes
+            // Boxes & Recipient details
             'boxes' => ['required', 'array', 'min:1'],
-            'boxes.*.is_door_to_door' => ['nullable', 'boolean'],
-            'boxes.*.recipient_first_name' => ['required', 'string', 'max:100'],
-            'boxes.*.recipient_last_name' => ['required', 'string', 'max:100'],
+            'boxes.*.recipient_first_name' => ['nullable', 'string', 'max:100'],
+            'boxes.*.recipient_last_name' => ['nullable', 'string', 'max:100'],
+            'boxes.*.recipient_name' => ['nullable', 'string', 'max:255'],
             'boxes.*.recipient_email' => ['nullable', 'string', 'email', 'max:255'],
             'boxes.*.recipient_address' => ['required', 'string', 'max:500'],
             'boxes.*.recipient_city' => ['required', 'string', 'max:100'],
@@ -143,7 +134,7 @@ class StoreGuestBookingRequest extends FormRequest
                     ? Rule::exists('provinces', 'name')->where(fn ($query) => $query->where('is_active', true))
                     : null,
             ])),
-            'boxes.*.recipient_zip_code' => ['required', 'string', 'max:20'],
+            'boxes.*.recipient_zip_code' => ['nullable', 'string', 'max:20'],
             'boxes.*.recipient_phone' => [
                 'required',
                 'string',
@@ -154,18 +145,13 @@ class StoreGuestBookingRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:50',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        (new Phone('secondary receiver phone'))->validate($attribute, $value, $fail);
-                    }
-                },
+                new Phone('receiver secondary phone'),
             ],
             'boxes.*.recipient_landmarks' => ['nullable', 'string', 'max:500'],
-            'boxes.*.recipient_latitude' => ['nullable', 'numeric', 'between:-90,90'],
-            'boxes.*.recipient_longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'boxes.*.area_id' => ['required', 'exists:areas,id'],
             'boxes.*.box_type_id' => ['nullable', 'exists:box_types,id'],
             'boxes.*.is_custom_size' => ['nullable', 'boolean'],
+            'boxes.*.is_door_to_door' => ['nullable', 'boolean'],
             'boxes.*.custom_length' => ['nullable', 'numeric', 'min:1', 'max:500'],
             'boxes.*.custom_width' => ['nullable', 'numeric', 'min:1', 'max:500'],
             'boxes.*.custom_height' => ['nullable', 'numeric', 'min:1', 'max:500'],
@@ -193,23 +179,9 @@ class StoreGuestBookingRequest extends FormRequest
                     }
                 }
 
-                $referenceData = app(ReferenceDataService::class);
-                if (! $referenceData->hasActiveProvinces()) {
-                    continue;
-                }
-
-                $derivedAreaId = $referenceData->resolveDestinationAreaId(
-                    $box['recipient_province'] ?? null,
-                    $box['recipient_city'] ?? null,
-                );
-
-                if ($derivedAreaId === null) {
-                    $v->errors()->add("boxes.{$index}.area_id", 'Select a supported recipient province and city.');
-                    continue;
-                }
-
-                if (! empty($box['area_id']) && (int) $box['area_id'] !== $derivedAreaId) {
-                    $v->errors()->add("boxes.{$index}.area_id", 'The selected province and city do not match the pricing area.');
+                $hasName = ! empty($box['recipient_name']) || (! empty($box['recipient_first_name']) && ! empty($box['recipient_last_name']));
+                if (! $hasName) {
+                    $v->errors()->add("boxes.{$index}.recipient_name", 'Recipient name is required.');
                 }
             }
         });
@@ -218,8 +190,8 @@ class StoreGuestBookingRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'mobile.regex' => 'The contact phone must be a valid Australian mobile number (e.g. 04XXXXXXXX or +614XXXXXXXX).',
-            'boxes.*.recipient_phone.regex' => 'The receiver phone must be a valid Philippine mobile number (e.g. 09XXXXXXXXX or +639XXXXXXXXX).',
+            'mobile.regex' => 'The contact phone must be a valid Australian mobile number.',
+            'boxes.*.recipient_phone.regex' => 'The receiver phone must be a valid Philippine mobile number.',
         ];
     }
 }

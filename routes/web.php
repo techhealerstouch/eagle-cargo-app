@@ -196,34 +196,38 @@ Route::get('/track/{tracking_number}', function (Request $request, $tracking_num
     return redirect()->route('track', array_merge(['tracking_number' => $tracking_number], $request->query()));
 });
 
-// Guest booking routes (public)
-Route::get('/guest/book', [GuestBookingController::class, 'create'])
-    ->middleware('throttle:public-tracking')
-    ->name('guest.book');
-Route::post('/guest/bookings', [GuestBookingController::class, 'store'])
-    ->middleware('throttle:booking-writes')
-    ->name('guest.bookings.store');
-Route::post('/guest/bookings/initialize', [GuestBookingController::class, 'initialize'])
-    ->middleware('throttle:booking-writes')
-    ->name('guest.bookings.initialize');
-Route::post('/guest/bookings/{booking}/stripe-intent', [StripePaymentController::class, 'createGuestIntent'])
-    ->middleware('throttle:payments')
-    ->name('guest.bookings.stripe-intent');
-Route::post('/guest/bookings/{booking}/stripe-verify', [StripePaymentController::class, 'verifyGuestPayment'])
-    ->middleware('throttle:payments')
-    ->name('guest.bookings.stripe-verify');
-Route::get('/guest/booking/confirmed', [GuestBookingController::class, 'confirmed'])
-    ->middleware('throttle:public-tracking')
-    ->name('guest.booking.confirmed');
+// Public Guest Booking Routes
+Route::get('/guest/book', [GuestBookingController::class, 'create'])->name('guest.book');
+Route::post('/guest/bookings', [GuestBookingController::class, 'store'])->middleware('throttle:booking-writes')->name('guest.bookings.store');
+Route::post('/guest/bookings/initialize', [GuestBookingController::class, 'initialize'])->middleware('throttle:booking-writes')->name('guest.bookings.initialize');
+Route::get('/guest/booking/{booking}/confirmed', [GuestBookingController::class, 'confirmed'])->name('guest.booking.confirmed');
 Route::get('/guest/booking/{booking}/verify', [GuestBookingController::class, 'verifyAccess'])->middleware('throttle:forms')->name('guest.booking.verify');
 Route::post('/guest/booking/{booking}/verify', [GuestBookingController::class, 'verifyAccessCode'])->middleware('throttle:forms')->name('guest.booking.verify-code');
 Route::get('/guest/booking/{booking}/pay', [BookingController::class, 'guestPay'])->name('guest.bookings.pay');
+Route::post('/guest/booking/{booking}/stripe-intent', [StripePaymentController::class, 'createIntent'])->middleware('throttle:payments')->name('guest.bookings.stripe-intent');
+Route::post('/guest/booking/{booking}/stripe-verify', [StripePaymentController::class, 'verifyPayment'])->middleware('throttle:payments')->name('guest.bookings.stripe-verify');
 Route::post('/guest/booking/{booking}/bank-transfer', [BookingController::class, 'requestBankTransferDetails'])->middleware('throttle:booking-writes')->name('guest.bookings.bank-transfer');
 Route::post('/guest/booking/{booking}/upload-proof', [BookingController::class, 'guestUploadProofOfPayment'])->middleware('throttle:uploads')->name('guest.bookings.upload-proof');
 
-Route::post('/guest/booking/upload-proof', [GuestBookingController::class, 'uploadProofOfPayment'])
-    ->middleware('throttle:uploads')
-    ->name('guest.booking.upload-proof');
+// Booking URL aliases and fallbacks to prevent 404s
+Route::get('/guest/bookings/{booking}/confirmed', function (Request $request, $booking) {
+    return redirect()->route('guest.booking.confirmed', array_merge(['booking' => $booking], $request->query()));
+});
+Route::get('/guest/booking/{booking}', function ($booking) {
+    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
+});
+Route::get('/guest/bookings/{booking}', function ($booking) {
+    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
+});
+Route::get('/bookings/{booking}', function ($booking) {
+    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    if (\Illuminate\Support\Facades\Auth::check()) {
+        return redirect()->route('sender.bookings', ['highlight' => $ref ?? $booking]);
+    }
+    return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
+});
 
 // Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
 Route::inertia('/about', 'marketing/about')->name('about');

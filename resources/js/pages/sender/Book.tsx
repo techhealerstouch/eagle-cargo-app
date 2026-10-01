@@ -1,221 +1,263 @@
-import { Head, useForm, usePage } from '@inertiajs/react';
+import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import { format } from 'date-fns';
-import { Package, MapPinned, X, PlusCircle, CheckCircle, ArrowRight, Wallet, Save, AlertTriangle, ShieldCheck, CalendarIcon, Loader2, Ruler, Lock, ChevronDown } from 'lucide-react';
+import { Package, MapPinned, MapPin, Info, X, PlusCircle, CheckCircle, Check, ChevronRight, ChevronDown, ArrowLeft, ArrowRight, Wallet, Save, AlertTriangle, ShieldCheck, CalendarIcon, Loader2, Ruler, Lock, Tag, Clock, Sparkles, User, Truck, Building2, Minus, ExternalLink } from 'lucide-react';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import Heading from '@/components/common/heading';
 import PaymentFlow from '@/components/payment/PaymentFlow';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
-import { Checkbox } from '@/components/ui/checkbox';
 import LocationPickerMap from '@/components/ui/LocationPickerMap';
 import PhoneInput from '@/components/ui/PhoneInput';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { SuburbSelect, type SuburbOption } from '@/components/ui/SuburbSelect';
 import { useAutoSave } from '@/hooks/use-auto-save';
+import { SuburbSelect } from '@/components/ui/SuburbSelect';
 import AppLayout from '@/layouts/app-layout';
 import MarketingLayout from '@/layouts/marketing-layout';
 import { validatePhone, COUNTRIES } from '@/lib/countries';
 import { cn } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
 
-const AU_STATES = [
-    { code: 'NSW', name: 'New South Wales' },
-    { code: 'VIC', name: 'Victoria' },
-    { code: 'QLD', name: 'Queensland' },
-    { code: 'WA', name: 'Western Australia' },
-    { code: 'SA', name: 'South Australia' },
-    { code: 'TAS', name: 'Tasmania' },
-    { code: 'ACT', name: 'Australian Capital Territory' },
-    { code: 'NT', name: 'Northern Territory' },
-];
+const AUSTRALIAN_STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT'];
 
 const baseInputClass = 'h-12 w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-100 dark:focus:ring-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500 dark:disabled:bg-zinc-800 dark:disabled:text-zinc-400';
 
-function StepIndicator({ step, onStepClick }: { step: number; onStepClick?: (step: number) => void }) {
-    const [isMobileExpanded, setIsMobileExpanded] = useState(false);
+function StepIndicator({
+    step,
+    isGuest = false,
+    onStepClick,
+    step1Summary,
+    step2Summary,
+    step3Summary,
+    mode = 'all',
+}: {
+    step: number;
+    isGuest?: boolean;
+    onStepClick?: (step: number) => void;
+    step1Summary?: string;
+    step2Summary?: string;
+    step3Summary?: string;
+    mode?: 'mobile' | 'desktop' | 'all';
+}) {
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
     const steps = [
-        { id: 1, label: 'Sender & Pickup' },
-        { id: 2, label: 'Boxes & Recipients' },
-        { id: 3, label: 'Review Details' },
-        { id: 4, label: 'Payment & Confirmation' },
+        { id: 1, label: 'Sender & Pickup', shortLabel: 'Sender', icon: User, summary: step1Summary },
+        { id: 2, label: 'Boxes & Recipients', shortLabel: 'Cargo', icon: Package, summary: step2Summary },
+        { id: 3, label: 'Review Details', shortLabel: 'Review', icon: ShieldCheck, summary: step3Summary },
+        { id: 4, label: 'Payment & Confirmation', shortLabel: 'Payment', icon: Wallet },
     ];
 
-    const currentStepItem = steps.find((s) => s.id === step) || steps[0];
+    const currentStepObj = steps.find((s) => s.id === step) || steps[0];
 
-    return (
-        <div className="space-y-2">
-            {/* Mobile View (< sm): Ultra-compact 54px progress bar that saves screen real estate */}
-            <div className="sm:hidden rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 shadow-xs">
-                <div className="flex items-center justify-between gap-2 mb-2.5">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-rust text-white text-xs font-bold shadow-xs">
-                            {step}
-                        </div>
-                        <div className="min-w-0">
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-brand-rust dark:text-orange-400 block leading-tight">
-                                Step {step} of 4
-                            </span>
-                            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate leading-tight mt-0.5">
-                                {currentStepItem.label}
-                            </p>
-                        </div>
+    const renderMobile = () => (
+        <div className="w-full select-none">
+            {/* Top row: Active step circle + STEP X OF 4 + Label + All steps button */}
+            <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-bold text-sm shadow-xs">
+                        {step}
+                    </span>
+                    <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 leading-none">
+                            STEP {step} OF {steps.length}
+                        </p>
+                        <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate mt-1">
+                            {currentStepObj.label}
+                        </p>
                     </div>
-
-                    <button
-                        type="button"
-                        onClick={() => setIsMobileExpanded((prev) => !prev)}
-                        className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0"
-                        aria-expanded={isMobileExpanded}
-                    >
-                        <span>{isMobileExpanded ? 'Hide' : 'All steps'}</span>
-                        <ChevronDown className={cn("size-3 transition-transform duration-200", isMobileExpanded && "rotate-180")} />
-                    </button>
                 </div>
 
-                {/* 4 Segmented Progress Bar */}
-                <div className="grid grid-cols-4 gap-1.5">
+                <button
+                    type="button"
+                    onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors shrink-0 shadow-2xs"
+                    aria-expanded={isMobileMenuOpen}
+                >
+                    <span>All steps</span>
+                    <ChevronDown className={cn("size-3.5 transition-transform duration-200", isMobileMenuOpen && "rotate-180")} />
+                </button>
+            </div>
+
+            {/* Segmented Progress Bar */}
+            <div className="flex items-center gap-2 mt-3.5">
+                {steps.map((item) => {
+                    const isFilled = item.id <= step;
+                    return (
+                        <div
+                            key={item.id}
+                            className={cn(
+                                "h-1.5 rounded-full flex-1 transition-all duration-300",
+                                isFilled ? "bg-zinc-900 dark:bg-zinc-100" : "bg-zinc-200 dark:bg-zinc-800"
+                            )}
+                        />
+                    );
+                })}
+            </div>
+
+            {/* Collapsible Step Menu */}
+            {isMobileMenuOpen && (
+                <div className="mt-3.5 pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
                     {steps.map((item) => {
                         const isActive = step === item.id;
                         const isDone = step > item.id;
+                        const isClickable = Boolean(isDone && onStepClick);
 
                         return (
                             <button
                                 key={item.id}
                                 type="button"
-                                disabled={!isDone || !onStepClick}
-                                onClick={() => isDone && onStepClick?.(item.id)}
+                                disabled={!isClickable}
+                                onClick={() => {
+                                    if (isClickable && onStepClick) {
+                                        onStepClick(item.id);
+                                        setIsMobileMenuOpen(false);
+                                    }
+                                }}
                                 className={cn(
-                                    "h-1.5 rounded-full transition-all duration-300",
-                                    isDone
-                                        ? "bg-emerald-500 hover:opacity-80 cursor-pointer"
-                                        : isActive
-                                            ? "bg-brand-rust"
-                                            : "bg-zinc-200 dark:bg-zinc-800 cursor-default"
+                                    "w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-colors",
+                                    isActive && "bg-zinc-100 dark:bg-zinc-800/80 font-bold",
+                                    isClickable && "hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer",
+                                    !isActive && !isDone && "opacity-50 cursor-default"
                                 )}
-                                title={`Step ${item.id}: ${item.label}`}
-                            />
+                            >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <span
+                                        className={cn(
+                                            "flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold",
+                                            isActive && "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900",
+                                            isDone && "bg-emerald-600 text-white",
+                                            !isActive && !isDone && "bg-zinc-200 dark:bg-zinc-700 text-zinc-500"
+                                        )}
+                                    >
+                                        {isDone ? <Check className="size-3.5 stroke-[2.5]" /> : item.id}
+                                    </span>
+                                    <span className={cn(
+                                        "text-xs truncate",
+                                        isActive ? "font-bold text-zinc-900 dark:text-zinc-100" : "font-medium text-zinc-700 dark:text-zinc-300"
+                                    )}>
+                                        {item.label}
+                                    </span>
+                                </div>
+
+                                {isDone && (
+                                    <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                                        Completed • Edit
+                                    </span>
+                                )}
+                                {isActive && (
+                                    <span className="text-[10px] font-semibold text-zinc-400 shrink-0">
+                                        Current
+                                    </span>
+                                )}
+                            </button>
                         );
                     })}
                 </div>
+            )}
+        </div>
+    );
 
-                {/* Expandable Step Details on Mobile */}
-                {isMobileExpanded && (
-                    <div className="mt-3 pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
-                        {steps.map((item) => {
-                            const isActive = step === item.id;
-                            const isDone = step > item.id;
+    const renderDesktop = () => (
+        <ol className="flex items-center gap-1.5 sm:gap-2">
+            {steps.map((item, idx) => {
+                const isActive = step === item.id;
+                const isDone = step > item.id;
+                const isClickable = Boolean(isDone && onStepClick);
 
-                            return (
-                                <button
-                                    key={item.id}
-                                    type="button"
-                                    disabled={!isDone || !onStepClick}
-                                    onClick={() => {
-                                        if (isDone && onStepClick) {
-                                            onStepClick(item.id);
-                                            setIsMobileExpanded(false);
-                                        }
-                                    }}
-                                    className={cn(
-                                        "w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left transition-all",
-                                        isActive
-                                            ? "bg-brand-rust/10 border border-brand-rust/20"
-                                            : isDone
-                                                ? "hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
-                                                : "opacity-45 cursor-default"
-                                    )}
-                                >
-                                    <div className="flex items-center gap-2.5">
-                                        <div
-                                            className={cn(
-                                                "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold shrink-0",
-                                                isDone
-                                                    ? "bg-emerald-500 text-white"
-                                                    : isActive
-                                                        ? "bg-brand-rust text-white"
-                                                        : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                                            )}
-                                        >
-                                            {isDone ? <CheckCircle className="size-3" /> : item.id}
-                                        </div>
-                                        <span
-                                            className={cn(
-                                                "text-xs",
-                                                isActive
-                                                    ? "font-bold text-brand-rust dark:text-orange-400"
-                                                    : isDone
-                                                        ? "font-semibold text-zinc-900 dark:text-zinc-100"
-                                                        : "text-zinc-500 dark:text-zinc-400"
-                                            )}
-                                        >
-                                            {item.label}
-                                        </span>
-                                    </div>
-                                    <span className="text-[10px] font-semibold text-zinc-400 shrink-0">
-                                        {isDone ? 'Completed' : isActive ? 'Current' : `Step ${item.id}`}
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-
-            {/* Desktop / Tablet View (sm: and up) */}
-            <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                {steps.map((item) => {
-                    const isActive = step === item.id;
-                    const isDone = step > item.id;
-
-                    return (
-                        <div
-                            key={item.id}
-                            onClick={() => isDone && onStepClick?.(item.id)}
+                return (
+                    <li key={item.id} className="flex-1 min-w-0 flex items-center">
+                        <button
+                            type="button"
+                            disabled={!isClickable}
+                            onClick={() => {
+                                if (isClickable && onStepClick) {
+                                    onStepClick(item.id);
+                                }
+                            }}
                             className={cn(
-                                "rounded-2xl border p-4 transition-all",
-                                isActive
-                                    ? "border-brand-rust/30 bg-brand-rust/5 dark:bg-brand-rust/10"
-                                    : isDone
-                                        ? "border-emerald-300 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-700/50"
-                                        : "border-zinc-200 bg-white dark:bg-zinc-900 dark:border-zinc-800",
-                                isDone && onStepClick && "cursor-pointer hover:shadow-xs"
+                                "w-full flex items-center justify-between gap-2 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl text-left transition-all select-none",
+                                isActive && "bg-white dark:bg-zinc-800 shadow-xs border border-zinc-200/90 dark:border-zinc-700 ring-1 ring-brand-rust/20",
+                                isClickable && "hover:bg-white/90 dark:hover:bg-zinc-800/90 cursor-pointer group hover:border-zinc-300 dark:hover:border-zinc-700 border border-transparent",
+                                !isActive && !isDone && "opacity-60 cursor-default border border-transparent"
                             )}
+                            title={isClickable ? `Click to jump back to Step ${item.id}: ${item.label}` : undefined}
                         >
-                            <div className="flex items-center gap-3">
-                                <div
+                            <div className="flex items-center gap-2.5 min-w-0">
+                                <span
                                     className={cn(
-                                        "flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold",
-                                        isDone
-                                            ? "bg-emerald-500 text-white"
-                                            : isActive
-                                                ? "bg-brand-rust text-white"
-                                                : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                                        "flex size-6 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-transform",
+                                        isActive && "bg-brand-rust text-white shadow-2xs",
+                                        isDone && "bg-emerald-600 text-white group-hover:scale-105",
+                                        !isActive && !isDone && "bg-zinc-200 dark:bg-zinc-700/80 text-zinc-600 dark:text-zinc-400"
                                     )}
                                 >
-                                    {isDone ? <CheckCircle className="size-4" /> : item.id}
-                                </div>
-                                <div>
-                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                                        Step {item.id} of 4
-                                    </p>
-                                    <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{item.label}</p>
+                                    {isDone ? <Check className="size-3.5 stroke-[2.5]" /> : item.id}
+                                </span>
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                        <p
+                                            className={cn(
+                                                "text-xs font-bold truncate leading-tight",
+                                                isActive && "text-zinc-900 dark:text-zinc-100",
+                                                isDone && "text-zinc-700 dark:text-zinc-300 group-hover:text-brand-rust dark:group-hover:text-brand-warm",
+                                                !isActive && !isDone && "text-zinc-400 dark:text-zinc-500"
+                                            )}
+                                        >
+                                            <span className="md:hidden">{item.shortLabel}</span>
+                                            <span className="hidden md:inline">{item.label}</span>
+                                        </p>
+                                        {isDone && (
+                                            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hidden xl:inline">
+                                                ✓ Done
+                                            </span>
+                                        )}
+                                    </div>
+                                    {isDone && item.summary && (
+                                        <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 truncate hidden lg:block leading-tight mt-0.5">
+                                            {item.summary}
+                                        </p>
+                                    )}
+                                    {isActive && (
+                                        <p className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 truncate hidden sm:block leading-tight mt-0.5">
+                                            In progress
+                                        </p>
+                                    )}
                                 </div>
                             </div>
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
+
+                            {isClickable && (
+                                <span className="text-[10px] font-semibold text-zinc-400 group-hover:text-brand-rust dark:group-hover:text-brand-warm hidden xl:inline shrink-0">
+                                    Edit
+                                </span>
+                            )}
+                        </button>
+                        {idx < steps.length - 1 && (
+                            <ChevronRight className="size-4 text-zinc-300 dark:text-zinc-600 shrink-0 mx-0.5 select-none hidden sm:block" />
+                        )}
+                    </li>
+                );
+            })}
+        </ol>
+    );
+
+    return (
+        <nav aria-label="Booking steps" className="w-full">
+            {mode === 'mobile' ? renderMobile() : mode === 'desktop' ? renderDesktop() : (
+                <>
+                    <div className="md:hidden">{renderMobile()}</div>
+                    <div className="hidden md:block">{renderDesktop()}</div>
+                </>
+            )}
+        </nav>
     );
 }
 
 function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
     return (
         <div className="space-y-1 border-b border-zinc-200 dark:border-zinc-800 pb-3">
-            <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
-            {subtitle ? <p className="text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p> : null}
+            <h3 className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">{title}</h3>
+            {subtitle ? <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p> : null}
         </div>
     );
 }
@@ -248,7 +290,6 @@ function Field({
 
 
 interface PageProps {
-    isGuest?: boolean;
     areas?: any[];
     provinces?: any[];
     boxTypes?: any[];
@@ -261,33 +302,25 @@ interface PageProps {
     draftBooking?: any;
     sender?: any;
     logistics?: any;
-    auth?: any;
+    activePromotions?: any[];
+    isGuest?: boolean;
 }
 
-export default function Book(props: PageProps = {}) {
-  const pageProps = (usePage()?.props as any) || {};
-  const isGuest = props.isGuest ?? (pageProps.isGuest ?? !pageProps.auth?.user);
+export default function Book(props?: PageProps) {
+  const pageProps = usePage().props as any;
+  const isGuest = Boolean(props?.isGuest || pageProps.isGuest || !pageProps.auth?.user);
+  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [] } = pageProps;
 
-  const auth = props.auth ?? pageProps.auth;
-  const areas = props.areas ?? pageProps.areas ?? [];
-  const provinces = props.provinces ?? pageProps.provinces ?? [];
-  const boxTypes = props.boxTypes ?? pageProps.boxTypes ?? [];
-  const boxPrices = props.boxPrices ?? pageProps.boxPrices ?? [];
-  const pickupZones = props.pickupZones ?? pageProps.pickupZones ?? [];
-  const suburbs = props.suburbs ?? pageProps.suburbs ?? [];
-  const savedRecipients = isGuest ? [] : (props.savedRecipients ?? pageProps.savedRecipients ?? []);
-  const cloneSource = isGuest ? null : (props.cloneSource ?? pageProps.cloneSource);
-  const editingBooking = isGuest ? null : (props.editingBooking ?? pageProps.editingBooking);
-  const draftBooking = isGuest ? null : (props.draftBooking ?? pageProps.draftBooking);
-  const sender = isGuest ? null : (props.sender ?? pageProps.sender);
-  const logistics = props.logistics ?? pageProps.logistics;
+  const depotAddress = logistics?.depotAddress || '6 Ivan St, Arundel QLD 4214';
+  const depotInstructions = logistics?.depotInstructions || '';
 
   const senderCountry = editingBooking?.sender?.country || sender?.country || 'Australia';
   const senderCountryCode = COUNTRIES.find(c => c.name === senderCountry)?.code || 'AU';
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isEditingSender, setIsEditingSender] = useState(isGuest || !sender || !sender.address);
-  const [isLocating, setIsLocating] = useState(false);
+  const [agreeTerms, setAgreeTerms] = useState(false);
+  const [, setIsLocating] = useState(false);
   const [draftId, setDraftId] = useState<number | null>(draftBooking?.id || null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [initializingPayment, setInitializingPayment] = useState(false);
@@ -302,7 +335,7 @@ export default function Book(props: PageProps = {}) {
       return null;
     }
 
-    const storageKey = isGuest ? 'guest_booking_initialization_key' : 'booking_initialization_key';
+    const storageKey = 'booking_initialization_key';
     const existingKey = localStorage.getItem(storageKey);
 
     if (existingKey) {
@@ -316,6 +349,11 @@ export default function Book(props: PageProps = {}) {
     return key;
   });
   const [paymentData, setPaymentData] = useState<any>(null);
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [validatingPromo, setValidatingPromo] = useState(false);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [promoSuccessMessage, setPromoSuccessMessage] = useState<string | null>(null);
   const hasAppliedDraftSource = useRef(false);
   const hasAppliedQueryDefaults = useRef(false);
   const hasAppliedCloneSource = useRef(false);
@@ -327,46 +365,6 @@ export default function Book(props: PageProps = {}) {
     { title: editingBooking ? 'Edit Booking' : 'Book a Pickup', href: editingBooking ? `/bookings/${editingBooking.id}/edit` : '/book' },
   ];
 
-  const getCurrentLocation = (type: 'sender' | 'recipient') => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser');
-
-      return;
-    }
-
-    setIsLocating(true);
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const coordsString = ` [GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}]`;
-
-          if (type === 'sender') {
-            setData((currentData: any) => ({
-              ...currentData,
-              latitude,
-              longitude,
-              notes: (currentData.notes || '') + (currentData.notes ? '\n' : '') + `Pickup GPS Coordinates: ${latitude}, ${longitude}`
-            }));
-            toast.success('Pickup GPS location captured!');
-          } else if (type === 'recipient') {
-            updatePrimaryRecipient('recipient_landmarks', (data.boxes[0].recipient_landmarks || '') + coordsString);
-            toast.success('Recipient GPS location captured!');
-          }
-        } catch (error) {
-          console.error('Error getting address from coordinates', error);
-        } finally {
-          setIsLocating(false);
-        }
-      },
-      (error) => {
-        setIsLocating(false);
-        toast.error(`Unable to retrieve your location: ${error.message}`);
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  };
   const formatTime = (time: string) => {
     try {
       const [hh, mm] = time.split(':');
@@ -396,6 +394,26 @@ export default function Book(props: PageProps = {}) {
       }
     }
     return '';
+  };
+
+  const handleSuburbChange = (suburbName: string, postcode?: string) => {
+    let detectedZoneId = '';
+    const found = (suburbs || []).find(
+      (s: any) => s.name?.toLowerCase() === suburbName.toLowerCase()
+    );
+
+    if (found?.pickup_zone_id) {
+      detectedZoneId = String(found.pickup_zone_id);
+    } else {
+      detectedZoneId = detectPickupZoneBySuburb(suburbName);
+    }
+
+    setData((prev: any) => ({
+      ...prev,
+      suburb: suburbName,
+      postcode: postcode || found?.postcode || prev.postcode,
+      pickup_zone_id: detectedZoneId || prev.pickup_zone_id,
+    }));
   };
 
   const getInitialValidDate = (zoneId?: string) => {
@@ -472,28 +490,27 @@ export default function Book(props: PageProps = {}) {
 
   const { data, setData, post, put, processing, errors, setError, clearErrors, transform } = useForm({
     // Sender Information
-    first_name: isGuest ? '' : (user ? (sender?.first_name || user.name?.split(' ')[0] || '') : ''),
-    last_name: isGuest ? '' : (user ? (sender?.last_name || user.name?.split(' ').slice(1).join(' ') || '') : ''),
-    email: isGuest ? '' : (user ? user.email : ''),
-    mobile: isGuest ? '' : (sender?.mobile || ''),
-    secondary_mobile: isGuest ? '' : (sender?.secondary_mobile || ''),
-    address: isGuest ? '' : (sender?.address || ''),
-    suburb: isGuest ? '' : (sender?.suburb || ''),
-    state: isGuest ? 'NSW' : (sender?.state || 'NSW'),
-    postcode: isGuest ? '' : (sender?.postcode || ''),
-    latitude: isGuest ? null : (sender?.latitude || null),
-    longitude: isGuest ? null : (sender?.longitude || null),
-    pickup_zone_id: isGuest ? '' : (sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || ''),
+    first_name: user ? user.name.split(' ')[0] : '',
+    last_name: user ? user.name.split(' ').slice(1).join(' ') : '',
+    email: user ? user.email : '',
+    mobile: sender?.mobile || '',
+    secondary_mobile: sender?.secondary_mobile || '',
+    address: sender?.address || '',
+    suburb: sender?.suburb || '',
+    state: sender?.state || 'NSW',
+    postcode: sender?.postcode || '',
+    latitude: sender?.latitude || null,
+    longitude: sender?.longitude || null,
+    pickup_zone_id: sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || '',
+    website: '',
 
     // Shared Booking Data
-    booking_type: editingBooking?.booking_type || draftBooking?.draft_data?.booking_type || 'home_pickup',
-    preferred_date: getInitialValidDate(isGuest ? '' : (sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || '')),
+    booking_type: 'home_pickup',
+    preferred_date: getInitialValidDate(sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || ''),
     payment_method: 'stripe',
     notes: '',
-
-    // Empty Box Delivery Request
-    request_empty_box: editingBooking?.empty_box_count > 0 || false,
-    empty_box_count: editingBooking?.empty_box_count || 1,
+    promo_code: '',
+    empty_box_count: editingBooking?.empty_box_count || 0,
     empty_box_fee: editingBooking?.empty_box_fee || 10.00,
 
     // Boxes & Their Recipients
@@ -514,7 +531,6 @@ export default function Book(props: PageProps = {}) {
         recipient_longitude: null,
         area_id: '',
         box_type_id: '',
-        is_door_to_door: false,
         is_custom_size: false,
         custom_length: '',
         custom_width: '',
@@ -523,26 +539,15 @@ export default function Book(props: PageProps = {}) {
     ],
   });
 
-  const handleSuburbChange = (suburbName: string, postcode?: string, suburbObj?: SuburbOption) => {
-    const foundSuburb = suburbObj || suburbs?.find((s: any) => (s?.name || s?.suburb || '').toLowerCase().trim() === suburbName.toLowerCase().trim());
-    const detectedZone = foundSuburb?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(suburbName);
-    const newPostcode = postcode || foundSuburb?.postcode || data.postcode;
-
-    setData((prev: any) => ({
-      ...prev,
-      suburb: suburbName,
-      postcode: newPostcode,
-      pickup_zone_id: detectedZone || prev.pickup_zone_id,
-      preferred_date: detectedZone ? getInitialValidDate(detectedZone) : prev.preferred_date,
-    }));
-    clearErrors('suburb');
-    if (newPostcode) clearErrors('postcode');
-    if (detectedZone) clearErrors('pickup_zone_id');
-  };
+  const detectedZoneId = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb || '');
+  const activeZoneId = data.pickup_zone_id || detectedZoneId;
+  const selectedZone = pickupZones?.find((z: any) => z.id.toString() === activeZoneId?.toString());
 
   const activeLogistics = useMemo(() => {
-    if (!data?.pickup_zone_id) return logistics;
-    const zone = pickupZones?.find((z: any) => z.id.toString() === data.pickup_zone_id.toString());
+    if (data.booking_type === 'drop_off') return logistics;
+    const currentZoneId = data.pickup_zone_id || detectedZoneId;
+    if (!currentZoneId) return logistics;
+    const zone = pickupZones?.find((z: any) => z.id.toString() === currentZoneId.toString());
     if (!zone) return logistics;
 
     return {
@@ -551,7 +556,23 @@ export default function Book(props: PageProps = {}) {
       blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : logistics.blackoutDates,
       leadTimeDays: zone.lead_time_days ?? logistics.leadTimeDays,
     };
-  }, [data?.pickup_zone_id, pickupZones, logistics]);
+  }, [data.booking_type, data?.pickup_zone_id, detectedZoneId, pickupZones, logistics]);
+
+  // Auto-sync pickup_zone_id with suburb when home_pickup is selected
+  useEffect(() => {
+    if (data.booking_type === 'drop_off') {
+      if (data.pickup_zone_id) {
+        setData('pickup_zone_id', '');
+      }
+      return;
+    }
+    if (data.suburb) {
+      const detected = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb);
+      if (detected && detected !== data.pickup_zone_id) {
+        setData('pickup_zone_id', detected);
+      }
+    }
+  }, [data.suburb, data.booking_type, pickupZones, sender?.pickup_zone_id]);
 
   useEffect(() => {
     if (!data.preferred_date || !activeLogistics) return;
@@ -632,21 +653,23 @@ export default function Book(props: PageProps = {}) {
   };
 
   const bookingDraftData = {
+    booking_type: data.booking_type,
     preferred_date: data.preferred_date,
     notes: data.notes,
-    boxes: data.boxes,
-    request_empty_box: data.request_empty_box,
     empty_box_count: data.empty_box_count,
+    empty_box_fee: data.empty_box_fee,
+    boxes: data.boxes,
   };
 
   const handleAutoSaveSetData = useCallback((updatedData: any) => {
     setData((currentData: any) => {
       const currentDraft = {
+        booking_type: currentData.booking_type,
         preferred_date: currentData.preferred_date,
         notes: currentData.notes,
-        boxes: currentData.boxes,
-        request_empty_box: currentData.request_empty_box,
         empty_box_count: currentData.empty_box_count,
+        empty_box_fee: currentData.empty_box_fee,
+        boxes: currentData.boxes,
       };
 
       const nextDraft = typeof updatedData === 'function'
@@ -663,6 +686,7 @@ export default function Book(props: PageProps = {}) {
   const hasMeaningfulDraftData = useCallback((draftData: typeof bookingDraftData) => {
     const hasSenderDetails = [
       data.mobile,
+      data.secondary_mobile,
       data.address,
       data.suburb,
       data.state,
@@ -681,6 +705,7 @@ export default function Book(props: PageProps = {}) {
         box?.recipient_province,
         box?.recipient_zip_code,
         box?.recipient_phone,
+        box?.recipient_secondary_phone,
         box?.recipient_landmarks,
         box?.area_id,
         box?.box_type_id,
@@ -688,7 +713,7 @@ export default function Book(props: PageProps = {}) {
     ));
 
     return hasSenderDetails || hasNotes || hasBoxDetails;
-  }, [data.mobile, data.address, data.suburb, data.state, data.postcode]);
+  }, [data.mobile, data.secondary_mobile, data.address, data.suburb, data.state, data.postcode]);
   const resolveDestinationAreaId = useCallback((provinceName?: string, cityName?: string) => {
     const normalize = (value?: string) => String(value ?? '').trim().toLowerCase();
 
@@ -707,7 +732,7 @@ export default function Book(props: PageProps = {}) {
 
   // Server-side auto-save callback
   const handleServerSave = useCallback(async (draftData: typeof bookingDraftData) => {
-    if (hasSubmittedBooking) {
+    if (isGuest || hasSubmittedBooking) {
       return;
     }
 
@@ -763,9 +788,9 @@ export default function Book(props: PageProps = {}) {
     } catch {
       // Silent failure — localStorage still has the data
     }
-  }, [draftId, hasSubmittedBooking, data.first_name, data.last_name, data.email, data.mobile, data.address, data.suburb, data.state, data.postcode, data.latitude, data.longitude, data.payment_method, hasMeaningfulDraftData]);
+  }, [draftId, hasSubmittedBooking, data.first_name, data.last_name, data.email, data.mobile, data.secondary_mobile, data.address, data.suburb, data.state, data.postcode, data.latitude, data.longitude, data.payment_method, hasMeaningfulDraftData]);
 
-  const canAutoSaveDraft = !isGuest && !editingBooking && !hasSubmittedBooking && !!user;
+  const canAutoSaveDraft = !isGuest && !editingBooking && !hasSubmittedBooking;
 
   const { clearSavedData, saveToServerNow } = useAutoSave<typeof bookingDraftData>(
     'booking_form_v2',
@@ -791,11 +816,12 @@ export default function Book(props: PageProps = {}) {
 
     setData((currentData: any) => ({
       ...currentData,
-      request_empty_box: dd.request_empty_box ?? currentData.request_empty_box,
-      empty_box_count: dd.empty_box_count ?? currentData.empty_box_count,
+      booking_type: dd.booking_type || currentData.booking_type,
       preferred_date: dd.preferred_date || currentData.preferred_date,
       payment_method: dd.payment_method || currentData.payment_method,
       notes: dd.notes || currentData.notes,
+      empty_box_count: dd.empty_box_count ?? currentData.empty_box_count,
+      empty_box_fee: dd.empty_box_fee ?? currentData.empty_box_fee,
       boxes: dd.boxes && dd.boxes.length > 0 ? dd.boxes : currentData.boxes,
     }));
   }, [draftBooking, editingBooking, cloneSource, setData]);
@@ -807,7 +833,8 @@ export default function Book(props: PageProps = {}) {
 
     hasAppliedEditSource.current = true;
     setIsEditingSender(false);
-    setData({
+    setData((prev: any) => ({
+      ...prev,
       first_name: editingBooking.sender?.first_name || sender?.first_name || '',
       last_name: editingBooking.sender?.last_name || sender?.last_name || '',
       email: editingBooking.sender?.email || sender?.email || '',
@@ -820,10 +847,13 @@ export default function Book(props: PageProps = {}) {
       latitude: editingBooking.sender?.latitude || sender?.latitude || null,
       longitude: editingBooking.sender?.longitude || sender?.longitude || null,
       pickup_zone_id: editingBooking.pickup_zone_id?.toString() || editingBooking.sender?.pickup_zone_id?.toString() || sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(editingBooking.sender?.suburb || sender?.suburb || '') || '',
-      preferred_date: editingBooking.preferred_date ? editingBooking.preferred_date.slice(0, 16) : '',
-      payment_method: editingBooking.payment_method || 'stripe',
+      booking_type: editingBooking.booking_type || prev.booking_type || 'home_pickup',
+      preferred_date: editingBooking.preferred_date ? editingBooking.preferred_date.slice(0, 16) : prev.preferred_date,
+      payment_method: editingBooking.payment_method || prev.payment_method || 'stripe',
       notes: editingBooking.notes || '',
-      boxes: editingBooking.boxes.map((box: any) => ({
+      empty_box_count: editingBooking.empty_box_count || 0,
+      empty_box_fee: editingBooking.empty_box_fee || 10.00,
+      boxes: (editingBooking.boxes && editingBooking.boxes.length > 0) ? editingBooking.boxes.map((box: any) => ({
         recipient_id: box.recipient_id || '',
         recipient_first_name: box.recipient?.first_name || box.recipient?.name?.split(' ')[0] || '',
         recipient_last_name: box.recipient?.last_name || box.recipient?.name?.split(' ').slice(1).join(' ') || '',
@@ -839,9 +869,13 @@ export default function Book(props: PageProps = {}) {
         recipient_longitude: box.recipient?.longitude || null,
         area_id: box.recipient?.area_id || '',
         box_type_id: box.box_type_id || '',
-      })),
-    });
-  }, [editingBooking, setData]);
+        is_custom_size: Boolean(box.is_custom_size),
+        custom_length: box.custom_length ?? '',
+        custom_width: box.custom_width ?? '',
+        custom_height: box.custom_height ?? '',
+      })) : prev.boxes,
+    }));
+  }, [editingBooking, sender, pickupZones, setData]);
 
   useEffect(() => {
     if (hasAppliedQueryDefaults.current) {
@@ -851,22 +885,24 @@ export default function Book(props: PageProps = {}) {
     const params = new URLSearchParams(window.location.search);
     const boxTypeId = params.get('box_type_id');
     const areaId = params.get('area_id');
-    const pickupZoneId = params.get('pickup_zone_id');
-    const province = params.get('province');
+    const suburbParam = params.get('suburb');
+    const pickupZoneIdParam = params.get('pickup_zone_id');
+    const provinceParam = params.get('province');
 
-    if (!boxTypeId && !areaId && !pickupZoneId && !province) {
+    if (!boxTypeId && !areaId && !suburbParam && !provinceParam) {
       return;
     }
 
     hasAppliedQueryDefaults.current = true;
-    setData((currentData) => ({
+    setData((currentData: any) => ({
       ...currentData,
-      pickup_zone_id: pickupZoneId || currentData.pickup_zone_id || '',
+      suburb: suburbParam || currentData.suburb || '',
+      pickup_zone_id: pickupZoneIdParam || currentData.pickup_zone_id || '',
       boxes: [{
-        ...(currentData.boxes[0] ?? {}),
-        box_type_id: boxTypeId || currentData.boxes[0]?.box_type_id || '',
-        area_id: areaId || currentData.boxes[0]?.area_id || '',
-        recipient_province: province || currentData.boxes[0]?.recipient_province || '',
+        ...(currentData.boxes?.[0] ?? {}),
+        box_type_id: boxTypeId || currentData.boxes?.[0]?.box_type_id || '',
+        area_id: areaId || currentData.boxes?.[0]?.area_id || '',
+        recipient_province: provinceParam || currentData.boxes?.[0]?.recipient_province || '',
       }],
     }));
   }, [setData]);
@@ -877,7 +913,7 @@ export default function Book(props: PageProps = {}) {
     }
 
     hasAppliedCloneSource.current = true;
-    setData((currentData) => ({
+    setData((currentData: any) => ({
       ...currentData,
       boxes: cloneSource.boxes.map((box: any) => ({
         recipient_id: box.recipient_id || '',
@@ -889,11 +925,16 @@ export default function Book(props: PageProps = {}) {
         recipient_province: box.recipient?.province || '',
         recipient_zip_code: box.recipient?.zip_code || '',
         recipient_phone: box.recipient?.phone_number || '',
+        recipient_secondary_phone: box.recipient?.secondary_phone_number || '',
         recipient_landmarks: box.recipient?.landmarks || '',
         recipient_latitude: box.recipient?.latitude || null,
         recipient_longitude: box.recipient?.longitude || null,
         area_id: box.recipient?.area_id || '',
         box_type_id: box.box_type_id || '',
+        is_custom_size: Boolean(box.is_custom_size),
+        custom_length: box.custom_length ?? '',
+        custom_width: box.custom_width ?? '',
+        custom_height: box.custom_height ?? '',
       })),
     }));
   }, [cloneSource, setData]);
@@ -947,6 +988,7 @@ export default function Book(props: PageProps = {}) {
           const expectedProvince = recipient.province || '';
           const expectedZipCode = recipient.zip_code || '';
           const expectedPhone = recipient.phone_number || '';
+          const expectedSecondaryPhone = recipient.secondary_phone_number || '';
           const expectedLandmarks = recipient.landmarks || '';
           const expectedLatitude = recipient.latitude || null;
           const expectedLongitude = recipient.longitude || null;
@@ -961,6 +1003,7 @@ export default function Book(props: PageProps = {}) {
             box.recipient_province !== expectedProvince ||
             box.recipient_zip_code !== expectedZipCode ||
             box.recipient_phone !== expectedPhone ||
+            box.recipient_secondary_phone !== expectedSecondaryPhone ||
             box.recipient_landmarks !== expectedLandmarks ||
             box.recipient_latitude !== expectedLatitude ||
             box.recipient_longitude !== expectedLongitude ||
@@ -978,6 +1021,7 @@ export default function Book(props: PageProps = {}) {
               recipient_province: expectedProvince,
               recipient_zip_code: expectedZipCode,
               recipient_phone: expectedPhone,
+              recipient_secondary_phone: expectedSecondaryPhone,
               recipient_landmarks: expectedLandmarks,
               recipient_latitude: expectedLatitude,
               recipient_longitude: expectedLongitude,
@@ -1002,7 +1046,6 @@ export default function Book(props: PageProps = {}) {
       {
         ...master,
         box_type_id: '',
-        is_door_to_door: master.is_door_to_door || false,
         is_custom_size: false,
         custom_length: '',
         custom_width: '',
@@ -1046,11 +1089,49 @@ export default function Book(props: PageProps = {}) {
     setData('boxes', newBoxes);
   };
 
+  const getCurrentLocation = (type: 'sender' | 'recipient') => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+
+      return;
+    }
+
+    setIsLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const coordsString = ` [GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}]`;
+
+          if (type === 'sender') {
+            setData((currentData: any) => ({
+              ...currentData,
+              notes: (currentData.notes || '') + (currentData.notes ? '\n' : '') + `Pickup GPS Coordinates: ${latitude}, ${longitude}`
+            }));
+            alert(`Location captured! Coordinates added to notes.`);
+          } else if (type === 'recipient') {
+            updatePrimaryRecipient('recipient_landmarks', (data.boxes?.[0]?.recipient_landmarks || '') + coordsString);
+          }
+        } catch (error) {
+          console.error('Error getting address from coordinates', error);
+        } finally {
+          setIsLocating(false);
+        }
+      },
+      (error) => {
+        setIsLocating(false);
+        alert(`Unable to retrieve your location: ${error.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+    );
+  };
+
   const applySavedRecipient = (recId: string) => {
     const rec = savedRecipients?.find((r: any) => r.id.toString() === recId) as any;
 
     if (!rec) {
-      const newBoxes = data.boxes.map(box => ({ ...box, recipient_id: '', recipient_first_name: '', recipient_last_name: '', recipient_email: '', recipient_address: '', recipient_city: '', recipient_province: '', recipient_zip_code: '', recipient_phone: '', recipient_landmarks: '', recipient_latitude: null, recipient_longitude: null, area_id: '' }));
+      const newBoxes = data.boxes.map(box => ({ ...box, recipient_id: '', recipient_first_name: '', recipient_last_name: '', recipient_email: '', recipient_address: '', recipient_city: '', recipient_province: '', recipient_zip_code: '', recipient_phone: '', recipient_secondary_phone: '', recipient_landmarks: '', recipient_latitude: null, recipient_longitude: null, area_id: '' }));
       setData('boxes', newBoxes);
 
       return;
@@ -1059,14 +1140,15 @@ export default function Book(props: PageProps = {}) {
     const newBoxes = data.boxes.map(box => ({
       ...box,
       recipient_id: rec.id,
-      recipient_first_name: rec.first_name || rec.name?.split(' ')[0] || '',
-      recipient_last_name: rec.last_name || rec.name?.split(' ').slice(1).join(' ') || '',
+      recipient_first_name: rec.first_name || (rec.name ? rec.name.split(' ')[0] : ''),
+      recipient_last_name: rec.last_name || (rec.name ? rec.name.split(' ').slice(1).join(' ') : ''),
       recipient_email: rec.email || '',
       recipient_address: rec.address,
       recipient_city: rec.city,
       recipient_province: rec.province,
       recipient_zip_code: rec.zip_code,
       recipient_phone: rec.phone_number || '',
+      recipient_secondary_phone: rec.secondary_phone_number || '',
       recipient_landmarks: rec.landmarks || '',
       recipient_latitude: rec.latitude,
       recipient_longitude: rec.longitude,
@@ -1079,30 +1161,22 @@ export default function Book(props: PageProps = {}) {
     const customCbmType = boxTypes?.find((bt: any) => bt.name?.toLowerCase().includes('cbm') || bt.name?.toLowerCase() === 'custom box');
     let rate = 0;
 
-    if (customCbmType) {
-        const exactPriceRecord = data.pickup_zone_id ? boxPrices?.find(
+    if (customCbmType && data.pickup_zone_id) {
+        const exactPriceRecord = boxPrices?.find(
             (p: any) => p.area_id.toString() === areaId.toString() && p.box_type_id.toString() === customCbmType.id.toString() && p.pickup_zone_id?.toString() === data.pickup_zone_id?.toString()
-        ) : null;
-        const fallbackPriceRecord = boxPrices?.find(
-            (p: any) => p.area_id.toString() === areaId.toString() && p.box_type_id.toString() === customCbmType.id.toString() && !p.pickup_zone_id
         );
-        const anyZonePriceRecord = boxPrices?.find(
-            (p: any) => p.area_id.toString() === areaId.toString() && p.box_type_id.toString() === customCbmType.id.toString()
-        );
-        const record = exactPriceRecord || fallbackPriceRecord || anyZonePriceRecord;
-        if (record) {
-            rate = parseFloat(record.price);
+        if (exactPriceRecord) {
+            rate = parseFloat(exactPriceRecord.price);
         }
     }
+
+    // Fallback removed as cbm_rate is no longer on the area model
 
     return rate;
   };
 
   const getBoxPrice = (box: any) => {
-    const selectedArea = areas?.find((a: any) => a.id.toString() === box.area_id?.toString());
-    const doorToDoorFee = (box.is_door_to_door && selectedArea) ? parseFloat(selectedArea.door_to_door_fee || '0') : 0;
-
-    // Custom size path: CBM × area's CBM rate + doorToDoorFee
+    // Custom size path: CBM × area's CBM rate
     if (box.is_custom_size) {
       const l = parseFloat(box.custom_length || '0');
       const w = parseFloat(box.custom_width  || '0');
@@ -1120,13 +1194,13 @@ export default function Book(props: PageProps = {}) {
 
       const cbm = (l * w * h) / 1_000_000;
 
-      return Math.round(cbm * cbmRate * 100) / 100 + doorToDoorFee;
+      return Math.round(cbm * cbmRate * 100) / 100;
     }
 
-    // Preset box path: price from area × box_type matrix + doorToDoorFee
+    // Preset box path: price from area × box_type matrix
     if (!box.area_id || !box.box_type_id) {
-      return 0;
-    }
+return 0;
+}
 
     const exactPriceRecord = boxPrices?.find(
       (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === box.box_type_id.toString() && p.pickup_zone_id?.toString() === data.pickup_zone_id?.toString()
@@ -1136,13 +1210,9 @@ export default function Book(props: PageProps = {}) {
       (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === box.box_type_id.toString() && !p.pickup_zone_id
     );
 
-    const anyZonePriceRecord = boxPrices?.find(
-      (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === box.box_type_id.toString()
-    );
+    const priceRecord = exactPriceRecord || fallbackPriceRecord;
 
-    const priceRecord = exactPriceRecord || fallbackPriceRecord || anyZonePriceRecord;
-
-    return priceRecord ? parseFloat(priceRecord.price) + doorToDoorFee : 0;
+    return priceRecord ? parseFloat(priceRecord.price) : 0;
   };
 
   const sanitizeRecipientId = (recipientId: any) => {
@@ -1155,9 +1225,164 @@ export default function Book(props: PageProps = {}) {
     return isValidRecipient ? recipientId : null;
   };
 
-  const emptyBoxTotal = data.request_empty_box ? (Number(data.empty_box_count) || 1) * (Number(data.empty_box_fee) || 10) : 0;
-  const boxesTotal = data.boxes.reduce((acc: number, box: any) => acc + getBoxPrice(box), 0);
-  const totalEstimate = boxesTotal + emptyBoxTotal;
+  const cargoSubtotal = data.boxes.reduce((acc, box) => acc + getBoxPrice(box), 0);
+  const emptyBoxTotal = (Number(data.empty_box_count) || 0) * (Number(data.empty_box_fee) || 10.00);
+  const totalEstimate = cargoSubtotal + emptyBoxTotal;
+  const finalEstimate = Math.max(0, totalEstimate - discountAmount);
+
+  const senderStep1Summary = useMemo(() => {
+    const isDropOff = data.booking_type === 'drop_off';
+    const methodStr = isDropOff ? 'Drop-Off' : 'Pick-Up';
+    const name = `${data.first_name || ''} ${data.last_name || ''}`.trim();
+    let dateStr = '';
+    if (data.preferred_date) {
+      try {
+        dateStr = format(new Date(data.preferred_date), 'MMM d');
+      } catch {
+        dateStr = data.preferred_date.slice(0, 10);
+      }
+    }
+    if (name && dateStr) return `${methodStr} • ${name} • ${dateStr}`;
+    if (name) return `${methodStr} • ${name}`;
+    if (dateStr) return `${methodStr} ${dateStr}`;
+    return methodStr;
+  }, [data.booking_type, data.first_name, data.last_name, data.preferred_date]);
+
+  const senderStep2Summary = useMemo(() => {
+    const count = data.boxes.length;
+    const dest = data.boxes[0]?.recipient_city || data.boxes[0]?.recipient_province;
+    const emptyCount = Number(data.empty_box_count) || 0;
+    const emptyPart = emptyCount > 0 ? ` + ${emptyCount} Empty` : '';
+    if (dest) {
+      return `${count} ${count === 1 ? 'Box' : 'Boxes'}${emptyPart} • ${dest}`;
+    }
+    return `${count} ${count === 1 ? 'Box' : 'Boxes'}${emptyPart}`;
+  }, [data.boxes, data.empty_box_count]);
+
+  const senderStep3Summary = useMemo(() => {
+    if (finalEstimate > 0) {
+      return `$${finalEstimate.toFixed(0)} AUD${discountAmount > 0 ? ` (-$${discountAmount.toFixed(0)})` : ''}`;
+    }
+    return undefined;
+  }, [finalEstimate, discountAmount]);
+
+  const getPromoBadge = (promo: any) => {
+    switch (promo.type) {
+      case 'percentage_discount':
+        return `${Number(promo.value)}% OFF`;
+      case 'fixed_discount':
+        return `$${Number(promo.value).toFixed(0)} OFF`;
+      case 'per_box_discount':
+        return `$${Number(promo.value).toFixed(0)}/Box OFF`;
+      case 'waive_empty_box_fee':
+        return 'FREE BOX FEE';
+      case 'buy_x_get_y_free':
+        return `BUY ${promo.buy_quantity} GET ${promo.free_quantity} FREE`;
+      default:
+        return 'PROMO';
+    }
+  };
+
+  const getPromoLifespan = (promo: any) => {
+    if (!promo.valid_to) {
+      return 'Limited time';
+    }
+
+    try {
+      const endDate = new Date(promo.valid_to);
+      const now = new Date();
+      const diffTime = endDate.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays < 0) {
+        return 'Expired';
+      }
+      if (diffDays === 0) {
+        return 'Ends today!';
+      }
+      if (diffDays === 1) {
+        return 'Ends tomorrow!';
+      }
+      if (diffDays <= 7) {
+        return `Ends in ${diffDays}d!`;
+      }
+      return `Valid until ${format(endDate, 'MMM d')}`;
+    } catch (e) {
+      return 'Active';
+    }
+  };
+
+  const applyPromoCode = async (codeToUse?: string) => {
+    const targetCode = (codeToUse !== undefined ? codeToUse : promoCodeInput).trim().toUpperCase();
+    if (!targetCode) return;
+    setPromoCodeInput(targetCode);
+    setValidatingPromo(true);
+    setPromoError(null);
+
+    const getXsrfToken = () => {
+        const match = document.cookie.match(new RegExp('(^|;\\s*)(XSRF-TOKEN)=([^;]*)'));
+        return match ? decodeURIComponent(match[3]) : '';
+    };
+
+    try {
+        const response = await fetch('/api/promotions/validate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-XSRF-TOKEN': getXsrfToken(),
+            },
+            body: JSON.stringify({
+                code: targetCode,
+                promo_code: targetCode,
+                boxes: data.boxes,
+                subtotal: cargoSubtotal,
+                empty_box_count: data.empty_box_count,
+                empty_box_fee: data.empty_box_fee || 10.00,
+            }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.valid) {
+            setDiscountAmount(result.discount_amount);
+            setPromoSuccessMessage(`Promo applied: Saved $${result.discount_amount.toFixed(2)}`);
+            if (data.promo_code !== targetCode) {
+                setData('promo_code', targetCode);
+            }
+        } else {
+            setDiscountAmount(0);
+            setData('promo_code', '');
+            setPromoError(result.message || 'Invalid promo code');
+            setPromoCodeInput('');
+        }
+    } catch (e) {
+        setDiscountAmount(0);
+        setData('promo_code', '');
+        setPromoError('Error validating promo code');
+    } finally {
+        setValidatingPromo(false);
+    }
+  };
+
+  // Auto-revalidate/calculate discount if promo_code is restored or subtotal changes
+  useEffect(() => {
+    if (data.promo_code) {
+      setPromoCodeInput(data.promo_code);
+      applyPromoCode(data.promo_code);
+    } else if (discountAmount > 0) {
+      setDiscountAmount(0);
+      setPromoSuccessMessage(null);
+    }
+  }, [data.promo_code, totalEstimate]);
+
+  const removePromoCode = () => {
+      setPromoCodeInput('');
+      setData('promo_code', '');
+      setDiscountAmount(0);
+      setPromoSuccessMessage(null);
+      setPromoError(null);
+  };
 
   const getFriendlyError = (key: string, message: string) => {
     let friendlyKey = key;
@@ -1226,16 +1451,17 @@ field = 'recipient mobile number';
     let hasErrors = false;
 
     if (step === 1) {
+      const isDropOff = data.booking_type === 'drop_off';
       const requiredFields: Record<string, string> = {
         first_name: 'First Name',
         last_name: 'Last Name',
         email: 'Email Address',
         mobile: 'Contact Phone',
-        address: 'Pickup Address',
+        address: isDropOff ? 'Sender Address' : 'Pickup Address',
         suburb: 'Suburb',
         state: 'State',
         postcode: 'Postcode',
-        preferred_date: 'Preferred Pickup Time',
+        preferred_date: isDropOff ? 'Preferred Drop-Off Date' : 'Preferred Pickup Time',
       };
       Object.entries(requiredFields).forEach(([field, label]) => {
         if (!data[field as keyof typeof data]) {
@@ -1253,24 +1479,24 @@ field = 'recipient mobile number';
         }
       }
 
-      // Thorough Pickup Schedule Validation
+      // Thorough Schedule Validation
       if (data.preferred_date) {
         const selectedDate = new Date(data.preferred_date);
         const now = new Date();
 
         if (selectedDate < now) {
-            setError('preferred_date', 'Pickup date cannot be in the past');
+            setError('preferred_date', isDropOff ? 'Drop-off date cannot be in the past' : 'Pickup date cannot be in the past');
             hasErrors = true;
-        } else if (logistics) {
+        } else if (activeLogistics) {
             // Lead time check
-            const leadTimeDate = new Date(Date.now() + 86400000 * (logistics.leadTimeDays || 2));
+            const leadTimeDate = new Date(Date.now() + 86400000 * (activeLogistics.leadTimeDays || 2));
             leadTimeDate.setHours(0, 0, 0, 0);
 
             const checkDate = new Date(selectedDate);
             checkDate.setHours(0, 0, 0, 0);
 
             if (checkDate < leadTimeDate) {
-                setError('preferred_date', `Minimum ${logistics.leadTimeDays || 2} days lead time required`);
+                setError('preferred_date', `Minimum ${activeLogistics.leadTimeDays || 2} days lead time required`);
                 hasErrors = true;
             }
 
@@ -1279,13 +1505,13 @@ field = 'recipient mobile number';
             const offset = selectedDate.getTimezoneOffset() * 60000;
             const localDateStr = new Date(selectedDate.getTime() - offset).toISOString().slice(0, 10);
 
-            if (logistics.blackoutDates?.includes(localDateStr)) {
+            if (activeLogistics.blackoutDates?.includes(localDateStr)) {
               setError('preferred_date', 'The selected date is an unavailable blackout date');
               hasErrors = true;
             }
 
             // Pickup windows check
-            const windows = logistics.pickupWindows || [];
+            const windows = activeLogistics.pickupWindows || [];
 
             if (windows.length > 0) {
                 const dayOfWeek = selectedDate.getDay();
@@ -1302,6 +1528,22 @@ field = 'recipient mobile number';
                     hasErrors = true;
                 }
             }
+        }
+      }
+
+      if (data.mobile) {
+        const phoneError = validatePhone(data.mobile, 'Contact Phone', senderCountryCode);
+        if (phoneError) {
+          setError('mobile', phoneError);
+          hasErrors = true;
+        }
+      }
+
+      if (data.secondary_mobile) {
+        const secondaryPhoneError = validatePhone(data.secondary_mobile, 'Secondary Phone Number', senderCountryCode);
+        if (secondaryPhoneError) {
+          setError('secondary_mobile', secondaryPhoneError);
+          hasErrors = true;
         }
       }
 
@@ -1347,6 +1589,15 @@ if (step === 2) {
 
             if (phoneError) {
                 setError(`boxes.0.recipient_phone` as any, phoneError);
+                hasErrors = true;
+            }
+        }
+
+        if (!primaryBox.recipient_id && primaryBox.recipient_secondary_phone) {
+            const secondaryPhoneError = validatePhone(primaryBox.recipient_secondary_phone, 'Secondary Contact Phone', 'PH');
+
+            if (secondaryPhoneError) {
+                setError(`boxes.0.recipient_secondary_phone` as any, secondaryPhoneError);
                 hasErrors = true;
             }
         }
@@ -1406,8 +1657,8 @@ if (step === 2) {
         setTimeout(() => {
           const firstError = document.querySelector('.text-red-600');
 
-          if (firstError && typeof (firstError as any).scrollIntoView === 'function') {
-            (firstError as any).scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (firstError) {
+            firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
         }, 100);
 
@@ -1425,18 +1676,14 @@ if (step === 2) {
     // Step 1 -> Step 2
     if (currentStep === 1) {
       setCurrentStep(2);
-      if (typeof window.scrollTo === 'function') {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
     // Step 2 -> Step 3 (Review Details)
     if (currentStep === 2) {
       setCurrentStep(3);
-      if (typeof window.scrollTo === 'function') {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -1461,6 +1708,11 @@ if (step === 2) {
             return;
         }
 
+        if (isGuest && !agreeTerms) {
+            toast.error('Please accept the Terms of Service to proceed to payment.');
+            return;
+        }
+
         setInitializingPayment(true);
         setHasSubmittedBooking(true);
         let submittedBookingId: number | null = null;
@@ -1470,8 +1722,8 @@ if (step === 2) {
                 const match = document.cookie.match(new RegExp('(^|;\\s*)(XSRF-TOKEN)=([^;]*)'));
                 return match ? decodeURIComponent(match[3]) : '';
             };
-            const endpoint = isGuest ? '/guest/bookings/initialize' : '/bookings/initialize';
-            const response = await fetch(endpoint, {
+            const initEndpoint = isGuest ? '/guest/bookings/initialize' : '/bookings/initialize';
+            const response = await fetch(initEndpoint, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -1487,7 +1739,7 @@ if (step === 2) {
                     boxes: data.boxes.map((box: any) => ({
                       ...box,
                       recipient_phone: (!box.recipient_id && box.recipient_phone) ? box.recipient_phone.replace(/[\s\-\(\)]/g, '') : box.recipient_phone,
-                      recipient_secondary_phone: (!box.recipient_id && box.recipient_secondary_phone) ? box.recipient_secondary_phone.replace(/[\s\-\(\)]/g, '') : (box.recipient_secondary_phone || ''),
+                      recipient_secondary_phone: (!box.recipient_id && box.recipient_secondary_phone) ? box.recipient_secondary_phone.replace(/[\s\-\(\)]/g, '') : box.recipient_secondary_phone,
                       recipient_id: sanitizeRecipientId(box.recipient_id),
                     })),
                     draft_id: draftId,
@@ -1522,11 +1774,7 @@ if (step === 2) {
             setDraftId(null);
             setPaymentData(result);
             clearSavedData();
-            if (result.guest_token) {
-                localStorage.setItem('guest_token', result.guest_token);
-            }
-            const storageKey = isGuest ? 'guest_booking_initialization_key' : 'booking_initialization_key';
-            localStorage.removeItem(storageKey);
+            localStorage.removeItem('booking_initialization_key');
             setCurrentStep(4);
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (error: any) {
@@ -1552,6 +1800,11 @@ if (step === 2) {
   };
 
   const handleSaveDraft = async () => {
+    if (isGuest) {
+      toast.info('Shipment draft is preserved in your current browser.');
+      return;
+    }
+
     if (hasSubmittedBooking) {
       return;
     }
@@ -1568,6 +1821,11 @@ if (step === 2) {
 
   const submit = (e: React.SyntheticEvent) => {
     e.preventDefault();
+
+    if (currentStep < 4) {
+      nextStep();
+      return;
+    }
 
     const isStepOneValid = validateStep(1);
     const isStepTwoValid = validateStep(2);
@@ -1589,7 +1847,7 @@ if (step === 2) {
       boxes: data.boxes.map(box => ({
         ...box,
         recipient_phone: (!box.recipient_id && box.recipient_phone) ? box.recipient_phone.replace(/[\s\-\(\)]/g, '') : box.recipient_phone,
-        recipient_secondary_phone: (!box.recipient_id && box.recipient_secondary_phone) ? box.recipient_secondary_phone.replace(/[\s\-\(\)]/g, '') : (box.recipient_secondary_phone || ''),
+        recipient_secondary_phone: (!box.recipient_id && box.recipient_secondary_phone) ? box.recipient_secondary_phone.replace(/[\s\-\(\)]/g, '') : box.recipient_secondary_phone,
         recipient_id: sanitizeRecipientId(box.recipient_id),
       })),
     };
@@ -1609,9 +1867,7 @@ if (step === 2) {
       },
     };
 
-    if (isGuest) {
-        post('/guest/bookings', submitOptions);
-    } else if (editingBooking) {
+    if (editingBooking) {
         put(`/bookings/${editingBooking.id}`, submitOptions);
     } else if (draftId) {
         // Submit the draft — promotes it to pending
@@ -1621,38 +1877,126 @@ if (step === 2) {
     }
   };
 
-
-
-  const LayoutComponent = isGuest ? MarketingLayout : AppLayout;
-  const layoutProps = isGuest ? {} : { breadcrumbs };
+  const Layout = isGuest ? MarketingLayout : AppLayout;
+  const layoutProps = isGuest ? { hideLogin: false, hideBookGuest: true } : { breadcrumbs };
 
   return (
-    <LayoutComponent {...layoutProps}>
-      <Head title={editingBooking ? 'Edit Booking' : isGuest ? 'Book Balikbayan Box Pickup' : 'Book a Pickup'} />
+    <Layout {...layoutProps}>
+      <Head title={editingBooking ? 'Edit Booking' : isGuest ? 'Book a Balikbayan Box (Guest)' : 'Book a Pickup'} />
 
       <div className="mx-auto max-w-7xl p-4 md:p-8 space-y-4 md:space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <Heading
-                    eyebrow={isGuest ? "Send Balikbayan Box" : "Booking Form"}
-                    title={editingBooking ? `Edit Booking: ${editingBooking.reference_number}` : isGuest ? "Book a Pickup" : "New Booking"}
-                    description={editingBooking ? 'Update the details for your active shipment.' : isGuest ? 'Send a box to the Philippines with door-to-door tracking.' : 'Enter your booking details and cargo information to schedule a pickup.'}
-                />
-                {!isGuest && !editingBooking && (
-                    <button
-                        type="button"
-                        onClick={handleSaveDraft}
-                        disabled={savingDraft}
-                        className="inline-flex items-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 h-10 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all disabled:opacity-50"
-                    >
-                        <Save className={`size-4 ${savingDraft ? 'animate-spin' : ''}`} />
-                        {savingDraft ? 'Saving...' : 'Save Draft'}
-                    </button>
+        {/* Mobile Header (md:hidden) */}
+        <div className="md:hidden space-y-1 pt-1 pb-1">
+            <p className="text-[11px] font-extrabold uppercase tracking-widest text-[#B24A2B] dark:text-amber-500">
+                SEND BALIKBAYAN BOX
+            </p>
+            <div className="flex items-center justify-between gap-2">
+                <h1 className="font-serif text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {editingBooking ? `Edit Booking` : 'Book a Pickup'}
+                </h1>
+                {canAutoSaveDraft && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 shrink-0">
+                        <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Auto-saved
+                    </span>
                 )}
             </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                Send a box to the Philippines with door-to-door tracking.
+            </p>
+        </div>
 
-            <StepIndicator step={currentStep} onStepClick={setCurrentStep} />
+        {/* Mobile Step Indicator Card (md:hidden) */}
+        <div className="md:hidden rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-2xs">
+            <StepIndicator
+                step={currentStep}
+                isGuest={isGuest}
+                onStepClick={(s) => {
+                    if (s < currentStep) {
+                        setCurrentStep(s);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                }}
+                step1Summary={senderStep1Summary}
+                step2Summary={senderStep2Summary}
+                step3Summary={senderStep3Summary}
+                mode="mobile"
+            />
+        </div>
 
-            <div className="space-y-8">
+        {/* Desktop Hero Header & Steps Card (hidden md:block) */}
+        <div className="hidden md:block rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
+            {/* Top Row: Title, Description & Action Badges */}
+            <div className="p-5 sm:p-6 pb-4 sm:pb-5">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    {/* Left: Back/Breadcrumb & Title */}
+                    <div className="flex items-center gap-3.5">
+                        <Link
+                            href={isGuest ? '/' : '/dashboard'}
+                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors shadow-2xs"
+                            title={isGuest ? "Back to home" : "Back to dashboard"}
+                        >
+                            <ArrowLeft className="size-4" />
+                        </Link>
+                        <div>
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                                <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                                    {editingBooking ? `Edit Booking: ${editingBooking.reference_number}` : 'Book a Balikbayan Box'}
+                                </h1>
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-brand-warm/30 dark:bg-brand-rust/30 text-brand-rust dark:text-brand-warm text-[10px] font-extrabold uppercase tracking-wide border border-brand-rust/15">
+                                    {editingBooking ? 'Edit Mode' : isGuest ? 'Quick Guest Booking' : 'Sender Portal'}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right: Autosave Status & Save Draft */}
+                    {(canAutoSaveDraft || (!editingBooking && !isGuest)) && (
+                        <div className="flex items-center gap-2.5 self-start lg:self-center flex-wrap">
+                            {canAutoSaveDraft && (
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    <span>Auto-saved</span>
+                                </div>
+                            )}
+
+                            {!editingBooking && !isGuest && (
+                                <button
+                                    type="button"
+                                    onClick={handleSaveDraft}
+                                    disabled={savingDraft}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 transition-colors disabled:opacity-50 cursor-pointer shadow-2xs"
+                                    title="Save current draft"
+                                >
+                                    <Save className={cn("size-3.5", savingDraft && "animate-spin")} />
+                                    <span>{savingDraft ? 'Saving...' : 'Save Draft'}</span>
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Integrated Step Indicator Ribbon */}
+            <div className="border-t border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/60 p-2 sm:px-4 sm:py-2.5">
+                <StepIndicator
+                    step={currentStep}
+                    isGuest={isGuest}
+                    onStepClick={(s) => {
+                        if (s < currentStep) {
+                            setCurrentStep(s);
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }
+                    }}
+                    step1Summary={senderStep1Summary}
+                    step2Summary={senderStep2Summary}
+                    step3Summary={senderStep3Summary}
+                    mode="desktop"
+                />
+            </div>
+        </div>
+
+        <div className="space-y-8">
 
             {/* STEP 1: SENDER & PICKUP DETAILS */}
             {currentStep === 1 && (
@@ -1660,7 +2004,7 @@ if (step === 2) {
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-3">
                     <SectionHeader title="Sender Information" subtitle="Personal and contact details" />
-                    {!isGuest && data.address && sender?.address && (
+                    {data.address && !isGuest && (
                       <button
                         type="button"
                         onClick={() => setIsEditingSender(!isEditingSender)}
@@ -1671,7 +2015,7 @@ if (step === 2) {
                     )}
                   </div>
 
-                  {!isGuest && sender?.address && !isEditingSender ? (
+                  {!isEditingSender && data.address && !isGuest ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <div className="space-y-1">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Full Name</p>
@@ -1681,7 +2025,7 @@ if (step === 2) {
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Contact</p>
                         <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{data.mobile}</p>
                         {data.secondary_mobile && (
-                          <p className="text-xs text-zinc-600 dark:text-zinc-400 font-mono">Alt: {data.secondary_mobile}</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-300 font-mono">Alt: {data.secondary_mobile}</p>
                         )}
                         <p className="text-xs text-zinc-500 dark:text-zinc-400">{data.email}</p>
                       </div>
@@ -1692,233 +2036,255 @@ if (step === 2) {
                         </p>
                       </div>
                     </div>
-                  ) : !isGuest && sender?.address && isEditingSender ? (
+                  ) : (
                     <div className="grid grid-cols-1 gap-4">
+                      {/* Hidden honeypot for bots */}
+                      <input
+                        type="text"
+                        name="website"
+                        className="hidden"
+                        tabIndex={-1}
+                        autoComplete="off"
+                        value={data.website || ''}
+                        onChange={(e) => setData('website', e.target.value)}
+                      />
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field label="First Name" required error={errors.first_name}>
-                          <input title="First Name" placeholder="e.g. Maria" className={baseInputClass} value={data.first_name || ''} onChange={e => { setData('first_name', e.target.value); clearErrors('first_name'); }} />
+                          <input title="First Name" placeholder="e.g. Maria" className={baseInputClass} value={data.first_name || ''} onChange={e => setData('first_name', e.target.value)} />
                         </Field>
                         <Field label="Last Name" required error={errors.last_name}>
-                          <input title="Last Name" placeholder="e.g. Santos" className={baseInputClass} value={data.last_name || ''} onChange={e => { setData('last_name', e.target.value); clearErrors('last_name'); }} />
+                          <input title="Last Name" placeholder="e.g. Santos" className={baseInputClass} value={data.last_name || ''} onChange={e => setData('last_name', e.target.value)} />
                         </Field>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <Field label="Contact Phone" required error={errors.mobile}>
-                          <PhoneInput value={data.mobile || ''} onChange={val => { setData('mobile', val); clearErrors('mobile'); }} defaultCountryCode={senderCountryCode} />
+                          <PhoneInput value={data.mobile || ''} onChange={val => setData('mobile', val)} defaultCountryCode={senderCountryCode} />
                         </Field>
-                        <Field label="Secondary Phone" error={errors.secondary_mobile} hint="Optional">
+                        <Field label="Secondary Phone" hint="Optional" error={errors.secondary_mobile}>
                           <PhoneInput value={data.secondary_mobile || ''} onChange={val => setData('secondary_mobile', val)} defaultCountryCode={senderCountryCode} />
                         </Field>
-                        <Field label="Email Address" required error={errors.email}>
-                          <input title="Email Address" placeholder="you@example.com" className={baseInputClass} type="email" value={data.email || ''} onChange={e => { setData('email', e.target.value); clearErrors('email'); }} />
-                        </Field>
+                        <div className="md:col-span-2">
+                          <Field label="Email Address" required error={errors.email}>
+                            <input title="Email Address" placeholder="e.g. maria.santos@gmail.com" className={baseInputClass} type="email" value={data.email || ''} onChange={e => setData('email', e.target.value)} />
+                          </Field>
+                        </div>
                       </div>
 
                       <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 mt-2">
-                        <div className="flex flex-col gap-2">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Pickup Address & Location</p>
-                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                            {data.address}, {data.suburb}, {data.state} {data.postcode}
-                          </p>
-                          <div className="mt-2 rounded-xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/50 dark:bg-amber-950/20 p-4 flex items-start gap-3">
-                            <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                            <div className="text-xs text-amber-800 dark:text-amber-300">
-                              <span className="font-semibold">Need to use a different pickup address?</span> To avoid data confusion, pickup address and GPS location coordinates must be updated in your settings. Please go to <a href="/settings/profile" className="underline font-bold hover:text-amber-950 dark:hover:text-amber-200">Settings</a> to change your pickup address or add a new pickup address.
+                        {isGuest || !sender?.address ? (
+                          <div className="space-y-4">
+                            <div>
+                              <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1">Pickup Address in Australia</p>
+                              <p className="text-xs text-zinc-400 dark:text-zinc-500">Provide the collection address where our driver will inspect and pick up your balikbayan box.</p>
+                            </div>
+
+                            <Field label="Street Address" required error={errors.address} hint="Unit / House number, street name">
+                              <input
+                                title="Street Address"
+                                placeholder="e.g. Unit 3, 42 King Street"
+                                className={baseInputClass}
+                                value={data.address || ''}
+                                onChange={(e) => setData('address', e.target.value)}
+                              />
+                            </Field>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              <div className="md:col-span-1">
+                                <Field label="Suburb" required error={errors.suburb}>
+                                  <SuburbSelect
+                                    value={data.suburb || ''}
+                                    onChange={handleSuburbChange}
+                                    suburbs={suburbs}
+                                    placeholder="Select suburb..."
+                                  />
+                                </Field>
+                              </div>
+
+                              <div>
+                                <Field label="State" required error={errors.state}>
+                                  <select
+                                    className={cn(baseInputClass)}
+                                    value={data.state || 'NSW'}
+                                    onChange={(e) => setData('state', e.target.value)}
+                                  >
+                                    {AUSTRALIAN_STATES.map((st) => (
+                                      <option key={st} value={st}>
+                                        {st}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </Field>
+                              </div>
+
+                              <div>
+                                <Field label="Postcode" required error={errors.postcode}>
+                                  <input
+                                    title="Postcode"
+                                    placeholder="e.g. 2000"
+                                    maxLength={4}
+                                    className={baseInputClass}
+                                    value={data.postcode || ''}
+                                    onChange={(e) => setData('postcode', e.target.value)}
+                                  />
+                                </Field>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Guest or Sender without profile address: Full editable form */
-                    <div className="grid grid-cols-1 gap-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <Field label="First Name" required error={errors.first_name}>
-                          <input title="First Name" placeholder="e.g. Maria" className={baseInputClass} value={data.first_name || ''} onChange={e => { setData('first_name', e.target.value); clearErrors('first_name'); }} />
-                        </Field>
-                        <Field label="Last Name" required error={errors.last_name}>
-                          <input title="Last Name" placeholder="e.g. Santos" className={baseInputClass} value={data.last_name || ''} onChange={e => { setData('last_name', e.target.value); clearErrors('last_name'); }} />
-                        </Field>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <Field label="Contact Phone" required error={errors.mobile}>
-                          <PhoneInput value={data.mobile || ''} onChange={val => { setData('mobile', val); clearErrors('mobile'); }} defaultCountryCode={senderCountryCode} />
-                        </Field>
-                        <Field label="Secondary Phone" error={errors.secondary_mobile} hint="Optional">
-                          <PhoneInput value={data.secondary_mobile || ''} onChange={val => setData('secondary_mobile', val)} defaultCountryCode={senderCountryCode} />
-                        </Field>
-                        <Field label="Email Address" required error={errors.email}>
-                          <input title="Email Address" placeholder="you@example.com" className={baseInputClass} type="email" value={data.email || ''} onChange={e => { setData('email', e.target.value); clearErrors('email'); }} />
-                        </Field>
-                      </div>
-
-                      <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4 mt-2 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Pickup Address in Australia</p>
-                          <button
-                            type="button"
-                            onClick={() => getCurrentLocation('sender')}
-                            disabled={isLocating}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 px-3 py-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all cursor-pointer"
-                          >
-                            {isLocating ? <Loader2 className="size-3.5 animate-spin" /> : <MapPinned className="size-3.5 text-brand-rust" />}
-                            {isLocating ? 'Locating...' : 'Use My Current GPS'}
-                          </button>
-                        </div>
-
-                        <Field label="Street Address" required error={errors.address}>
-                          <input
-                            type="text"
-                            placeholder="e.g. Unit 4, 123 George Street"
-                            value={data.address || ''}
-                            onChange={e => { setData('address', e.target.value); clearErrors('address'); }}
-                            className={baseInputClass}
-                          />
-                        </Field>
-
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                          <Field label="Suburb" required error={errors.suburb}>
-                            <SuburbSelect
-                              suburbs={suburbs}
-                              value={data.suburb || ''}
-                              onChange={handleSuburbChange}
-                            />
-                          </Field>
-
-                          <Field label="State" required error={errors.state}>
-                            <select
-                              value={data.state || 'NSW'}
-                              onChange={e => { setData('state', e.target.value); clearErrors('state'); }}
-                              className={baseInputClass}
-                            >
-                              {AU_STATES.map((s) => (
-                                <option key={s.code} value={s.code}>
-                                  {s.code} - {s.name}
-                                </option>
-                              ))}
-                            </select>
-                          </Field>
-
-                          <Field label="Postcode" required error={errors.postcode}>
-                            <input
-                              type="text"
-                              placeholder="e.g. 2000"
-                              value={data.postcode || ''}
-                              onChange={e => { setData('postcode', e.target.value); clearErrors('postcode'); }}
-                              className={baseInputClass}
-                            />
-                          </Field>
-                        </div>
-
-                        <div className="space-y-2 pt-2">
-                          <div className="flex items-center justify-between">
-                            <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                              Pin Location on Map (Optional)
-                            </label>
-                            <span className="text-xs text-zinc-400">
-                              Click map to adjust pickup coordinates
-                            </span>
+                        ) : (
+                          <div className="flex flex-col gap-2">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Pickup Address & Location</p>
+                            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 bg-zinc-50 dark:bg-zinc-950 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800">
+                              {data.address}, {data.suburb}, {data.state} {data.postcode}
+                            </p>
+                            <div className="mt-2 rounded-xl border border-amber-100 dark:border-amber-900/30 bg-amber-50/50 dark:bg-amber-950/20 p-4 flex items-start gap-3">
+                              <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                              <div className="text-xs text-amber-800 dark:text-amber-300">
+                                <span className="font-semibold">Need to use a different pickup address?</span> To avoid data confusion, pickup address and GPS location coordinates must be updated in your settings. Please go to <a href="/settings/profile" className="underline font-bold hover:text-amber-950 dark:hover:text-amber-200">Settings</a> to change your pickup address or add a new pickup address.
+                              </div>
+                            </div>
                           </div>
-                          <LocationPickerMap
-                            className="h-64 w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden"
-                            initialCenter={
-                              data.latitude && data.longitude
-                                ? [data.latitude, data.longitude]
-                                : [-33.8688, 151.2093]
-                            }
-                            onLocationSelect={(lat, lng, addr) => {
-                              setData((curr: any) => ({
-                                ...curr,
-                                latitude: lat,
-                                longitude: lng,
-                                ...(addr?.address ? { address: addr.address } : {}),
-                                ...(addr?.suburb ? { suburb: addr.suburb } : {}),
-                                ...(addr?.postcode ? { postcode: addr.postcode } : {}),
-                                ...(addr?.state ? { state: addr.state } : {}),
-                              }));
-                              if (addr?.suburb) {
-                                const detected = detectPickupZoneBySuburb(addr.suburb);
-                                if (detected) {
-                                  setData((curr: any) => ({ ...curr, pickup_zone_id: detected }));
-                                }
-                              }
-                            }}
-                          />
-                        </div>
+                        )}
                       </div>
                     </div>
                   )}
                 </section>
 
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
-                  <SectionHeader title="Pickup Schedule" subtitle="Choose your preferred pickup date" />
+                  <SectionHeader
+                    title={data.booking_type === 'drop_off' ? 'Drop-Off Schedule' : 'Pickup Schedule'}
+                    subtitle={data.booking_type === 'drop_off' ? 'Choose your preferred drop-off date' : 'Choose your preferred pickup date'}
+                  />
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {(() => {
-                      const detectedZoneId = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb || '');
-                      const isLocked = !!detectedZoneId;
-                      const activeZoneId = data.pickup_zone_id || detectedZoneId;
-                      const selectedZone = pickupZones?.find((z: any) => z.id.toString() === activeZoneId?.toString());
+                  {/* Compact Collection Method Segmented Control */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                        Collection Method
+                      </label>
+                      <span className="text-[11px] text-zinc-400">
+                        {data.booking_type === 'drop_off' ? 'Drop-off at Gold Coast depot' : 'Doorstep collection'}
+                      </span>
+                    </div>
 
-                      return (
+                    <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-zinc-100 dark:bg-zinc-800/60 border border-zinc-200/80 dark:border-zinc-700/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const detected = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb || '');
+                          setData((prev: any) => ({
+                            ...prev,
+                            booking_type: 'home_pickup',
+                            pickup_zone_id: detected || prev.pickup_zone_id,
+                          }));
+                          clearErrors('booking_type');
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer",
+                          data.booking_type === 'home_pickup'
+                            ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs border border-zinc-200/80 dark:border-zinc-700"
+                            : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        )}
+                      >
+                        <Truck className={cn("size-4 shrink-0", data.booking_type === 'home_pickup' ? "text-brand-rust" : "text-zinc-400")} />
+                        <span>Home Pick-Up</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setData((prev: any) => ({
+                            ...prev,
+                            booking_type: 'drop_off',
+                            pickup_zone_id: '',
+                          }));
+                          clearErrors('booking_type');
+                          clearErrors('pickup_zone_id');
+                        }}
+                        className={cn(
+                          "flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer",
+                          data.booking_type === 'drop_off'
+                            ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-xs border border-zinc-200/80 dark:border-zinc-700"
+                            : "text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        )}
+                      >
+                        <Building2 className={cn("size-4 shrink-0", data.booking_type === 'drop_off' ? "text-sky-600" : "text-zinc-400")} />
+                        <span>Drop-Off at Depot</span>
+                      </button>
+                    </div>
+
+                    {data.booking_type === 'drop_off' && (
+                      <div className="flex flex-col gap-1 p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-900/40 text-xs text-sky-800 dark:text-sky-300">
+                        <div className="flex items-center gap-2">
+                          <MapPinned className="size-4 text-sky-600 shrink-0" />
+                          <span className="truncate">
+                            Depot Address: <strong>{depotAddress}</strong>
+                          </span>
+                        </div>
+                        {depotInstructions && (
+                          <p className="text-[11px] text-sky-700/80 dark:text-sky-300/80 pl-6 leading-relaxed">
+                            {depotInstructions}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Home Pickup Zone Detection (Auto-assigned based on suburb) */}
+                  {data.booking_type === 'home_pickup' && (
+                    <div className="space-y-3">
+                      {selectedZone ? (
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/80 text-xs">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <MapPin className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <p className="text-zinc-700 dark:text-zinc-300 font-medium truncate">
+                              Pickup Area: <strong className="text-zinc-900 dark:text-zinc-100">{selectedZone.name}</strong>
+                              {data.suburb && (
+                                <span className="text-zinc-500 dark:text-zinc-400 font-normal ml-1.5">
+                                  (Auto-recognized from {data.suburb})
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                            <CheckCircle className="size-3.5" /> Auto-Assigned
+                          </span>
+                        </div>
+                      ) : data.suburb ? (
                         <Field
                           label="Pickup Area"
                           required
                           error={errors.pickup_zone_id}
-                          hint={!isLocked ? "Select your pickup area to see available schedule." : undefined}
+                          hint={`We couldn't automatically match "${data.suburb}" to a zone. Please select your area.`}
                         >
-                          {isLocked ? (
-                            <div className="relative flex items-center">
-                              <input
-                                type="text"
-                                readOnly
-                                className={cn(
-                                  baseInputClass,
-                                  "bg-zinc-100/70 dark:bg-zinc-800/50 text-zinc-800 dark:text-zinc-200 font-semibold cursor-not-allowed pr-10 border-zinc-200 dark:border-zinc-800"
-                                )}
-                                value={selectedZone?.name || 'Assigned Zone'}
-                              />
-                              <div className="absolute right-3 flex items-center justify-center p-1 rounded-lg bg-zinc-200/60 dark:bg-zinc-700/60 text-zinc-500 dark:text-zinc-400" title="Locked based on address">
-                                <Lock className="size-3.5" />
-                              </div>
-                            </div>
-                          ) : (
-                            <select
-                              className={cn(baseInputClass)}
-                              value={data.pickup_zone_id || ''}
-                              onChange={(e) => setData('pickup_zone_id', e.target.value)}
-                              disabled={!!editingBooking}
-                            >
-                              <option value="" disabled>Select your pickup area</option>
-                              {pickupZones?.map((zone: any) => (
-                                <option key={zone.id} value={zone.id}>
-                                  {zone.name}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-
-                          {isLocked && (
-                            <div className="mt-2.5 flex items-center gap-2 rounded-xl bg-sky-50/80 dark:bg-sky-950/20 border border-sky-200/70 dark:border-sky-900/40 px-3.5 py-2 text-xs text-sky-800 dark:text-sky-300 font-medium">
-                              <ShieldCheck className="size-4 text-sky-600 dark:text-sky-400 shrink-0" />
-                              <span>Area auto-assigned and locked based on your address.</span>
-                            </div>
-                          )}
-
-                          {!isLocked && data.suburb && (
-                            <div className="mt-2 text-[11px] text-amber-600 dark:text-amber-400 flex items-start gap-1.5 leading-snug">
-                              <AlertTriangle className="size-3.5 shrink-0 mt-0.5" />
-                              <p>We couldn't automatically match <strong>{data.suburb}</strong> to a zone. Please select the closest area carefully.</p>
-                            </div>
-                          )}
+                          <select
+                            className={cn(baseInputClass)}
+                            value={data.pickup_zone_id || ''}
+                            onChange={(e) => setData('pickup_zone_id', e.target.value)}
+                            disabled={!!editingBooking}
+                          >
+                            <option value="" disabled>Select your pickup area</option>
+                            {pickupZones?.map((zone: any) => (
+                              <option key={zone.id} value={zone.id}>
+                                {zone.name}
+                              </option>
+                            ))}
+                          </select>
                         </Field>
-                      );
-                    })()}
+                      ) : (
+                        <div className="flex items-center gap-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-dashed border-zinc-200 dark:border-zinc-700 text-xs text-zinc-500 dark:text-zinc-400">
+                          <Info className="size-4 text-zinc-400 shrink-0" />
+                          <span>Pickup area and schedule will auto-load once you select your suburb above.</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
                     <Field
-                      label="Preferred Pickup Date"
+                      label={data.booking_type === 'drop_off' ? 'Preferred Drop-Off Date' : 'Preferred Pickup Date'}
                       required
                       error={errors.preferred_date}
                       hint={`Minimum ${activeLogistics?.leadTimeDays ?? 2} days lead time required.`}
@@ -2006,10 +2372,13 @@ if (step === 2) {
                       <PickupScheduleSummary />
                     </Field>
 
-                    <Field label="Additional Pickup Notes" hint="Gate codes, parking info, etc.">
+                    <Field
+                      label={data.booking_type === 'drop_off' ? 'Additional Drop-Off Notes' : 'Additional Pickup Notes'}
+                      hint={data.booking_type === 'drop_off' ? 'Estimated arrival time or depot remarks.' : 'Gate codes, parking info, etc.'}
+                    >
                       <textarea
                         className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-100 dark:focus:ring-zinc-800 min-h-25"
-                        placeholder="Optional notes for the driver..."
+                        placeholder={data.booking_type === 'drop_off' ? 'Optional remarks for warehouse team...' : 'Optional notes for the driver...'}
                         value={data.notes || ''}
                         onChange={e => setData('notes', e.target.value)}
                       />
@@ -2026,7 +2395,7 @@ if (step === 2) {
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-3">
                     <SectionHeader title="Primary Recipient" subtitle="Who is receiving these boxes?" />
-                    {!isGuest && savedRecipients && savedRecipients.length > 0 && (
+                    {savedRecipients && savedRecipients.length > 0 && (
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 shrink-0 hidden sm:inline">Use Saved Contact:</span>
                         <select
@@ -2068,7 +2437,7 @@ if (step === 2) {
                       <input
                         title="Receiver First Name"
                         className={baseInputClass}
-                        placeholder="Receiver's first name (e.g. Juan)"
+                        placeholder="Receiver's first name"
                         value={data.boxes[0].recipient_first_name || ''}
                         disabled={!!data.boxes[0].recipient_id}
                         onChange={e => updatePrimaryRecipient('recipient_first_name', e.target.value)}
@@ -2078,7 +2447,7 @@ if (step === 2) {
                       <input
                         title="Receiver Last Name"
                         className={baseInputClass}
-                        placeholder="Receiver's last name (e.g. Dela Cruz)"
+                        placeholder="Receiver's last name"
                         value={data.boxes[0].recipient_last_name || ''}
                         disabled={!!data.boxes[0].recipient_id}
                         onChange={e => updatePrimaryRecipient('recipient_last_name', e.target.value)}
@@ -2090,7 +2459,7 @@ if (step === 2) {
                     <input
                       title="Recipient Address"
                       className={baseInputClass}
-                      placeholder="House number, street, barangay... (e.g. Block 5 Lot 12)"
+                      placeholder="House number, street, barangay..."
                       value={data.boxes[0].recipient_address || ''}
                       disabled={!!data.boxes[0].recipient_id}
                       onChange={e => updatePrimaryRecipient('recipient_address', e.target.value)}
@@ -2144,7 +2513,7 @@ if (step === 2) {
                     <Field label="City" required error={errors[`boxes.0.recipient_city` as keyof typeof errors]}>
                       <input
                         title="City"
-                        placeholder="City (e.g. Pasig City)"
+                        placeholder="City"
                         className={baseInputClass}
                         value={data.boxes[0].recipient_city || ''}
                         disabled={!!data.boxes[0].recipient_id}
@@ -2168,7 +2537,7 @@ if (step === 2) {
                     <Field label="Zip Code" required error={errors[`boxes.0.recipient_zip_code` as keyof typeof errors]}>
                       <input
                         title="Zip Code"
-                        placeholder="Zip Code (e.g. 1600)"
+                        placeholder="Zip Code"
                         className={baseInputClass}
                         value={data.boxes[0].recipient_zip_code || ''}
                         disabled={!!data.boxes[0].recipient_id}
@@ -2177,8 +2546,8 @@ if (step === 2) {
                     </Field>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Field label="Receiver Phone" required error={errors[`boxes.0.recipient_phone` as keyof typeof errors]}>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Field label="Primary Contact Number" required error={errors[`boxes.0.recipient_phone` as keyof typeof errors]}>
                       <PhoneInput
                         value={data.boxes[0].recipient_phone || ''}
                         onChange={val => updatePrimaryRecipient('recipient_phone', val)}
@@ -2186,7 +2555,7 @@ if (step === 2) {
                         disabled={!!data.boxes[0].recipient_id}
                       />
                     </Field>
-                    <Field label="Secondary Phone" error={errors[`boxes.0.recipient_secondary_phone` as keyof typeof errors]} hint="Optional">
+                    <Field label="Secondary Contact Number" hint="Optional" error={errors[`boxes.0.recipient_secondary_phone` as keyof typeof errors]}>
                       <PhoneInput
                         value={data.boxes[0].recipient_secondary_phone || ''}
                         onChange={val => updatePrimaryRecipient('recipient_secondary_phone', val)}
@@ -2194,17 +2563,19 @@ if (step === 2) {
                         disabled={!!data.boxes[0].recipient_id}
                       />
                     </Field>
-                    <Field label="Receiver Email" required error={errors[`boxes.0.recipient_email` as keyof typeof errors]}>
-                      <input
-                        title="Receiver Email"
-                        className={baseInputClass}
-                        type="email"
-                        placeholder="recipient@example.com"
-                        value={data.boxes[0].recipient_email || ''}
-                        disabled={!!data.boxes[0].recipient_id}
-                        onChange={e => updatePrimaryRecipient('recipient_email', e.target.value)}
-                      />
-                    </Field>
+                    <div className="md:col-span-2">
+                      <Field label="Receiver Email" required error={errors[`boxes.0.recipient_email` as keyof typeof errors]}>
+                        <input
+                          title="Receiver Email"
+                          className={baseInputClass}
+                          type="email"
+                          placeholder="recipient@example.com"
+                          value={data.boxes[0].recipient_email || ''}
+                          disabled={!!data.boxes[0].recipient_id}
+                          onChange={e => updatePrimaryRecipient('recipient_email', e.target.value)}
+                        />
+                      </Field>
+                    </div>
                   </div>
 
                   <Field
@@ -2233,40 +2604,6 @@ if (step === 2) {
                       )}
                     </div>
                   </Field>
-
-                  {/* Door-to-Door Delivery Add-On */}
-                  {(() => {
-                    const selectedArea = areas?.find((a: any) => a.id.toString() === data.boxes[0]?.area_id?.toString());
-                    const fee = selectedArea ? parseFloat(selectedArea.door_to_door_fee || '0') : 0;
-
-                    return (
-                      <div className="flex items-start gap-3 p-4 rounded-2xl border border-amber-200/80 bg-amber-50/50 dark:bg-amber-950/20 dark:border-amber-900/50 mt-4">
-                        <Checkbox
-                          id="door-to-door-primary"
-                          checked={!!data.boxes[0]?.is_door_to_door}
-                          onCheckedChange={(checked) => updatePrimaryRecipient('is_door_to_door', !!checked)}
-                          className="mt-0.5"
-                        />
-                        <div className="space-y-0.5 flex-1">
-                          <label htmlFor="door-to-door-primary" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer block">
-                            Door-to-Door Delivery Add-On{' '}
-                            {data.boxes[0]?.area_id ? (
-                              fee > 0 ? (
-                                <span className="text-amber-700 dark:text-amber-400 font-extrabold">(+${fee.toFixed(2)} per box)</span>
-                              ) : (
-                                <span className="text-emerald-600 dark:text-emerald-400 text-[10px] uppercase tracking-wider font-extrabold">(Included / Free)</span>
-                              )
-                            ) : (
-                              <span className="text-zinc-400 dark:text-zinc-500 text-[10px] font-normal">(Select Province first to calculate fee)</span>
-                            )}
-                          </label>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight">
-                            Request direct last-mile delivery to the recipient's home address. Applied to all boxes.
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
                 </section>
 
                 <section className="space-y-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 md:p-8">
@@ -2355,15 +2692,18 @@ if (step === 2) {
                                         (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === bt.id.toString() && !p.pickup_zone_id
                                       );
 
-                                      const anyZonePriceRecord = boxPrices?.find(
-                                        (p: any) => p.area_id.toString() === box.area_id.toString() && p.box_type_id.toString() === bt.id.toString()
-                                      );
-
-                                      const priceRecord = exactPriceRecord || fallbackPriceRecord || anyZonePriceRecord;
+                                      const priceRecord = exactPriceRecord || fallbackPriceRecord;
                                       return priceRecord ? parseFloat(priceRecord.price) > 0 : false;
                                     })();
 
                                     const isSelected = box.box_type_id?.toString() === bt.id.toString();
+                                    const capacityTip = (() => {
+                                      const lower = bt.name.toLowerCase();
+                                      if (lower.includes('jumbo')) return 'Fits comforters, appliances, bulky goods';
+                                      if (lower.includes('standard')) return 'Fits ~20 canned goods, 6 shoes, clothes (~60kg)';
+                                      if (lower.includes('junior') || lower.includes('mini')) return 'Fits chocolates, gifts, toiletries';
+                                      return 'Standard Balikbayan cargo';
+                                    })();
 
                                     return (
                                       <button
@@ -2377,29 +2717,36 @@ if (step === 2) {
                                           updateBox(index, 'box_type_id', bt.id.toString());
                                         }}
                                         title={!hasPrice ? 'No price configured — contact customer support' : (bt.dimensions || bt.name)}
-                                        className={`relative flex flex-col items-start gap-0.5 rounded-xl border px-3 py-2.5 text-left transition-all ${
+                                        className={`relative flex flex-col items-start gap-1 rounded-2xl border p-3 text-left transition-all ${
                                           !hasPrice
                                             ? 'border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800/50 opacity-50 cursor-not-allowed'
                                             : isSelected
-                                              ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 dark:bg-zinc-100 shadow-sm'
-                                              : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-500 cursor-pointer'
+                                              ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-900 dark:bg-zinc-100 shadow-md ring-2 ring-zinc-900/10'
+                                              : 'border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:border-zinc-400 dark:hover:border-zinc-500 cursor-pointer shadow-xs'
                                         }`}
                                       >
-                                        <span className={`text-xs font-bold truncate w-full ${
-                                          !hasPrice ? 'text-zinc-400 dark:text-zinc-500' : isSelected ? 'text-white dark:text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'
-                                        }`}>
-                                          {bt.name.toUpperCase()}
-                                        </span>
-                                        {bt.dimensions && (
-                                          <span className={`text-[10px] font-mono truncate w-full ${
-                                            !hasPrice ? 'text-zinc-400 dark:text-zinc-500' : isSelected ? 'text-zinc-300 dark:text-zinc-600' : 'text-zinc-400 dark:text-zinc-500'
+                                        <div className="flex items-center justify-between w-full">
+                                          <span className={`text-xs font-black truncate ${
+                                            !hasPrice ? 'text-zinc-400 dark:text-zinc-500' : isSelected ? 'text-white dark:text-zinc-900' : 'text-zinc-900 dark:text-zinc-100'
                                           }`}>
-                                            {bt.dimensions}
+                                            {bt.name.toUpperCase()}
                                           </span>
-                                        )}
+                                          {bt.dimensions && (
+                                            <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
+                                              isSelected ? 'bg-white/20 text-white dark:text-zinc-900 dark:bg-black/10' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                                            }`}>
+                                              {bt.dimensions}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p className={`text-[10px] leading-tight mt-0.5 line-clamp-2 ${
+                                          isSelected ? 'text-zinc-300 dark:text-zinc-700' : 'text-zinc-500 dark:text-zinc-400'
+                                        }`}>
+                                          {capacityTip}
+                                        </p>
                                         {!hasPrice && box.area_id && (
-                                          <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                                            No price
+                                          <span className="text-[9px] font-bold uppercase tracking-wider text-rose-500 mt-1">
+                                            No rate for area
                                           </span>
                                         )}
                                       </button>
@@ -2550,63 +2897,62 @@ if (step === 2) {
                   >
                     <PlusCircle className="size-5" /> Add Another Box
                   </button>
+                </section>
 
-                  {/* Empty Box Delivery Service Add-On */}
-                  <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/50 bg-amber-50/40 dark:bg-amber-950/20 p-5 space-y-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 dark:border-amber-900/40 pb-3">
-                      <div>
-                        <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">Empty Box Delivery Service</h4>
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Need boxes in advance? Request empty balikbayan boxes delivered to your address before collection.</p>
-                      </div>
-                      <span className="inline-flex items-center self-start sm:self-auto rounded-full bg-amber-100/80 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider border border-amber-200/60 dark:border-amber-800/60">
-                        $10.00 each
-                      </span>
-                    </div>
-
-                    <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-200/60 bg-white/90 dark:bg-zinc-900/90 dark:border-amber-900/40">
-                      <Checkbox
-                        id="request-empty-box"
-                        checked={!!data.request_empty_box}
-                        onCheckedChange={(checked) => setData('request_empty_box', !!checked)}
-                        className="mt-0.5"
+                {/* Empty Box Delivery Add-On */}
+                <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 sm:p-5 shadow-xs transition-all">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <label className="flex items-center gap-3 cursor-pointer select-none min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={Number(data.empty_box_count || 0) > 0}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setData('empty_box_count', Math.max(1, Number(data.empty_box_count) || data.boxes.length || 1));
+                          } else {
+                            setData('empty_box_count', 0);
+                          }
+                        }}
+                        className="size-4.5 rounded border-zinc-300 dark:border-zinc-700 text-brand-rust focus:ring-brand-rust"
                       />
-                      <div className="space-y-0.5 flex-1">
-                        <label htmlFor="request-empty-box" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer block">
-                          I need empty boxes delivered to my address before pickup
-                        </label>
-                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-tight">
-                          Our courier will drop off the boxes so you can pack your items comfortably prior to pickup day.
+                      <div className="min-w-0">
+                        <span className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                          <Package className="size-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                          Need empty boxes delivered in advance? ($10.00 each)
+                        </span>
+                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                          Heavy-duty balikbayan boxes dispatched to your address prior to pickup
                         </p>
                       </div>
-                    </div>
+                    </label>
 
-                    {data.request_empty_box && (
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-amber-200/60 dark:border-amber-900/40">
-                        <div>
-                          <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Empty Box Quantity</p>
-                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Specify number of empty boxes to be delivered</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setData('empty_box_count', Math.max(1, (data.empty_box_count || 1) - 1))}
-                            disabled={(data.empty_box_count || 1) <= 1}
-                            className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
-                          >-</button>
-                          <span className="font-extrabold text-sm min-w-8 text-center text-zinc-900 dark:text-zinc-100">{data.empty_box_count || 1}</span>
-                          <button
-                            type="button"
-                            onClick={() => setData('empty_box_count', (data.empty_box_count || 1) + 1)}
-                            className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
-                          >+</button>
-                          <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400 ml-1">
-                            (+${(((data.empty_box_count || 1) * 10)).toFixed(2)})
-                          </span>
-                        </div>
+                    {Number(data.empty_box_count || 0) > 0 && (
+                      <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto bg-zinc-50 dark:bg-zinc-800/80 px-2.5 py-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700">
+                        <span className="text-xs font-semibold text-zinc-500">Qty:</span>
+                        <button
+                          type="button"
+                          onClick={() => setData('empty_box_count', Math.max(1, (Number(data.empty_box_count) || 1) - 1))}
+                          className="size-6 rounded-lg border border-zinc-200 dark:border-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-700 dark:text-zinc-200 transition-colors"
+                        >
+                          <Minus className="size-3" />
+                        </button>
+                        <span className="w-6 text-center font-bold text-xs text-zinc-900 dark:text-zinc-100 font-mono">
+                          {data.empty_box_count}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setData('empty_box_count', (Number(data.empty_box_count) || 1) + 1)}
+                          className="size-6 rounded-lg border border-zinc-200 dark:border-zinc-600 hover:bg-zinc-200 dark:hover:bg-zinc-700 flex items-center justify-center text-zinc-700 dark:text-zinc-200 transition-colors"
+                        >
+                          <PlusCircle className="size-3.5" />
+                        </button>
+                        <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 font-mono pl-1.5 border-l border-zinc-200 dark:border-zinc-700">
+                          +${((Number(data.empty_box_count) || 0) * (data.empty_box_fee || 10)).toFixed(2)}
+                        </span>
                       </div>
                     )}
                   </div>
-                </section>
+                </div>
               </form>
             )}
 
@@ -2632,7 +2978,9 @@ if (step === 2) {
                       <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
                         <div className="flex items-center gap-2">
                           <MapPinned className="size-5 text-brand-rust" />
-                          <h3 className="font-bold text-zinc-900 dark:text-zinc-100 text-base">Sender & Pickup Information</h3>
+                          <h3 className="font-bold text-zinc-900 dark:text-zinc-100 text-base">
+                            {data.booking_type === 'drop_off' ? 'Sender & Drop-Off Information' : 'Sender & Pickup Information'}
+                          </h3>
                         </div>
                         <Button
                           type="button"
@@ -2641,47 +2989,78 @@ if (step === 2) {
                           onClick={() => setCurrentStep(1)}
                           className="text-xs font-semibold text-sky-600 hover:text-sky-700 dark:text-sky-400 h-8 px-3 rounded-lg"
                         >
-                          Edit Sender & Pickup
+                          {data.booking_type === 'drop_off' ? 'Edit Drop-Off Details' : 'Edit Pickup Details'}
                         </Button>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Collection Method</p>
+                          <p className="font-semibold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5">
+                            {data.booking_type === 'drop_off' ? (
+                              <><Building2 className="size-3.5 text-sky-600" /> Drop-Off at Depot</>
+                            ) : (
+                              <><Truck className="size-3.5 text-emerald-600" /> Home Pick-Up</>
+                            )}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                            {data.booking_type === 'drop_off' ? 'Preferred Drop-Off Date' : 'Preferred Pickup Date'}
+                          </p>
+                          <p className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                            <CalendarIcon className="size-3.5" />
+                            {data.preferred_date ? format(new Date(data.preferred_date), 'PPP') : 'Not specified'}
+                          </p>
+                        </div>
                         <div>
                           <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Sender Name</p>
                           <p className="font-semibold text-zinc-800 dark:text-zinc-200">{data.first_name} {data.last_name}</p>
                         </div>
                         <div>
                           <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Contact Number</p>
-                          <p className="font-semibold text-zinc-800 dark:text-zinc-200">{data.mobile}</p>
-                          {data.secondary_mobile && (
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-normal">Alt: {data.secondary_mobile}</p>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Email Address</p>
-                          <p className="font-semibold text-zinc-800 dark:text-zinc-200">{data.email}</p>
-                        </div>
-                        <div>
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Preferred Pickup Date</p>
-                          <p className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                            <CalendarIcon className="size-3.5" />
-                            {data.preferred_date ? format(new Date(data.preferred_date), 'PPP') : 'Not specified'}
+                          <p className="font-semibold text-zinc-800 dark:text-zinc-200">
+                            {data.mobile}
+                            {data.secondary_mobile && (
+                              <span className="text-xs font-normal text-zinc-500 ml-1.5">• Alt: {data.secondary_mobile}</span>
+                            )}
                           </p>
                         </div>
                         <div className="sm:col-span-2">
-                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Pickup Address</p>
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Email Address</p>
+                          <p className="font-semibold text-zinc-800 dark:text-zinc-200">{data.email}</p>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                            {data.booking_type === 'drop_off' ? 'Sender Address' : 'Pickup Address'}
+                          </p>
                           <p className="font-semibold text-zinc-800 dark:text-zinc-200">
                             {data.address}, {data.suburb} {data.state} {data.postcode}
                           </p>
-                          {data.pickup_zone_id && (
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                              Zone: {pickupZones?.find((z: any) => z.id.toString() === data.pickup_zone_id.toString())?.name || 'Selected Zone'}
-                            </p>
+                          {data.booking_type === 'drop_off' ? (
+                            <div className="mt-1 space-y-0.5">
+                              <p className="text-xs text-sky-600 dark:text-sky-400 flex items-center gap-1">
+                                <MapPinned className="size-3 shrink-0" /> Drop-Off Depot: {depotAddress}
+                              </p>
+                              {depotInstructions && (
+                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 pl-4">
+                                  {depotInstructions}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            data.pickup_zone_id && (
+                              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                Zone: {pickupZones?.find((z: any) => z.id.toString() === data.pickup_zone_id.toString())?.name || 'Selected Zone'}
+                              </p>
+                            )
                           )}
                         </div>
                         {data.notes && (
                           <div className="sm:col-span-2 bg-zinc-50 dark:bg-zinc-800/50 p-3 rounded-xl border border-zinc-100 dark:border-zinc-800">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Pickup Notes</p>
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                              {data.booking_type === 'drop_off' ? 'Drop-Off Notes' : 'Pickup Notes'}
+                            </p>
                             <p className="text-xs text-zinc-700 dark:text-zinc-300 mt-0.5">{data.notes}</p>
                           </div>
                         )}
@@ -2727,7 +3106,7 @@ if (step === 2) {
                           const recCity = recipient?.city || box.recipient_city || '';
                           const recProvince = recipient?.province || box.recipient_province || '';
                           const recZip = recipient?.zip_code || box.recipient_zip_code || '';
-                          const recPhone = recipient?.phone_number || recipient?.receiver_phone || box.recipient_phone || '';
+                          const recPhone = recipient?.phone_number || box.recipient_phone || '';
                           const recSecondaryPhone = recipient?.secondary_phone_number || box.recipient_secondary_phone || '';
 
                           return (
@@ -2740,11 +3119,6 @@ if (step === 2) {
                                   <span className="font-bold text-zinc-900 dark:text-zinc-100 text-sm">
                                     {boxTypeName}
                                   </span>
-                                  {box.is_door_to_door && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[10px] font-bold">
-                                      Door-to-Door
-                                    </span>
-                                  )}
                                 </div>
                                 <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 text-base">
                                   ${price.toFixed(2)}
@@ -2789,6 +3163,27 @@ if (step === 2) {
                             </div>
                           );
                         })}
+
+                        {Number(data.empty_box_count || 0) > 0 && (
+                          <div className="rounded-2xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/20 p-4 flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="size-9 rounded-xl bg-amber-500/20 text-amber-700 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                <Package className="size-5" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
+                                  Empty Box Delivery Add-On
+                                </p>
+                                <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                                  {data.empty_box_count} empty box{Number(data.empty_box_count) !== 1 ? 'es' : ''} requested to be delivered in advance
+                                </p>
+                              </div>
+                            </div>
+                            <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 text-sm">
+                              ${emptyBoxTotal.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -2808,19 +3203,173 @@ if (step === 2) {
 
                         <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
                           <span>Cargo Subtotal</span>
-                          <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">${boxesTotal.toFixed(2)}</span>
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">${cargoSubtotal.toFixed(2)}</span>
                         </div>
 
-                        {data.request_empty_box && (
+                        {Number(data.empty_box_count || 0) > 0 && (
                           <div className="flex justify-between text-zinc-600 dark:text-zinc-400">
-                            <span>Empty Box Delivery ({data.empty_box_count || 1} @ ${(Number(data.empty_box_fee) || 10).toFixed(2)})</span>
-                            <span className="font-semibold text-amber-700 dark:text-amber-400 font-mono">+${emptyBoxTotal.toFixed(2)}</span>
+                            <span>Empty Boxes ({data.empty_box_count}x @ ${(Number(data.empty_box_fee) || 10).toFixed(2)})</span>
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-100 font-mono">${emptyBoxTotal.toFixed(2)}</span>
                           </div>
                         )}
 
+                        {discountAmount > 0 && (
+                          <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                            <span className="flex items-center gap-1.5">
+                              <Tag className="size-3.5" /> Promo Discount
+                            </span>
+                            <span className="font-mono">-${discountAmount.toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        {/* Promo / Voucher Section */}
+                        <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
+                          {/* Active / Applied Voucher Banner */}
+                          {data.promo_code && discountAmount > 0 ? (
+                            <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-950/30 p-2.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60">
+                              <div className="flex items-center gap-2">
+                                <div className="size-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold">
+                                  <CheckCircle className="size-3.5" />
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono font-black text-xs text-emerald-800 dark:text-emerald-200 uppercase tracking-wider">
+                                      {data.promo_code}
+                                    </span>
+                                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                                      (-${discountAmount.toFixed(2)})
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-emerald-600 dark:text-emerald-400">
+                                    {promoSuccessMessage}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={removePromoCode}
+                                className="text-zinc-400 hover:text-red-600 dark:hover:text-red-400 p-1 transition-colors"
+                                title="Remove promo code"
+                              >
+                                <X className="size-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                <div className="relative flex-1">
+                                  <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-zinc-400">
+                                    <Tag className="size-3.5" />
+                                  </div>
+                                  <input
+                                    type="text"
+                                    placeholder="Enter promo code"
+                                    value={promoCodeInput}
+                                    onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyPromoCode(); } }}
+                                    className="w-full pl-8 h-9 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 text-xs uppercase font-bold tracking-wider placeholder:normal-case placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                                  />
+                                </div>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  onClick={() => applyPromoCode()}
+                                  disabled={!promoCodeInput.trim() || validatingPromo}
+                                  className="h-9 px-3.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-all disabled:opacity-50"
+                                >
+                                  {validatingPromo ? <Loader2 className="size-3 animate-spin" /> : 'Apply'}
+                                </Button>
+                              </div>
+                              {promoError && (
+                                <p className="text-red-500 text-[11px] font-medium flex items-center gap-1">
+                                  <AlertTriangle className="size-3 shrink-0" /> {promoError}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Available Customer Vouchers (Shopee-style) */}
+                          {activePromotions && activePromotions.length > 0 && (
+                            <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                                  <Sparkles className="size-3 text-amber-500" /> Available Vouchers
+                                </span>
+                                <span className="text-[10px] text-zinc-400">1-Tap Apply</span>
+                              </div>
+
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-0.5">
+                                {activePromotions.map((promo: any) => {
+                                  const isApplied = Boolean(data.promo_code && data.promo_code === promo.code && discountAmount > 0);
+                                  return (
+                                    <div
+                                      key={promo.id || promo.code}
+                                      className={cn(
+                                        "flex items-center justify-between p-2 rounded-lg border transition-all text-left",
+                                        isApplied
+                                          ? "bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800"
+                                          : "bg-zinc-50/50 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800 hover:border-amber-400 dark:hover:border-amber-500"
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <div className={cn(
+                                          "px-2 py-1 rounded text-[10px] font-black text-center shrink-0 min-w-[58px]",
+                                          isApplied
+                                            ? "bg-emerald-600 text-white"
+                                            : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800/60"
+                                        )}>
+                                          {getPromoBadge(promo)}
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-mono font-bold text-xs text-zinc-900 dark:text-zinc-100 uppercase">
+                                              {promo.code}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 flex-wrap">
+                                            {promo.min_spend > 0 && (
+                                              <span>Min. ${Number(promo.min_spend).toFixed(0)}</span>
+                                            )}
+                                            {promo.min_spend > 0 && promo.valid_to && <span>•</span>}
+                                            <span className="flex items-center gap-0.5 text-amber-600 dark:text-amber-400 font-medium">
+                                              <Clock className="size-2.5" />
+                                              {getPromoLifespan(promo)}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="shrink-0 ml-2">
+                                        {isApplied ? (
+                                          <button
+                                            type="button"
+                                            onClick={removePromoCode}
+                                            className="text-[11px] font-bold text-red-600 dark:text-red-400 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40"
+                                          >
+                                            Remove
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => applyPromoCode(promo.code)}
+                                            disabled={validatingPromo}
+                                            className="text-[11px] font-bold text-white bg-amber-600 hover:bg-amber-700 px-2.5 py-1 rounded-md shadow-xs transition-colors"
+                                          >
+                                            Use
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         <div className="pt-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-baseline">
                           <span className="font-bold text-zinc-900 dark:text-zinc-100">Total Estimate</span>
-                          <span className="text-2xl font-black text-brand-rust font-mono">${totalEstimate.toFixed(2)}</span>
+                          <span className="text-2xl font-black text-brand-rust font-mono">${finalEstimate.toFixed(2)}</span>
                         </div>
                       </div>
 
@@ -2829,16 +3378,65 @@ if (step === 2) {
                           <ShieldCheck className="size-4 text-emerald-600 dark:text-emerald-400" /> Transparent Pricing
                         </p>
                         <p className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-relaxed">
-                          Review your shipment details above. Click "Proceed to Payment" when you are ready to confirm your order.
+                          {isGuest
+                            ? 'Review your shipment details above. Click "Proceed to Payment" to choose your payment method and complete your payment securely.'
+                            : 'Review your shipment details above. Click "Proceed to Payment" when you are ready to confirm your order.'}
                         </p>
                       </div>
+
+                      {/* Terms & Conditions Agreement for Guest */}
+                      {isGuest && (
+                        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-xs text-zinc-800 dark:text-zinc-200 space-y-2 mt-4">
+                          <div className="flex items-start gap-2.5">
+                            <input
+                              id="guest-agree-terms"
+                              type="checkbox"
+                              checked={agreeTerms}
+                              onChange={(e) => setAgreeTerms(e.target.checked)}
+                              className="mt-0.5 rounded border-amber-400 text-brand-rust focus:ring-brand-rust cursor-pointer"
+                              required
+                            />
+                            <div className="leading-relaxed">
+                              <label htmlFor="guest-agree-terms" className="cursor-pointer">
+                                I agree to the{' '}
+                              </label>
+                              <a
+                                href="/terms"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-bold underline text-brand-rust hover:brightness-110 inline-flex items-center gap-0.5 cursor-pointer"
+                              >
+                                Terms of Service
+                                <ExternalLink className="size-3 inline-block ml-0.5 opacity-70" />
+                              </a>
+                              <label htmlFor="guest-agree-terms" className="cursor-pointer">
+                                ,{' '}
+                              </label>
+                              <a
+                                href="/customs-guide"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="font-bold underline text-brand-rust hover:brightness-110 inline-flex items-center gap-0.5 cursor-pointer"
+                              >
+                                Cargo Prohibited Items Policy
+                                <ExternalLink className="size-3 inline-block ml-0.5 opacity-70" />
+                              </a>
+                              <label htmlFor="guest-agree-terms" className="cursor-pointer">
+                                , and understand that Philippine customs packing declaration is required for every balikbayan box.
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* STEP 4: DIRECT PAYMENT CONSOLE */}
+            {/* STEP 4: DIRECT PAYMENT CONSOLE (Sender & Guest) */}
             {currentStep === 4 && paymentData && (
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start animate-in fade-in duration-500">
                   {/* Left Column: Order Summary (Consistent with PaymentConsole design) */}
@@ -2866,16 +3464,11 @@ if (step === 2) {
                                                       Custom {box.custom_length}×{box.custom_width}×{box.custom_height} cm
                                                     </span>
                                                   ) : (
-                                                    <span className="text-sm font-bold text-zinc-800">{box.box_type?.name || 'Standard Box'}</span>
-                                                  )}
-                                                  {box.is_door_to_door && (
-                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider w-fit">
-                                                      Door-to-Door
-                                                    </span>
+                                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{box.box_type?.name || box.boxType?.name || 'Standard Box'}</span>
                                                   )}
                                               </div>
                                               <div className="text-right">
-                                                <span className="text-base font-mono font-bold text-zinc-900">${parseFloat(box.price_charged || '0').toFixed(2)}</span>
+                                                <span className="text-base font-mono font-bold text-zinc-900 dark:text-zinc-100">${parseFloat(box.price_charged || '0').toFixed(2)}</span>
                                                 {box.price_is_estimate && (
                                                   <p className="text-[9px] text-amber-600 font-bold uppercase tracking-wider">Est.</p>
                                                 )}
@@ -2895,28 +3488,23 @@ if (step === 2) {
                                   </div>
                               ))}
 
-                              {((paymentData.booking.empty_box_count && Number(paymentData.booking.empty_box_count) > 0) || data.request_empty_box) && (
-                                <div className="flex items-center gap-4 p-4 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40">
-                                  <div className="h-12 w-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-amber-200 dark:border-amber-800 shrink-0 shadow-sm text-amber-700 dark:text-amber-400">
-                                    <Package className="size-5" />
-                                  </div>
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center justify-between">
-                                      <div>
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">Add-On Service</span>
-                                        <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                                          Empty Box Delivery ({paymentData.booking.empty_box_count || data.empty_box_count || 1} @ ${(Number(paymentData.booking.empty_box_fee) || Number(data.empty_box_fee) || 10).toFixed(2)})
-                                        </p>
+                              {Number(paymentData.booking.empty_box_count || 0) > 0 && (
+                                  <div className="flex items-center gap-4 p-4 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-900/40">
+                                      <div className="h-12 w-12 rounded-xl bg-white dark:bg-zinc-900 flex items-center justify-center border border-amber-200 dark:border-amber-800 shrink-0 shadow-sm text-amber-600 dark:text-amber-400">
+                                          <Package className="size-5" />
                                       </div>
-                                      <span className="text-base font-mono font-bold text-amber-700 dark:text-amber-400">
-                                        +${(((paymentData.booking.empty_box_count || data.empty_box_count || 1) * (Number(paymentData.booking.empty_box_fee) || Number(data.empty_box_fee) || 10))).toFixed(2)}
-                                      </span>
-                                    </div>
-                                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                                      Delivery of empty boxes to pickup address
-                                    </p>
+                                      <div className="flex-1 min-w-0">
+                                          <div className="flex items-center justify-between mb-0.5">
+                                              <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">Empty Box Delivery</span>
+                                              <span className="text-base font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                                                  ${(Number(paymentData.booking.empty_box_count) * Number(paymentData.booking.empty_box_fee || 10)).toFixed(2)}
+                                              </span>
+                                          </div>
+                                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                              {paymentData.booking.empty_box_count} empty box{Number(paymentData.booking.empty_box_count) !== 1 ? 'es' : ''} ordered (@ ${Number(paymentData.booking.empty_box_fee || 10).toFixed(2)} each)
+                                          </p>
+                                      </div>
                                   </div>
-                                </div>
                               )}
 
                               <div className="pt-6 mt-4 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
@@ -2940,7 +3528,7 @@ if (step === 2) {
                                   )}
                                   <div className="flex justify-between text-sm px-1 font-bold">
                                       <span className="text-zinc-500 dark:text-zinc-400 uppercase tracking-widest text-[10px]">Amount Due</span>
-                                      <span className="text-2xl font-black text-zinc-900 dark:text-zinc-100">${paymentData.booking.payment_status === 'paid' ? '0.00' : totalEstimate.toFixed(2)}</span>
+                                      <span className="text-2xl font-black text-zinc-900 dark:text-zinc-100">${paymentData.booking.payment_status === 'paid' ? '0.00' : finalEstimate.toFixed(2)}</span>
                                   </div>
                               </div>
                           </div>
@@ -2958,10 +3546,9 @@ if (step === 2) {
                             booking={paymentData.booking}
                             stripeKey={paymentData.stripeKey}
                             clientSecret={paymentData.clientSecret}
-                            bankDetails={paymentData.bankDetails}
                             role={isGuest ? 'guest' : 'sender'}
-                            backUrl={isGuest ? '/' : '/dashboard'}
-                            backLabel={isGuest ? 'Return to Home' : 'Return to My Bookings'}
+                            backUrl={isGuest ? `/track?tracking_number=${paymentData.booking.reference_number}` : '/bookings'}
+                            backLabel={isGuest ? 'Track My Shipment' : 'Go to My Bookings'}
                             onSuccess={() => {
                                 setPaymentData((prev: any) => ({
                                     ...prev,
@@ -2975,7 +3562,6 @@ if (step === 2) {
                   </div>
               </div>
             )}
-          </div>
 
           {Object.keys(errors).length > 0 && (
             <div className="rounded-2xl bg-red-50 dark:bg-red-950/20 p-6 border border-red-100 dark:border-red-900/50">
@@ -2994,67 +3580,94 @@ if (step === 2) {
             </div>
           )}
 
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 pt-8 border-t border-zinc-200 dark:border-zinc-800">
-             {currentStep > 1 && (
-                <div className="hidden md:block">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1">Total Shipment Value</p>
-                    <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">${totalEstimate.toFixed(0)}</p>
-                </div>
-             )}
-             <div className="flex items-center gap-4 w-full md:w-auto">
-                {currentStep > 1 && paymentData?.booking?.payment_status !== 'paid' && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={prevStep}
-                    disabled={processing || initializingPayment}
-                    className="flex-1 md:flex-none h-12 rounded-xl border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-8 font-semibold text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all"
-                  >
-                    Back
-                  </Button>
-                )}
+          {currentStep < 4 && (
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6 pt-8 border-t border-zinc-200 dark:border-zinc-800">
+               {currentStep > 1 && (
+                  <div className="hidden md:block">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1">Total Shipment Value</p>
+                      <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">${finalEstimate.toFixed(0)}</p>
+                  </div>
+               )}
+               <div className="flex items-center gap-4 w-full md:w-auto">
+                  {currentStep > 1 && paymentData?.booking?.payment_status !== 'paid' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={prevStep}
+                      disabled={processing || initializingPayment}
+                      className="flex-1 md:flex-none h-12 rounded-xl border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-8 font-semibold text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all"
+                    >
+                      Back
+                    </Button>
+                  )}
 
-                {currentStep === 1 && (
-                  <Button
-                    type="button"
-                    onClick={nextStep}
-                    disabled={processing || initializingPayment}
-                    className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
-                  >
-                    Continue <ArrowRight className="size-4" />
-                  </Button>
-                )}
+                  {currentStep === 1 && (
+                    <Button
+                      type="button"
+                      onClick={nextStep}
+                      disabled={!data.address || !data.preferred_date || !data.first_name || !data.last_name || !data.mobile || !data.email}
+                      className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
+                    >
+                      Continue <ArrowRight className="size-4" />
+                    </Button>
+                  )}
 
-                {currentStep === 2 && (
-                  <Button
-                    type="button"
-                    onClick={nextStep}
-                    disabled={data.boxes.some(box =>
-                      !box.area_id ||
-                      (box.is_custom_size
-                        ? (!box.custom_length || !box.custom_width || !box.custom_height)
-                        : !box.box_type_id)
-                    )}
-                    className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
-                  >
-                    Review Details <ArrowRight className="size-4" />
-                  </Button>
-                )}
+                  {currentStep === 2 && (
+                    <Button
+                      type="button"
+                      onClick={nextStep}
+                      disabled={data.boxes.some(box =>
+                        !box.area_id ||
+                        (box.is_custom_size
+                          ? (!box.custom_length || !box.custom_width || !box.custom_height)
+                          : !box.box_type_id)
+                      )}
+                      className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
+                    >
+                      Review Details <ArrowRight className="size-4" />
+                    </Button>
+                  )}
 
-                {currentStep === 3 && (
-                  <Button
-                    type="button"
-                    onClick={nextStep}
-                    disabled={initializingPayment}
-                    className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
-                  >
-                    {initializingPayment ? <><Loader2 className="animate-spin size-4" /> Initializing...</> : <>Proceed to Payment <CheckCircle className="size-4" /></>}
-                  </Button>
-                )}
-              </div>
-          </div>
+                  {currentStep === 3 && (
+                    <Button
+                      type="button"
+                      onClick={nextStep}
+                      disabled={initializingPayment || (isGuest && !agreeTerms)}
+                      className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {initializingPayment ? (
+                        <><Loader2 className="animate-spin size-4" /> Preparing Payment...</>
+                      ) : (
+                        <>Proceed to Payment <ArrowRight className="size-4" /></>
+                      )}
+                    </Button>
+                  )}
+               </div>
+            </div>
+          )}
         </div>
 
-    </LayoutComponent>
+
+      {/* Floating Sticky Pricing Summary Pill */}
+      {/* {currentStep < 4 && finalEstimate > 0 && (
+          <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-30 pointer-events-auto animate-in fade-in slide-in-from-bottom-3 duration-300">
+              <div className="glass-dock rounded-2xl px-4 py-2.5 shadow-2xl border border-zinc-200 dark:border-zinc-700 flex items-center gap-3">
+                  <div className="size-8 rounded-xl bg-brand-primary text-white flex items-center justify-center font-bold text-xs shadow-xs">
+                      {data.boxes.length}
+                  </div>
+                  <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                          {data.boxes.length === 1 ? '1 Box' : `${data.boxes.length} Boxes`} Estimated
+                      </p>
+                      <p className="text-base font-black text-zinc-900 dark:text-zinc-100">
+                          ${finalEstimate.toFixed(0)} AUD
+                      </p>
+                  </div>
+              </div>
+          </div>
+      )} */}
+
+      </div>
+    </Layout>
   );
 }

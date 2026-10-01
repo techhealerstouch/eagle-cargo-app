@@ -170,7 +170,7 @@ class BookingsImport implements ToCollection, WithHeadingRow
                     'status' => $status,
                     'booking_type' => $bookingType ?? BookingType::HomePickup,
                     'payment_status' => $paymentStatus,
-                    'service_type' => ! empty($serviceType) ? $serviceType : 'standard',
+                    'service_type' => ! empty($serviceType) ? $serviceType : 'balikbayan',
                     'preferred_date' => $preferredDate,
                     'payment_method' => ! empty($paymentMethod) ? $paymentMethod : null,
                     'payment_reference' => ! empty($paymentReference) ? $paymentReference : null,

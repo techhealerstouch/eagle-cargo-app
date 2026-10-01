@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Models\Booking;
+use App\Services\TrackingStepService;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
@@ -47,7 +48,6 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
                 'Booking Type',
                 'Status',
                 'Payment Status',
-                'Service Type',
                 'Preferred Date',
                 'Payment Method',
                 'Payment Reference',
@@ -62,7 +62,6 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
             $headers = array_merge($headers, [
                 'Reference Number',
                 'Booking Type',
-                'Service Type',
                 'Preferred Date',
                 'Status',
                 'Created At',
@@ -138,7 +137,6 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
             $row = array_merge($row, [
                 $booking->reference_number,
                 ucfirst(str_replace('_', ' ', $bookingType)),
-                $booking->service_type ? ucfirst(str_replace('_', ' ', $booking->service_type)) : 'Standard',
                 $booking->preferred_date ? $booking->preferred_date->format('Y-m-d') : 'N/A',
                 ucfirst(str_replace('_', ' ', $status)),
                 $booking->created_at ? $booking->created_at->format('Y-m-d H:i:s') : 'N/A',
@@ -178,7 +176,8 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
             $trackingNumbers = $booking->boxes->pluck('tracking_number')->filter()->implode(', ');
             $boxTypes = $booking->boxes->map(fn ($b) => $b->boxType?->name)->filter()->unique()->implode(', ');
 
-            $stepService = app(\App\Services\TrackingStepService::class);
+            /** @var TrackingStepService $stepService */
+            $stepService = app(TrackingStepService::class);
             $milestones = $booking->boxes->map(function ($b) use ($stepService) {
                 if ($b->tracking_step_key) {
                     $step = $stepService->getStep($b->tracking_step_key);
@@ -202,9 +201,7 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
                 ? $booking->payment_status->value
                 : (string) $booking->payment_status;
 
-            $totalAmount = $booking->total_amount
-                ?? $booking->invoice?->total_amount
-                ?? 0;
+            $totalAmount = $booking->total_amount ?? 0.0;
 
             $row = array_merge($row, [
                 ucfirst(str_replace('_', ' ', $paymentStatus)),

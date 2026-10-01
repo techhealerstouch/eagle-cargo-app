@@ -84,15 +84,31 @@ export function NotificationDropdown() {
     };
 
     return (
-        <DropdownMenu onOpenChange={(open) => { if (open) refetch(); }}>
+        <DropdownMenu
+            onOpenChange={(open) => {
+                if (open) {
+                    refetch({ force: true });
+                }
+            }}
+        >
             <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="group relative h-9 w-9 cursor-pointer">
-                    <Bell className="size-5 opacity-80 group-hover:opacity-100" />
-                    {unreadCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-background">
-                            {unreadCount}
-                        </span>
-                    )}
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    className="group relative h-8 px-2 sm:px-2.5 rounded-xl flex items-center gap-1.5 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                    title={`Notifications ${unreadCount > 0 ? `(${unreadCount} unread)` : ''}`}
+                >
+                    <div className="relative flex items-center">
+                        <Bell className="size-4 opacity-80 group-hover:opacity-100 transition-opacity" />
+                        {unreadCount > 0 && (
+                            <span className="absolute -top-1.5 -right-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white shadow-xs">
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                            </span>
+                        )}
+                    </div>
+                    <span className="hidden 2xl:inline font-medium text-xs opacity-80 group-hover:opacity-100 transition-opacity">
+                        Notifications
+                    </span>
                     <span className="sr-only">Notifications</span>
                 </Button>
             </DropdownMenuTrigger>

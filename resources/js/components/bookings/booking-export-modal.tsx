@@ -62,7 +62,7 @@ const DATA_SECTIONS: DataSection[] = [
     {
         id: 'booking',
         title: 'Booking Details',
-        description: 'Reference, type, service, preferred date, status, created at',
+        description: 'Reference, type, preferred date, status, created at',
         icon: Package,
     },
     {

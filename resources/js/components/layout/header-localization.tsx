@@ -9,19 +9,18 @@ export function HeaderLocalization() {
     useEffect(() => {
         const timer = setInterval(() => {
             setNow(new Date());
-        }, 1000); // Update every second for the clock
+        }, 1000);
 
         return () => clearInterval(timer);
     }, []);
 
     if (!settings) {
-return null;
-}
+        return null;
+    }
 
     const timezone = settings.timezone || 'UTC';
-    
-    // Format time
-    const timeString = new Intl.DateTimeFormat('en-US', {
+
+    const timeString = new Intl.DateTimeFormat('en-AU', {
         timeZone: timezone,
         hour: '2-digit',
         minute: '2-digit',
@@ -29,53 +28,44 @@ return null;
         hour12: true,
     }).format(now);
 
-    // Format date based on system setting if possible, otherwise standard
-    // Note: PHP format strings (d/m/Y) are different from JS. 
-    // We'll use a standard long date format for the header to look professional.
-    const dateString = new Intl.DateTimeFormat('en-US', {
+    const dateString = new Intl.DateTimeFormat('en-AU', {
         timeZone: timezone,
         month: 'short',
         day: 'numeric',
         year: 'numeric',
     }).format(now);
 
+    const currencyCode = settings.currency || 'AUD';
+    const currencySymbol = settings.currencySymbol || '$';
+
     return (
-        <div className="hidden lg:flex items-center gap-4 px-4 py-1.5 rounded-2xl bg-zinc-100/50 border border-zinc-200/50 backdrop-blur-sm mx-4 transition-all hover:bg-zinc-100 hover:border-zinc-300 group">
-            <div className="flex items-center gap-2.5">
-                <div className="size-7 rounded-lg bg-white border border-zinc-200 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-                    <Clock className="size-3.5 text-brand-rust" />
-                </div>
-                <div className="flex flex-col">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 leading-none mb-0.5">System Time</span>
-                    <span className="text-[11px] font-bold text-zinc-900 leading-none tabular-nums">{timeString}</span>
-                </div>
+        <div 
+            className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-100/70 dark:bg-zinc-900/70 border border-zinc-200/80 dark:border-zinc-800 shadow-2xs backdrop-blur-md transition-all hover:border-zinc-300 dark:hover:border-zinc-700 select-none shrink-0"
+            title={`Timezone: ${timezone} | Base Currency: ${currencyCode}`}
+        >
+            {/* System Time */}
+            <div className="flex items-center gap-1.5 text-xs text-foreground font-semibold" title={`System Time (${timezone})`}>
+                <Clock className="size-3 text-brand-rust shrink-0" />
+                <span className="tabular-nums tracking-tight">{timeString}</span>
             </div>
 
-            <div className="h-6 w-px bg-zinc-200/60"></div>
+            {/* Divider (visible on xl+ when date is displayed) */}
+            <span className="hidden xl:inline-block h-3.5 w-px bg-zinc-200 dark:bg-zinc-700"></span>
 
-            <div className="flex items-center gap-2.5">
-                <div className="size-7 rounded-lg bg-white border border-zinc-200 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-                    <Calendar className="size-3.5 text-brand-rust" />
-                </div>
-                <div className="flex flex-col">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 leading-none mb-0.5">Global Date</span>
-                    <span className="text-[11px] font-bold text-zinc-900 leading-none">{dateString}</span>
-                </div>
+            {/* Global Date (shows on xl+) */}
+            <div className="hidden xl:flex items-center gap-1.5 text-xs text-muted-foreground font-medium" title="Global Date">
+                <Calendar className="size-3 text-brand-rust shrink-0" />
+                <span className="whitespace-nowrap">{dateString}</span>
             </div>
 
-            <div className="h-6 w-px bg-zinc-200/60"></div>
+            {/* Divider */}
+            <span className="h-3.5 w-px bg-zinc-200 dark:bg-zinc-700"></span>
 
-            <div className="flex items-center gap-2.5">
-                <div className="size-7 rounded-lg bg-brand-rust/5 border border-brand-rust/20 flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-                    <Coins className="size-3.5 text-brand-rust" />
-                </div>
-                <div className="flex flex-col">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-brand-rust/60 leading-none mb-0.5">Currency</span>
-                    <div className="flex items-center gap-1">
-                        <span className="text-[11px] font-black text-brand-rust leading-none">{settings.currency || 'AUD'}</span>
-                        <span className="text-[10px] font-medium text-zinc-400 leading-none">({settings.currencySymbol || '$'})</span>
-                    </div>
-                </div>
+            {/* Currency */}
+            <div className="flex items-center gap-1 text-xs font-bold text-brand-rust" title={`Currency: ${currencyCode} (${currencySymbol})`}>
+                <Coins className="size-3 shrink-0" />
+                <span>{currencyCode}</span>
+                <span className="text-[10px] font-normal text-muted-foreground">({currencySymbol})</span>
             </div>
         </div>
     );
