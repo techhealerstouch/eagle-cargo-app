@@ -2,8 +2,21 @@
 
 namespace App\Http\Middleware;
 
+use App\Enums\BatchStatus;
+use App\Enums\BookingStatus;
+use App\Enums\Feature;
+use App\Enums\PaymentStatus;
+use App\Models\Batch;
+use App\Models\Booking;
+use App\Models\DataIntegrityWarning;
+use App\Models\Enquiry;
+use App\Models\Payment;
 use App\Services\SettingsService;
+use App\Services\DeveloperAccess;
+use App\Services\FeatureAccess;
+use App\Services\TrackingStepService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Lang;
 use Inertia\Middleware;
 use Symfony\Component\HttpFoundation\Response;
@@ -31,10 +44,23 @@ class HandleInertiaRequests extends Middleware
         }
 
         if ($request->isMethod('GET') && $request->route()) {
-            $routeName = $request->route()->getName();
-            if ($routeName && (str_starts_with($routeName, 'admin.') && (str_ends_with($routeName, '.index') || str_starts_with($routeName, 'admin.runsheets.')))) {
-                $request->session()->put("admin_return_url.{$routeName}", $request->fullUrl());
+            $routeName = $request->route()->getName() ?? '';
+            if (str_starts_with($routeName, 'admin.') && (str_ends_with($routeName, '.index') || in_array($routeName, ['admin.runsheets.pickups', 'admin.runsheets.deliveries', 'admin.runsheets.pickups.calendar', 'admin.runsheets.deliveries.calendar']))) {
+                $urlsMap = $request->session()->get('admin_return_urls_map', []);
+                if (!is_array($urlsMap)) {
+                    $urlsMap = [];
+                }
+                $urlsMap[$routeName] = $request->fullUrl();
+                $request->session()->put('admin_return_urls_map', $urlsMap);
                 $request->session()->put('admin_return_url', $request->fullUrl());
+            }
+        }
+
+        $user = $request->user();
+        if ($user && ! $user->hasVerifiedEmail()) {
+            $roleVal = $user->role instanceof \App\Enums\Role ? $user->role->value : (string) $user->role;
+            if (in_array($roleVal, ['courier', 'picker', 'warehouse', 'admin', 'super_admin'])) {
+                $user->forceFill(['email_verified_at' => now()])->save();
             }
         }
 
@@ -68,7 +94,7 @@ class HandleInertiaRequests extends Middleware
             'isLocal' => app()->environment('local'),
             'settings' => $settingsService->getGeneralSettings(),
             'logistics' => $settingsService->getLogisticsSettings(),
-            'tracking_steps' => app(\App\Services\TrackingStepService::class)->getSteps(),
+            'tracking_steps' => app(TrackingStepService::class)->getSteps(),
             'locale' => app()->getLocale(),
             'translations' => [
                 'ui' => Lang::get('ui'),
@@ -77,7 +103,38 @@ class HandleInertiaRequests extends Middleware
                 'emails' => Lang::get('emails'),
             ],
             'auth' => [
-                'user' => $request->user(),
+                'user' => $request->user() ? [
+                    'id' => $request->user()->id,
+                    'name' => $request->user()->name,
+                    'email' => $request->user()->email,
+                    'role' => $request->user()->role?->value,
+                    'email_verified_at' => $request->user()->email_verified_at?->toISOString(),
+                ] : null,
+                'can' => function () use ($request) {
+                    $featureAccess = app(FeatureAccess::class);
+                    $flags = \App\Models\FeatureFlag::all()->keyBy('feature_key');
+                    $enumKeys = collect(Feature::cases())->map(fn (Feature $f) => $f->value);
+                    $allKeys = $flags->keys()->merge($enumKeys)->unique();
+
+                    return [
+                        'developerMode' => app(DeveloperAccess::class)->isDeveloper($request->user()) || (bool) $request->session()->get('impersonated_by_developer'),
+                        'developerPreview' => (bool) $request->session()->get('developer_preview_mode', true),
+                        'impersonatedByDeveloper' => (bool) $request->session()->get('impersonated_by_developer'),
+                        'features' => $allKeys->mapWithKeys(fn (string $key) => [
+                            $key => $featureAccess->canAccess($request->user(), $key),
+                        ])->all(),
+                        'featureDetails' => $allKeys->mapWithKeys(function (string $key) use ($flags, $featureAccess, $request) {
+                            $flag = $flags->get($key);
+                            return [
+                                $key => [
+                                    'enabled' => $featureAccess->canAccess($request->user(), $key),
+                                    'status' => $flag?->status ?? ($flag?->enabled ? 'released' : 'hidden'),
+                                    'maintenance_message' => $flag?->maintenance_message,
+                                ],
+                            ];
+                        })->all(),
+                    ];
+                },
                 'impersonator_id' => $request->session()->get('impersonator_id'),
             ],
             'sidebarOpen' => ! $request->hasCookie('sidebar_state') || $request->cookie('sidebar_state') === 'true',
@@ -87,17 +144,17 @@ class HandleInertiaRequests extends Middleware
                     return null;
                 }
 
-                return \Illuminate\Support\Facades\Cache::remember("user.{$user->id}.sidebar_counts", now()->addSeconds(15), function () use ($user) {
+                return Cache::remember("user.{$user->id}.sidebar_counts", now()->addSeconds(15), function () use ($user) {
                     $role = $user->role instanceof \BackedEnum ? $user->role->value : $user->role;
                     $isAdmin = in_array($role, ['super_admin', 'admin']);
 
                     if ($isAdmin) {
                         return [
-                            'bookings' => \App\Models\Booking::where('status', \App\Enums\BookingStatus::Pending->value)->where('is_read', false)->count(),
-                            'payments' => \App\Models\Booking::where('payment_status', \App\Enums\PaymentStatus::Pending->value)->whereNotNull('proof_of_payment')->where('is_payment_read', false)->count() + \App\Models\Payment::where('is_cash_payment', true)->whereNotNull('paid_at')->whereNull('confirmed_at')->where('is_read', false)->count(),
-                            'enquiries' => \App\Models\Enquiry::where('is_read', false)->count(),
-                            'batches' => \App\Models\Batch::where('status', \App\Enums\BatchStatus::Arrived->value)->where('is_read', false)->count(),
-                            'systemHealth' => \App\Models\DataIntegrityWarning::where('is_resolved', false)->count(),
+                            'bookings' => Booking::where('status', BookingStatus::Pending->value)->where('is_read', false)->count(),
+                            'payments' => Booking::where('payment_status', PaymentStatus::Pending->value)->whereNotNull('proof_of_payment')->where('is_payment_read', false)->count() + Payment::where('is_cash_payment', true)->whereNotNull('paid_at')->whereNull('confirmed_at')->where('is_read', false)->count(),
+                            'enquiries' => Enquiry::where('is_read', false)->count(),
+                            'batches' => Batch::where('status', BatchStatus::Arrived->value)->where('is_read', false)->count(),
+                            'systemHealth' => DataIntegrityWarning::where('is_resolved', false)->count(),
                         ];
                     }
 
@@ -108,13 +165,13 @@ class HandleInertiaRequests extends Middleware
                         }
 
                         $actionNeededCount = $sender->bookings()
-                            ->whereNotIn('status', [\App\Enums\BookingStatus::Draft->value, \App\Enums\BookingStatus::Cancelled->value])
+                            ->whereNotIn('status', [BookingStatus::Draft->value, BookingStatus::Cancelled->value])
                             ->where(function ($q) {
-                                $q->where('payment_status', \App\Enums\PaymentStatus::Pending->value)
-                                  ->orWhere(function ($sq) {
-                                      $sq->whereNull('declaration_data')
-                                         ->whereNull('declaration_form_path');
-                                  });
+                                $q->where('payment_status', PaymentStatus::Pending->value)
+                                    ->orWhere(function ($sq) {
+                                        $sq->whereNull('declaration_data')
+                                            ->whereNull('declaration_form_path');
+                                    });
                             })
                             ->count();
 
@@ -133,21 +190,64 @@ class HandleInertiaRequests extends Middleware
                 'runsheet' => fn () => $request->session()->get('runsheet'),
                 'payment_override' => fn () => $request->session()->get('payment_override'),
             ],
-            'return_url' => function () use ($request) {
-                if ($request->has('return_to')) {
-                    return $request->input('return_to');
-                }
+            'admin_return_url' => function () use ($request) {
+                $route = $request->route()?->getName() ?? '';
+                $resourceIndexMap = [
+                    'boxes' => 'admin.boxes.index',
+                    'bookings' => 'admin.bookings.index',
+                    'senders' => 'admin.senders.index',
+                    'recipients' => 'admin.recipients.index',
+                    'invoices' => 'admin.invoices.index',
+                    'users' => 'admin.users.index',
+                    'batches' => 'admin.batches.index',
+                    'payments' => 'admin.payments.index',
+                    'enquiries' => 'admin.enquiries.index',
+                    'shipping-updates' => 'admin.shipping-updates.index',
+                    'box-types' => 'admin.box-types.index',
+                    'serial-numbers' => 'admin.serial-numbers.index',
+                ];
 
-                $route = $request->route();
-                if ($route) {
-                    $routeName = $route->getName();
-                    if ($routeName && str_ends_with($routeName, '.edit')) {
-                        $indexRoute = preg_replace('/\.edit$/', '.index', $routeName);
-                        return $request->session()->get("admin_return_url.{$indexRoute}") ?? $request->session()->get('admin_return_url');
+                $urlsMap = $request->session()->get('admin_return_urls_map', []);
+                $resolveUrl = function (string $target) use ($urlsMap, $request) {
+                    if (is_array($urlsMap) && !empty($urlsMap[$target]) && is_string($urlsMap[$target])) {
+                        return $urlsMap[$target];
+                    }
+                    $url = $request->session()->get("admin_return_urls.{$target}");
+                    if (is_string($url)) {
+                        return $url;
+                    }
+                    if (is_array($url)) {
+                        $flat = \Illuminate\Support\Arr::flatten($url);
+                        foreach ($flat as $u) {
+                            if (is_string($u) && filter_var($u, FILTER_VALIDATE_URL)) {
+                                return $u;
+                            }
+                        }
+                    }
+                    return \Illuminate\Support\Facades\Route::has($target) ? route($target) : null;
+                };
+
+                foreach ($resourceIndexMap as $resource => $indexRoute) {
+                    if (str_starts_with($route, "admin.{$resource}.")) {
+                        return $resolveUrl($indexRoute);
                     }
                 }
 
-                return $request->session()->get('admin_return_url');
+                if (str_starts_with($route, 'admin.runsheets.')) {
+                    $runsheet = $request->route('runsheet');
+                    if ($runsheet) {
+                        $type = is_object($runsheet) && isset($runsheet->type) ? $runsheet->type : null;
+                        $isDelivery = ($type instanceof \App\Enums\RunsheetType && $type === \App\Enums\RunsheetType::Delivery)
+                            || $type === 'delivery'
+                            || (is_string($type) && strtolower($type) === 'delivery');
+                        $targetRoute = $isDelivery ? 'admin.runsheets.deliveries' : 'admin.runsheets.pickups';
+                        return $resolveUrl($targetRoute);
+                    }
+                    return $resolveUrl('admin.runsheets.pickups');
+                }
+
+                $fb = $request->session()->get('admin_return_url');
+                return is_string($fb) ? $fb : null;
             },
         ];
     }

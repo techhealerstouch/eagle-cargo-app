@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import ConfirmModal from '@/components/common/confirm-modal';
 import FilterSelect from '@/components/common/filter-select';
+import BookingExportModal from '@/components/bookings/booking-export-modal';
+import ExcelImportModal from '@/components/common/excel-import-modal';
 import Heading from '@/components/common/heading';
 import Pagination, { PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
@@ -154,6 +156,7 @@ export default function BookingsIndex({
     const [selectedBookingId, setSelectedBookingId] = useState<number | null>(null);
     const [adminNotes, setAdminNotes] = useState('');
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
     const [isGlobalSelection, setIsGlobalSelection] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isBulkUpdateModalOpen, setIsBulkUpdateModalOpen] = useState(false);
@@ -434,13 +437,22 @@ export default function BookingsIndex({
                         title="Logistics Bookings"
                         description="Manage sender box bookings, schedules, and carrier assignments."
                     />
-                    <Link
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <BookingExportModal
+                            exportUrl="/admin/bookings/export-excel"
+                            selectedIds={selectedIds}
+                            filters={filters}
+                            label="Export"
+                            size="sm"
+                        />
+                        <Link
                         href="/admin/bookings/create"
                         className="h-9 px-4 rounded-lg bg-brand-rust text-white text-xs font-medium hover:bg-brand-rust/90 flex items-center gap-1.5 transition-colors shadow-2xs shrink-0"
                     >
                         <Plus className="size-3.5" />
                         New Booking
                     </Link>
+                </div>
                 </div>
 
                 <div className="flex flex-col gap-4">
@@ -498,8 +510,8 @@ export default function BookingsIndex({
                         </TabsList>
                     </Tabs>
 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div className="flex flex-1 flex-wrap items-end gap-3">
                             <SearchFilter
                                 routeName="/admin/bookings"
                                 queryParams={filters}

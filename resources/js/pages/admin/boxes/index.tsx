@@ -8,6 +8,8 @@ import UpdateBoxStatusModal from '@/components/admin/update-box-status-modal';
 import BoxBulkUpdateModal from '@/components/admin/box-bulk-update-modal';
 import BulkAssignBatchModal from '@/components/admin/bulk-assign-batch-modal';
 import ConfirmModal from '@/components/common/confirm-modal';
+import ExcelExportButton from '@/components/common/excel-export-button';
+import ExcelImportModal from '@/components/common/excel-import-modal';
 import Heading from '@/components/common/heading';
 import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
@@ -243,6 +245,7 @@ export default function BoxesIndex({
     };
 
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
     const [selectedBox, setSelectedBox] = useState<Box | null>(null);
     const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
     const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
@@ -318,13 +321,33 @@ export default function BoxesIndex({
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Boxes Inventory | Admin" />
 
-            <div className="flex h-full flex-1 flex-col gap-5 p-4 sm:p-6 md:p-8 min-w-0 w-full">
+            
+            <ExcelImportModal
+                isOpen={isImportModalOpen}
+                onClose={() => setIsImportModalOpen(false)}
+                title="Import Boxes"
+                description="Upload an Excel (.xlsx) file to create new boxes or update existing boxes by tracking number."
+                importUrl="/admin/boxes/import-excel"
+                templateUrl="/admin/boxes/import-template"
+                entityName="Boxes"
+            />
+<div className="flex h-full flex-1 flex-col gap-5 p-4 sm:p-6 md:p-8 min-w-0 w-full">
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-zinc-200/80 pb-5">
                     <Heading
                         eyebrow="Inventory Management"
                         title="Box Tracking & Inventory"
                         description="Track individual boxes across sea transit, hub scans, and final delivery."
                     />
+                
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <ExcelExportButton
+                            exportUrl="/admin/boxes/export-excel"
+                            selectedIds={selectedIds}
+                            filters={filters}
+                            label="Export"
+                            size="sm"
+                        />
+                    </div>
                 </div>
 
                 <div className="flex flex-col gap-4">
@@ -373,8 +396,8 @@ export default function BoxesIndex({
                         </TabsList>
                     </Tabs>
 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div className="flex flex-1 flex-wrap items-end gap-3">
                             <SearchFilter
                                 routeName="/admin/boxes"
                                 queryParams={filters}
@@ -419,23 +442,31 @@ export default function BoxesIndex({
                                     }))
                                 ]}
                             />
-                            <select
-                                className="h-9 px-3 text-xs rounded-lg border border-zinc-200 bg-white text-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-                                value={filters.area_id || ''}
-                                onChange={(e) => {
-                                    router.get('/admin/boxes', { ...filters, area_id: e.target.value }, { preserveState: true });
-                                }}
-                            >
-                                <option value="">All Areas</option>
-                                {areas.map(area => (
-                                    <option key={area.id} value={area.id}>{area.name}</option>
-                                ))}
-                            </select>
+                            <FilterSelect
+                                label="Area"
+                                routeName="/admin/boxes"
+                                paramName="area_id"
+                                queryParams={filters}
+                                placeholder="All Areas"
+                                options={areas.map((area: any) => ({
+                                    label: area.name,
+                                    value: String(area.id),
+                                }))}
+                            />
                         </div>
                     </div>
                     <ActiveFilterChips
                         routeName="/admin/boxes"
                         queryParams={filters}
+                        labels={{
+                            payment_status: 'Payment',
+                            declaration_form_status: 'Declaration',
+                            batch_id: 'Batch',
+                            area_id: 'Area',
+                            search: 'Search',
+                            status: 'Status',
+                            trashed: 'Status',
+                        }}
                     />
                 </div>
 

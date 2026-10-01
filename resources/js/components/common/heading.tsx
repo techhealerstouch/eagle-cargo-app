@@ -15,11 +15,12 @@ export default function Heading({
         <header className={variant === 'small' ? '' : 'space-y-1'}>
             {eyebrow && <div className="eyebrow">{eyebrow}</div>}
             <h2
-                className={
+                className={cn(
+                    "font-sans text-brand-text",
                     variant === 'small'
-                        ? 'mb-1 text-base font-semibold text-brand-text'
-                        : 'text-2xl font-semibold tracking-tight text-brand-text leading-tight'
-                }
+                        ? 'mb-0.5 text-base font-bold'
+                        : 'text-xl font-bold tracking-tight leading-tight'
+                )}
             >
                 {title}
             </h2>

@@ -5,6 +5,9 @@ use App\Http\Middleware\EnsureRole;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use Illuminate\Foundation\Application;
+use App\Http\Middleware\EnsureFeatureAccess;
+use App\Http\Middleware\EnsureDeveloper;
+use App\Http\Middleware\AssignCorrelationId;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
@@ -27,8 +30,14 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->statefulApi();
 
         $middleware->alias([
+            'developer' => EnsureDeveloper::class,
+            'feature' => EnsureFeatureAccess::class,
             'role' => EnsureRole::class,
             'declaration.signed' => EnsureDeclarationSigned::class,
+        ]);
+
+        $middleware->prepend([
+            AssignCorrelationId::class,
         ]);
 
         $middleware->web(append: [

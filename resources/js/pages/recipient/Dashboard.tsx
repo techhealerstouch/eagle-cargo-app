@@ -1,6 +1,7 @@
 import { Head, Link } from '@inertiajs/react';
 import { Package, User, MapPin, ArrowRight, Truck, CheckCircle2, Clock } from 'lucide-react';
 import AppLayout from '@/layouts/app-layout';
+import { BOX_STATUS_CONFIG } from '@/lib/statuses';
 import type { BreadcrumbItem } from '@/types';
 
 interface BoxRecipient {
@@ -130,7 +131,7 @@ export default function Dashboard({ boxes, stats, pageTitle = 'Recipient Dashboa
                                                 <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
                                                     box.status === 'delivered' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
                                                 }`}>
-                                                    {box.status.replace(/_/g, ' ')}
+                                                    {BOX_STATUS_CONFIG[box.status]?.label ?? box.status.replace(/_/g, ' ')}
                                                 </div>
                                             </div>
 

@@ -2,6 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use Maatwebsite\Excel\Facades\Excel;
+
+use App\Services\AuditLogService;
+
+use App\Imports\BookingsImport;
+
+use App\Exports\BookingsExport;
+
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
@@ -25,6 +33,7 @@ use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\RunsheetService;
 use App\Services\SettingsService;
 use App\Services\ReferenceDataService;
+use App\Services\TrackingStepService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -1096,7 +1105,26 @@ class BookingController extends Controller
         }
 
         if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+            $statusVal = (string) $request->status;
+            $trackingStep = app(TrackingStepService::class)->getStep($statusVal);
+
+            if ($trackingStep) {
+                $systemStatus = $trackingStep['system_status'] ?? null;
+                $query->where(function ($q) use ($statusVal, $systemStatus) {
+                    $q->whereHas('boxes', function ($bq) use ($statusVal, $systemStatus) {
+                        $bq->where('tracking_step_key', $statusVal);
+                        if ($systemStatus) {
+                            $bq->orWhere('status', $systemStatus);
+                        }
+                    });
+                    if ($systemStatus) {
+                        $q->orWhere('status', $systemStatus);
+                    }
+                    $q->orWhere('status', $statusVal);
+                });
+            } else {
+                $query->where('status', $statusVal);
+            }
         }
 
         if ($request->filled('payment_status')) {
@@ -1127,6 +1155,14 @@ class BookingController extends Controller
             }
         }
 
+        if ($request->filled('start_date')) {
+            $query->whereDate('created_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('created_at', '<=', $request->end_date);
+        }
+
         $sortableColumns = [
             'reference_number',
             'status',
@@ -1140,4 +1176,75 @@ class BookingController extends Controller
 
         return $query->orderBy($sort, $direction)->orderBy('id', 'desc');
     }
+
+
+
+    public function exportExcel(Request $request)
+    {
+        $query = Booking::with(['sender', 'boxes.recipient', 'boxes.boxType', 'runsheets.courier', 'runsheets.picker', 'invoice']);
+
+        if ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $query->whereIn('id', array_filter($ids));
+        } else {
+            $query = $this->applyFilters($query, $request);
+        }
+
+        $bookings = $query->get();
+
+        $sections = $request->input('sections', []);
+        if (is_string($sections)) {
+            $sections = explode(',', $sections);
+        }
+        $sections = array_filter((array) $sections);
+
+        $format = strtolower($request->input('format', 'xlsx'));
+        $extension = $format === 'csv' ? 'csv' : 'xlsx';
+        $filename = 'bookings_export_'.now()->format('Ymd_His').'.'.$extension;
+
+        app(AuditLogService::class)->logExportEvent($format, "Bookings list exported as {$extension}", [
+            'count' => $bookings->count(),
+            'sections' => $sections,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'status' => $request->status,
+        ]);
+
+        return Excel::download(new BookingsExport($bookings, false, $sections), $filename);
+    }
+
+
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new BookingsExport(null, true), 'bookings_import_template.xlsx');
+    }
+
+
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new BookingsImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
+    }
+
 }

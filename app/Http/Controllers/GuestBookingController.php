@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\GuestBookingAccessService;
+
 use App\Enums\BookingStatus;
 use App\Http\Requests\StoreGuestBookingRequest;
 use App\Models\Booking;
@@ -21,7 +23,8 @@ class GuestBookingController extends Controller
 {
     public function __construct(
         protected BookingRepositoryInterface $bookingRepository,
-        protected ReferenceDataService $referenceData
+        protected ReferenceDataService $referenceData,
+        protected GuestBookingAccessService $guestAccess
     ) {}
 
     /**
@@ -348,5 +351,41 @@ class GuestBookingController extends Controller
 
         return redirect()->back()->with('error', 'Failed to upload proof of payment.');
     }
-}
 
+
+
+    public function verifyAccess(Request $request, Booking $booking): Response
+    {
+        $purpose = (string) $request->query('purpose');
+        $this->guestAccess->authorize($request, $booking, $purpose);
+
+        $this->guestAccess->sendChallenge($booking, $purpose);
+
+        return Inertia::render('guest/VerifyAccess', [
+            'bookingId' => $booking->id,
+            'bookingReference' => $booking->reference_number,
+            'purpose' => $purpose,
+            'accessQuery' => '?'.$request->getQueryString(),
+            'email' => $booking->sender?->email,
+        ]);
+    }
+
+
+
+    public function verifyAccessCode(Request $request, Booking $booking)
+    {
+        $purpose = (string) $request->query('purpose');
+        $this->guestAccess->authorize($request, $booking, $purpose);
+        $request->validate(['code' => ['required', 'digits:6']]);
+
+        if (! $this->guestAccess->verifyChallenge($request, $booking, $purpose, (string) $request->input('code'))) {
+            return back()->withErrors(['code' => 'That verification code is invalid or expired.']);
+        }
+
+        $target = $purpose === GuestBookingAccessService::PAYMENT
+            ? $this->guestAccess->paymentUrl($booking)
+            : $this->guestAccess->declarationUrl($booking);
+
+        return redirect($target);
+    }
+}

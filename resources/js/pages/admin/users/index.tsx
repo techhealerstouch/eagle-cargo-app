@@ -30,6 +30,7 @@ const ROLE_COLORS: Record<string, string> = {
     picker: 'bg-cyan-500/10 text-cyan-600 border border-cyan-500/20',
     warehouse: 'bg-amber-500/10 text-amber-600 border border-amber-500/20',
     sender: 'bg-muted text-muted-foreground border border-border',
+    developer: 'bg-emerald-500/10 text-emerald-600 border border-emerald-500/20',
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -39,6 +40,7 @@ const ROLE_LABELS: Record<string, string> = {
     picker: 'Picker',
     warehouse: 'Warehouse',
     sender: 'Sender',
+    developer: 'Developer',
 };
 
 export default function UsersIndex({

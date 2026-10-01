@@ -157,8 +157,9 @@ export default function Show({ runsheet }: ShowProps) {
                             <ArrowLeft className="size-5" />
                         </Link>
                         <Heading
+                            eyebrow="Logistics & Dispatch"
                             title={`Runsheet #${runsheet.id}`}
-                            description="Detailed view of this runsheet and its bookings."
+                            description="Detailed view of this runsheet and its assigned stops."
                         />
                     </div>
                     <div className="flex items-center gap-3">

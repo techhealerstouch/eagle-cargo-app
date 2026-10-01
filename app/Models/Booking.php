@@ -56,6 +56,13 @@ class Booking extends Model
         'notes',
         'payment_method',
         'admin_notes',
+        'tracking_views_count',
+        'last_tracked_at',
+        'promotion_id',
+        'promo_code',
+        'discount_amount',
+        'is_read',
+        'is_payment_read',
         'confirmed_at',
         'shipped_at',
         'declaration_data',
@@ -120,6 +127,11 @@ class Booking extends Model
         }
 
         $this->attributes['status'] = $newStatus->value;
+    }
+
+        public function promotion()
+    {
+        return $this->belongsTo(Promotion::class);
     }
 
     public function sender()

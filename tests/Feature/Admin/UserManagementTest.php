@@ -462,5 +462,47 @@ class UserManagementTest extends TestCase
         // Ensure new user was not created
         $this->assertEquals(1, User::withTrashed()->where('email', 'archived@example.com')->count());
     }
+
+    public function test_all_staff_filter_excludes_senders_and_recipients(): void
+    {
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $courier = User::factory()->create(['role' => Role::Courier]);
+        $sender = User::factory()->create(['role' => Role::Sender]);
+        $recipient = User::factory()->create(['role' => Role::Recipient]);
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index'));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('admin/users/index')
+            ->has('users.data')
+            ->where('users.data', fn ($users) => 
+                collect($users)->pluck('id')->contains($admin->id) &&
+                collect($users)->pluck('id')->contains($courier->id) &&
+                !collect($users)->pluck('id')->contains($sender->id) &&
+                !collect($users)->pluck('id')->contains($recipient->id)
+            )
+        );
+    }
+
+    public function test_admins_filter_includes_both_admin_and_super_admin_users(): void
+    {
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $superAdmin = User::factory()->create(['role' => Role::SuperAdmin]);
+        $courier = User::factory()->create(['role' => Role::Courier]);
+
+        $response = $this->actingAs($admin)->get(route('admin.users.index', ['role' => 'admin']));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('admin/users/index')
+            ->has('users.data')
+            ->where('users.data', fn ($users) => 
+                collect($users)->pluck('id')->contains($admin->id) &&
+                collect($users)->pluck('id')->contains($superAdmin->id) &&
+                !collect($users)->pluck('id')->contains($courier->id)
+            )
+        );
+    }
 }
 

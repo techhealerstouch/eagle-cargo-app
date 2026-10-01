@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Services\AuditLogService;
+
 use App\Enums\CommissionStatus;
 use App\Enums\InvoiceStatus;
 use App\Http\Controllers\Controller;
@@ -429,4 +431,173 @@ class FinancialReportController extends Controller
 
         return 'data:image/jpeg;base64,'.base64_encode($bytes);
     }
+
+
+
+    public function downloadCsv(Request $request, SettingsService $settingsService, AuditLogService $auditLogService)
+    {
+        $startDate = $request->input('start_date') ? Carbon::parse($request->input('start_date'))->startOfDay() : now()->startOfMonth();
+        $endDate = $request->input('end_date') ? Carbon::parse($request->input('end_date'))->endOfDay() : now()->endOfMonth();
+
+        $data = $this->getFinancialStats($startDate, $endDate, [
+            'include_sales_page' => false,
+            'include_sales_full' => true,
+            'include_outstanding_report' => true,
+            'include_recent_payments' => false,
+        ]);
+
+        $stats = $data['stats'];
+        $sales = $data['sales_report_full'];
+        $currencySymbol = $settingsService->getGeneralSettings()['currencySymbol'] ?? '$';
+        $taxLabel = $settingsService->getInvoiceSettings()['taxLabel'] ?? 'GST';
+
+        $filename = 'financial-report-'.$startDate->format('Y-m-d').'-to-'.$endDate->format('Y-m-d').'.csv';
+
+        // Log export in GeneratedReport for history/audit
+        GeneratedReport::create([
+            'type' => 'financial',
+            'filename' => $filename,
+            'parameters' => [
+                'start_date' => $startDate->toDateString(),
+                'end_date' => $endDate->toDateString(),
+                'report_type' => 'csv_export',
+                'report_title' => 'Financial CSV Export',
+            ],
+            'user_id' => $request->user()->id,
+        ]);
+
+        $auditLogService->logExportEvent('csv', 'Financial report exported as CSV', [
+            'start_date' => $startDate->toDateString(),
+            'end_date' => $endDate->toDateString(),
+            'total_invoiced' => $stats['total_invoiced'],
+            'total_collected' => $stats['total_collected'],
+        ]);
+
+        return response()->streamDownload(function () use ($stats, $sales, $currencySymbol, $taxLabel, $startDate, $endDate) {
+            $handle = fopen('php://output', 'w');
+
+            // UTF-8 BOM for Excel compatibility
+            fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
+
+            // Section 1: Executive Summary
+            fputcsv($handle, ['=== EAGLE CARGO - FINANCIAL AUDIT REPORT ===']);
+            fputcsv($handle, ['Period:', $startDate->format('Y-m-d').' to '.$endDate->format('Y-m-d')]);
+            fputcsv($handle, ['Generated At:', now()->toIso8601String()]);
+            fputcsv($handle, ['Currency:', $currencySymbol]);
+            fputcsv($handle, []);
+
+            fputcsv($handle, ['--- EXECUTIVE SUMMARY ---']);
+            fputcsv($handle, ['Metric', 'Amount', 'Notes']);
+            fputcsv($handle, ['Total Invoiced', number_format($stats['total_invoiced'], 2), 'Gross invoiced revenue (non-voided)']);
+            fputcsv($handle, ['Courier Commissions (Gross)', number_format($stats['total_commissions'], 2), 'Courier commissions issued in period']);
+            fputcsv($handle, ['Clawbacks Recovered', number_format($stats['total_clawbacks'], 2), 'Refund/cancellation commission recoveries']);
+            fputcsv($handle, ['Net Courier Commissions', number_format($stats['net_commissions'], 2), 'Commissions less recovered clawbacks']);
+            fputcsv($handle, ['Invoiced Revenue (Less Comm.)', number_format($stats['net_revenue'], 2), 'Total Invoiced - Net Courier Commissions']);
+            fputcsv($handle, ['Total Settled Collections', number_format($stats['total_collected'], 2), 'Confirmed cash & electronic inflows']);
+            fputcsv($handle, ['Period Unconfirmed Cash', number_format($stats['unconfirmed_cash'], 2), 'Cash collected by couriers pending admin confirmation']);
+            fputcsv($handle, ['All-Time Unconfirmed Cash', number_format($stats['all_time_unconfirmed_cash'], 2), 'Total pending cash across all periods']);
+            fputcsv($handle, ['Period Collection Rate', $stats['collection_rate'].'%', 'Settled collections against period invoices']);
+            fputcsv($handle, ['Total Outstanding Receivables', number_format($stats['outstanding_amount'], 2), 'Open balance across unpaid/partial invoices (settled basis)']);
+            fputcsv($handle, []);
+
+            // Section 2: Receivables Aging
+            fputcsv($handle, ['--- RECEIVABLES AGING BREAKDOWN (As of ' . ($stats['reference_date'] ?? $endDate->toDateString()) . ') ---']);
+            fputcsv($handle, ['Bucket', 'Outstanding Amount']);
+            fputcsv($handle, ['Current (Not yet due)', number_format($stats['aging_buckets']['current'] ?? 0, 2)]);
+            fputcsv($handle, ['1-30 Days Overdue', number_format($stats['aging_buckets']['overdue_30'] ?? 0, 2)]);
+            fputcsv($handle, ['31-60 Days Overdue', number_format($stats['aging_buckets']['overdue_60'] ?? 0, 2)]);
+            fputcsv($handle, ['61-90 Days Overdue', number_format($stats['aging_buckets']['overdue_90'] ?? 0, 2)]);
+            fputcsv($handle, ['90+ Days Overdue', number_format($stats['aging_buckets']['overdue_90_plus'] ?? 0, 2)]);
+            fputcsv($handle, []);
+
+            // Section 3: Payment Method Summary
+            fputcsv($handle, ['--- SETTLED COLLECTIONS BY PAYMENT METHOD ---']);
+            fputcsv($handle, ['Payment Method', 'Total Collected']);
+            foreach ($stats['payment_methods'] as $pm) {
+                fputcsv($handle, [ucwords(str_replace('_', ' ', $pm->payment_method)), number_format($pm->total, 2)]);
+            }
+            fputcsv($handle, []);
+
+            // Section 4: Courier Cash Collections & In-Transit Float
+            if (!empty($stats['courier_cash_collections']) && count($stats['courier_cash_collections']) > 0) {
+                fputcsv($handle, ['--- COURIER CASH COLLECTIONS & IN-TRANSIT FLOAT ---']);
+                fputcsv($handle, ['Courier / Collector', 'Txns', 'Confirmed (Banked)', 'Unconfirmed (In-Transit)', 'Total Cash Handled']);
+                foreach ($stats['courier_cash_collections'] as $courier) {
+                    fputcsv($handle, [
+                        $courier['collector_name'],
+                        $courier['count'],
+                        number_format($courier['confirmed_total'], 2),
+                        number_format($courier['unconfirmed_total'], 2),
+                        number_format($courier['total'], 2),
+                    ]);
+                }
+                fputcsv($handle, []);
+            }
+
+            // Section 5: Revenue by Box Type
+            fputcsv($handle, ['--- REVENUE BY BOX TYPE ---']);
+            fputcsv($handle, ['Box Type', 'Units Shipped', 'Total Revenue']);
+            foreach ($stats['revenue_by_box_type'] as $box) {
+                fputcsv($handle, [$box->name, $box->count, number_format($box->total, 2)]);
+            }
+            fputcsv($handle, []);
+
+            // Section 6: Tax Summary
+            fputcsv($handle, ['--- TAX & ' . strtoupper($taxLabel) . ' SUMMARY ---']);
+            fputcsv($handle, ['Taxable Revenue', number_format($stats['vat_stats']->vatable_sales ?? 0, 2)]);
+            fputcsv($handle, ['Tax-Exempt Revenue', number_format($stats['vat_stats']->vat_exempt_sales ?? 0, 2)]);
+            fputcsv($handle, ['Tax Amount (' . $taxLabel . ')', number_format($stats['vat_stats']->vat_amount ?? 0, 2)]);
+            fputcsv($handle, ['Gross Revenue', number_format($stats['vat_stats']->total_sales ?? 0, 2)]);
+            fputcsv($handle, []);
+
+            // Section 7: Invoices & Transactions Ledger
+            fputcsv($handle, ['--- DETAILED INVOICE & SALES LEDGER ---']);
+            fputcsv($handle, [
+                'Invoice Date',
+                'Invoice Number',
+                'OR Number',
+                'Sender ID',
+                'Customer Name',
+                'Booking Reference',
+                'Service Type',
+                'Status',
+                'Due Date',
+                'Taxable Revenue',
+                'Tax Amount',
+                'Total Amount',
+                'Amount Paid (Settled)',
+                'Balance',
+            ]);
+
+            foreach ($sales as $inv) {
+                $paid = $inv->payments->filter(fn ($p) => $p->isSettled())->sum('amount');
+                $balance = max(0, ((float) $inv->amount) - $paid);
+                $senderName = trim(($inv->booking?->sender?->first_name ?? '') . ' ' . ($inv->booking?->sender?->last_name ?? ''));
+
+                fputcsv($handle, [
+                    $inv->created_at ? Carbon::parse($inv->created_at)->format('Y-m-d') : '',
+                    $inv->invoice_number,
+                    $inv->or_number ?? 'PENDING',
+                    $inv->booking?->sender_id ?? '',
+                    $senderName ?: 'N/A',
+                    $inv->booking?->booking_number ?? $inv->booking_id,
+                    $inv->booking?->service_type ?? 'N/A',
+                    $inv->status instanceof \BackedEnum ? $inv->status->value : (string) $inv->status,
+                    $inv->due_date ? Carbon::parse($inv->due_date)->format('Y-m-d') : '',
+                    number_format($inv->vatable_revenue ?? 0, 2, '.', ''),
+                    number_format($inv->vat_amount ?? 0, 2, '.', ''),
+                    number_format($inv->amount, 2, '.', ''),
+                    number_format($paid, 2, '.', ''),
+                    number_format($balance, 2, '.', ''),
+                ]);
+            }
+
+            fclose($handle);
+        }, $filename, [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Cache-Control' => 'no-store, no-cache',
+        ]);
+    }
+
 }
