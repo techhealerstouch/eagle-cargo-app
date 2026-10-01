@@ -137,9 +137,9 @@ export default function AdminCalendarIndex({
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Operations & Event Calendar | Admin" />
 
-            <div className="flex h-full flex-1 flex-col gap-6 p-4 sm:p-6 lg:p-8 w-full">
+            <div className="flex h-full flex-1 flex-col gap-4 p-4 sm:p-5 lg:p-6 w-full">
                 {/* Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3.5">
                     <Heading
                         eyebrow="Operations & Logistics"
                         title="Event & Schedule Calendar"
@@ -172,68 +172,76 @@ export default function AdminCalendarIndex({
                     </div>
                 </div>
 
-                {/* Operations Metric Cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-5">
-                    <Card className="border border-border/80 shadow-xs bg-card hover:border-indigo-500/40 hover:shadow-sm transition-all relative overflow-hidden group">
-                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-indigo-600" />
-                        <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                            <div className="space-y-0.5">
-                                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Active Batches</p>
-                                <p className="text-2xl sm:text-3xl font-black text-foreground tracking-tight">
-                                    {currentMetrics?.active_batches_count ?? 0}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground font-medium">In transit & loading</p>
+                {/* Operations Metric Cards - Compact & Space-Efficient */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+                    <Card className="border border-border/80 shadow-2xs bg-card hover:border-indigo-500/40 transition-all relative overflow-hidden group">
+                        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-indigo-500 to-indigo-600" />
+                        <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">Active Batches</p>
+                                <div className="flex items-baseline gap-1.5 mt-0.5">
+                                    <span className="text-xl sm:text-2xl font-black text-foreground tracking-tight leading-none">
+                                        {currentMetrics?.active_batches_count ?? 0}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground font-medium truncate">In transit & loading</span>
+                                </div>
                             </div>
-                            <div className="w-11 h-11 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                                <Ship className="w-5 h-5" />
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card className="border border-border/80 shadow-xs bg-card hover:border-blue-500/40 hover:shadow-sm transition-all relative overflow-hidden group">
-                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-cyan-500" />
-                        <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                            <div className="space-y-0.5">
-                                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Upcoming Cut-offs</p>
-                                <p className="text-2xl sm:text-3xl font-black text-blue-600 dark:text-blue-400 tracking-tight">
-                                    {currentMetrics?.upcoming_cutoffs_count ?? 0}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground font-medium">Through month end</p>
-                            </div>
-                            <div className="w-11 h-11 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                                <Layers className="w-5 h-5" />
+                            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                                <Ship className="w-4 h-4" />
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="border border-border/80 shadow-xs bg-card hover:border-emerald-500/40 hover:shadow-sm transition-all relative overflow-hidden group">
-                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                        <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                            <div className="space-y-0.5">
-                                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Monthly Runsheets</p>
-                                <p className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
-                                    {currentMetrics?.monthly_runsheets_count ?? 0}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground font-medium">Pickups & deliveries</p>
+                    <Card className="border border-border/80 shadow-2xs bg-card hover:border-blue-500/40 transition-all relative overflow-hidden group">
+                        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-blue-500 to-cyan-500" />
+                        <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">Upcoming Cut-offs</p>
+                                <div className="flex items-baseline gap-1.5 mt-0.5">
+                                    <span className="text-xl sm:text-2xl font-black text-blue-600 dark:text-blue-400 tracking-tight leading-none">
+                                        {currentMetrics?.upcoming_cutoffs_count ?? 0}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground font-medium truncate">Through month end</span>
+                                </div>
                             </div>
-                            <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                                <Truck className="w-5 h-5" />
+                            <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                                <Layers className="w-4 h-4" />
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="border border-border/80 shadow-xs bg-card hover:border-amber-500/40 hover:shadow-sm transition-all relative overflow-hidden group">
-                        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
-                        <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                            <div className="space-y-0.5">
-                                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Blackout Days</p>
-                                <p className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight">
-                                    {currentMetrics?.active_blackouts_count ?? 0}
-                                </p>
-                                <p className="text-[11px] text-muted-foreground font-medium">Bookings restricted</p>
+                    <Card className="border border-border/80 shadow-2xs bg-card hover:border-emerald-500/40 transition-all relative overflow-hidden group">
+                        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
+                        <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">Monthly Runsheets</p>
+                                <div className="flex items-baseline gap-1.5 mt-0.5">
+                                    <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+                                        {currentMetrics?.monthly_runsheets_count ?? 0}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground font-medium truncate">Pickups & deliveries</span>
+                                </div>
                             </div>
-                            <div className="w-11 h-11 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                                <AlertOctagon className="w-5 h-5" />
+                            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                                <Truck className="w-4 h-4" />
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="border border-border/80 shadow-2xs bg-card hover:border-amber-500/40 transition-all relative overflow-hidden group">
+                        <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+                        <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">Blackout Days</p>
+                                <div className="flex items-baseline gap-1.5 mt-0.5">
+                                    <span className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                                        {currentMetrics?.active_blackouts_count ?? 0}
+                                    </span>
+                                    <span className="text-[11px] text-muted-foreground font-medium truncate">Bookings restricted</span>
+                                </div>
+                            </div>
+                            <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                                <AlertOctagon className="w-4 h-4" />
                             </div>
                         </CardContent>
                     </Card>

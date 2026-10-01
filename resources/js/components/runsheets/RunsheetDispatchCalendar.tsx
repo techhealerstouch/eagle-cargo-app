@@ -365,8 +365,8 @@ export function RunsheetDispatchCalendar({
         );
     };
 
-    // One-click Organize Runsheet Action
-    const handleOrganizeRunsheet = (targetDate: string, ids: number[]) => {
+    // One-click Assign Runsheet Action
+    const handleAssignRunsheet = (targetDate: string, ids: number[]) => {
         const isDelivery = selectedType === 'delivery';
         const routeType = isDelivery ? 'delivery' : 'pickup';
         const idParam = isDelivery ? 'box_ids' : 'booking_ids';
@@ -387,9 +387,9 @@ export function RunsheetDispatchCalendar({
     const isDeliveryMode = selectedType === 'delivery';
 
     return (
-        <div className="flex h-full flex-1 flex-col gap-6 p-4 sm:p-6 md:p-8 min-w-0 w-full">
+        <div className="flex h-full flex-1 flex-col gap-4 p-4 sm:p-5 md:p-6 min-w-0 w-full">
             {/* Page Header with Dual View Switcher */}
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-brand-warm/20 pb-6">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-3 border-b border-brand-warm/20 pb-4">
                 <Heading
                     eyebrow={eyebrow}
                     title={
@@ -403,7 +403,7 @@ export function RunsheetDispatchCalendar({
                         isPickupMode
                             ? 'Track upcoming box collections, bundle customer requests into driver runsheets, and monitor pickup progress.'
                             : isDeliveryMode
-                            ? 'Track devanned arrivals, organize recipient delivery routes, and monitor courier proof-of-delivery.'
+                            ? 'Track devanned arrivals, assign recipient delivery routes, and monitor courier proof-of-delivery.'
                             : 'Unified calendar view to monitor both pickup collections and doorstep delivery runs.'
                     }
                 />
@@ -443,99 +443,107 @@ export function RunsheetDispatchCalendar({
                 </div>
             </div>
 
-            {/* Operations KPI Metric Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+            {/* Operations KPI Metric Cards - Compact & Space-Efficient */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
                 {/* 1. Upcoming Stops */}
-                <Card className="border shadow-xs hover:border-blue-500/40 transition-all relative overflow-hidden group">
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-indigo-500" />
-                    <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                        <div>
-                            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                <Card className="border border-border/80 shadow-2xs hover:border-blue-500/40 transition-all relative overflow-hidden group bg-card">
+                    <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-blue-500 to-indigo-500" />
+                    <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">
                                 {isDeliveryMode ? 'Scheduled Deliveries' : 'Scheduled Collections'}
                             </p>
-                            <p className="text-2xl sm:text-3xl font-black text-foreground tracking-tight mt-0.5">
-                                {data.metrics?.upcoming_stops ?? 0}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground font-medium">
-                                {data.metrics?.total_boxes ?? 0} boxes in period
-                            </p>
+                            <div className="flex items-baseline gap-1.5 mt-0.5">
+                                <span className="text-xl sm:text-2xl font-black text-foreground tracking-tight leading-none">
+                                    {data.metrics?.upcoming_stops ?? 0}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground font-medium truncate">
+                                    {data.metrics?.total_boxes ?? 0} boxes
+                                </span>
+                            </div>
                         </div>
-                        <div className="w-10 h-10 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                            {isDeliveryMode ? <Truck className="w-5 h-5" /> : <Package className="w-5 h-5" />}
+                        <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                            {isDeliveryMode ? <Truck className="w-4 h-4" /> : <Package className="w-4 h-4" />}
                         </div>
                     </CardContent>
                 </Card>
 
                 {/* 2. Unassigned Needs Runsheet */}
                 <Card
-                    className={`border shadow-xs transition-all relative overflow-hidden group ${
+                    className={`border border-border/80 shadow-2xs transition-all relative overflow-hidden group bg-card ${
                         (data.metrics?.unassigned_count ?? 0) > 0
                             ? 'border-amber-500/40 bg-amber-500/5'
                             : 'hover:border-amber-500/40'
                     }`}
                 >
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
-                    <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                        <div>
-                            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                    <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-amber-500 to-orange-500" />
+                    <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">
                                 Unassigned Items
                             </p>
-                            <p className="text-2xl sm:text-3xl font-black text-amber-600 dark:text-amber-400 tracking-tight mt-0.5">
-                                {data.metrics?.unassigned_count ?? 0}
-                            </p>
-                            <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80 font-medium">
-                                {(data.metrics?.unassigned_count ?? 0) > 0
-                                    ? 'Requires runsheet dispatch'
-                                    : 'All items assigned'}
-                            </p>
+                            <div className="flex items-baseline gap-1.5 mt-0.5">
+                                <span className="text-xl sm:text-2xl font-black text-amber-600 dark:text-amber-400 tracking-tight leading-none">
+                                    {data.metrics?.unassigned_count ?? 0}
+                                </span>
+                                <span className="text-[11px] text-amber-700/80 dark:text-amber-400/80 font-medium truncate">
+                                    {(data.metrics?.unassigned_count ?? 0) > 0
+                                        ? 'Needs dispatch'
+                                        : 'All assigned'}
+                                </span>
+                            </div>
                         </div>
-                        <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                            <AlertCircle className="w-5 h-5" />
+                        <div className="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                            <AlertCircle className="w-4 h-4" />
                         </div>
                     </CardContent>
                 </Card>
 
                 {/* 3. Active Runsheets on Route */}
-                <Card className="border shadow-xs hover:border-emerald-500/40 transition-all relative overflow-hidden group">
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                    <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                        <div>
-                            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                <Card className="border border-border/80 shadow-2xs hover:border-emerald-500/40 transition-all relative overflow-hidden group bg-card">
+                    <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-emerald-500 to-teal-500" />
+                    <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">
                                 Active Runsheets
                             </p>
-                            <p className="text-2xl sm:text-3xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight mt-0.5">
-                                {data.metrics?.active_runsheets_count ?? 0}
-                            </p>
-                            <p className="text-[11px] text-muted-foreground font-medium">
-                                {data.metrics?.total_runsheets_count ?? 0} total runsheets
-                            </p>
+                            <div className="flex items-baseline gap-1.5 mt-0.5">
+                                <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight leading-none">
+                                    {data.metrics?.active_runsheets_count ?? 0}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground font-medium truncate">
+                                    {data.metrics?.total_runsheets_count ?? 0} total
+                                </span>
+                            </div>
                         </div>
-                        <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                            <Truck className="w-5 h-5" />
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                            <Truck className="w-4 h-4" />
                         </div>
                     </CardContent>
                 </Card>
 
                 {/* 4. Completion Rate */}
-                <Card className="border shadow-xs hover:border-indigo-500/40 transition-all relative overflow-hidden group">
-                    <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 to-purple-500" />
-                    <CardContent className="p-4 sm:p-5 flex items-center justify-between">
-                        <div>
-                            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                <Card className="border border-border/80 shadow-2xs hover:border-indigo-500/40 transition-all relative overflow-hidden group bg-card">
+                    <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-indigo-500 to-purple-500" />
+                    <CardContent className="p-2.5 sm:px-3.5 sm:py-2.5 flex items-center justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">
                                 Completion Rate
                             </p>
-                            <p className="text-2xl sm:text-3xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight mt-0.5">
-                                {data.metrics?.completion_rate ?? 0}%
-                            </p>
-                            <div className="w-24 bg-muted rounded-full h-1.5 mt-1.5 overflow-hidden">
-                                <div
-                                    className="bg-indigo-600 h-1.5 rounded-full transition-all"
-                                    style={{ width: `${Math.min(100, data.metrics?.completion_rate ?? 0)}%` }}
-                                />
+                            <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight leading-none">
+                                    {data.metrics?.completion_rate ?? 0}%
+                                </span>
+                                <div className="flex-1 max-w-[80px] bg-muted rounded-full h-1.5 overflow-hidden">
+                                    <div
+                                        className="bg-indigo-600 h-1.5 rounded-full transition-all"
+                                        style={{ width: `${Math.min(100, data.metrics?.completion_rate ?? 0)}%` }}
+                                    />
+                                </div>
                             </div>
                         </div>
-                        <div className="w-10 h-10 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20 shadow-2xs group-hover:scale-105 transition-transform">
-                            <CheckCircle2 className="w-5 h-5" />
+                        <div className="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center border border-indigo-500/20 shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                            <CheckCircle2 className="w-4 h-4" />
                         </div>
                     </CardContent>
                 </Card>
@@ -767,7 +775,7 @@ export function RunsheetDispatchCalendar({
                                         className="bg-brand-rust text-white hover:bg-brand-rust/90 gap-1.5 h-8 text-xs font-bold shadow-xs"
                                     >
                                         <Plus className="w-3.5 h-3.5" />
-                                        <span>Organize Day Runsheet</span>
+                                        <span>Assign Day Runsheet</span>
                                     </Button>
                                 </div>
                             </div>
@@ -785,7 +793,7 @@ export function RunsheetDispatchCalendar({
                                             <Truck className="w-8 h-8 text-muted-foreground mx-auto opacity-50" />
                                             <p className="text-xs font-semibold text-foreground">No runsheets scheduled for this date</p>
                                             <p className="text-[11px] text-muted-foreground">
-                                                Click Organize Day Runsheet to create a runsheet for this date.
+                                                Click Assign Day Runsheet to create a runsheet for this date.
                                             </p>
                                         </div>
                                     ) : (
@@ -1010,7 +1018,7 @@ export function RunsheetDispatchCalendar({
                                                     ⚠️ {unassignedCount} Unassigned
                                                 </span>
                                                 <span className="text-[9px] bg-amber-500/20 px-1 rounded uppercase">
-                                                    Organize
+                                                    Assign
                                                 </span>
                                             </div>
                                         )}
@@ -1099,7 +1107,7 @@ export function RunsheetDispatchCalendar({
                             {isDeliveryMode ? 'Delivery Stops & Routes' : 'Collection Stops & Runsheets'}
                         </DialogTitle>
                         <DialogDescription className="text-xs text-muted-foreground">
-                            Organize pending stops into driver runsheets or monitor live progress for this date.
+                            Assign pending stops into driver runsheets or monitor live progress for this date.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -1126,12 +1134,12 @@ export function RunsheetDispatchCalendar({
                                             )}
                                         </div>
 
-                                        {/* Action: Select All / Organize Runsheet */}
+                                        {/* Action: Select All / Assign Runsheet */}
                                         {unassigned.length > 0 && (
                                             <Button
                                                 size="sm"
                                                 onClick={() =>
-                                                    handleOrganizeRunsheet(
+                                                    handleAssignRunsheet(
                                                         selectedDayDate || '',
                                                         selectedBookingIds
                                                     )
@@ -1140,7 +1148,7 @@ export function RunsheetDispatchCalendar({
                                                 className="bg-brand-rust text-white hover:bg-brand-rust/90 gap-1.5 text-xs font-bold shadow-xs h-8"
                                             >
                                                 <Plus className="w-3.5 h-3.5" />
-                                                <span>Organize Runsheet ({selectedBookingIds.length})</span>
+                                                <span>Assign Runsheet ({selectedBookingIds.length})</span>
                                             </Button>
                                         )}
                                     </div>

@@ -585,7 +585,15 @@ class BoxController extends Controller
 
         if ($request->filled('payment_status')) {
             $query->whereHas('booking', function ($bq) use ($request) {
-                $bq->where('payment_status', $request->payment_status);
+                if ($request->payment_status === 'paid') {
+                    $bq->whereIn('payment_status', ['paid', 'cash_collected']);
+                } elseif ($request->payment_status === 'unpaid') {
+                    $bq->whereIn('payment_status', ['pending', 'cash_on_pickup']);
+                } elseif ($request->payment_status === 'partial') {
+                    $bq->whereIn('payment_status', ['partially_paid', 'balance_pending']);
+                } else {
+                    $bq->where('payment_status', $request->payment_status);
+                }
             });
         }
 

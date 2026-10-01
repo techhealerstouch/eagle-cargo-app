@@ -33,6 +33,7 @@ use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\RunsheetService;
 use App\Services\SettingsService;
 use App\Services\ReferenceDataService;
+use App\Services\TrackingStepService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -1104,7 +1105,26 @@ class BookingController extends Controller
         }
 
         if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+            $statusVal = (string) $request->status;
+            $trackingStep = app(TrackingStepService::class)->getStep($statusVal);
+
+            if ($trackingStep) {
+                $systemStatus = $trackingStep['system_status'] ?? null;
+                $query->where(function ($q) use ($statusVal, $systemStatus) {
+                    $q->whereHas('boxes', function ($bq) use ($statusVal, $systemStatus) {
+                        $bq->where('tracking_step_key', $statusVal);
+                        if ($systemStatus) {
+                            $bq->orWhere('status', $systemStatus);
+                        }
+                    });
+                    if ($systemStatus) {
+                        $q->orWhere('status', $systemStatus);
+                    }
+                    $q->orWhere('status', $statusVal);
+                });
+            } else {
+                $query->where('status', $statusVal);
+            }
         }
 
         if ($request->filled('payment_status')) {
@@ -1135,6 +1155,14 @@ class BookingController extends Controller
             }
         }
 
+        if ($request->filled('start_date')) {
+            $query->whereDate('created_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('created_at', '<=', $request->end_date);
+        }
+
         $sortableColumns = [
             'reference_number',
             'status',
@@ -1153,7 +1181,7 @@ class BookingController extends Controller
 
     public function exportExcel(Request $request)
     {
-        $query = Booking::with(['sender', 'boxes.recipient', 'runsheets.courier', 'runsheets.picker']);
+        $query = Booking::with(['sender', 'boxes.recipient', 'boxes.boxType', 'runsheets.courier', 'runsheets.picker', 'invoice']);
 
         if ($request->filled('ids')) {
             $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
@@ -1164,11 +1192,25 @@ class BookingController extends Controller
 
         $bookings = $query->get();
 
-        app(AuditLogService::class)->logExportEvent('excel', 'Bookings list exported as Excel (.xlsx)', [
+        $sections = $request->input('sections', []);
+        if (is_string($sections)) {
+            $sections = explode(',', $sections);
+        }
+        $sections = array_filter((array) $sections);
+
+        $format = strtolower($request->input('format', 'xlsx'));
+        $extension = $format === 'csv' ? 'csv' : 'xlsx';
+        $filename = 'bookings_export_'.now()->format('Ymd_His').'.'.$extension;
+
+        app(AuditLogService::class)->logExportEvent($format, "Bookings list exported as {$extension}", [
             'count' => $bookings->count(),
+            'sections' => $sections,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'status' => $request->status,
         ]);
 
-        return Excel::download(new BookingsExport($bookings), 'bookings_export_'.now()->format('Ymd_His').'.xlsx');
+        return Excel::download(new BookingsExport($bookings, false, $sections), $filename);
     }
 
 

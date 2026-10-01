@@ -95,7 +95,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Override configuration dynamically from settings
-        if (! app()->runningUnitTests()) {
+        if (! app()->runningInConsole() && ! app()->runningUnitTests()) {
             try {
                 $settingsService = app(SettingsService::class);
                 $appName = $settingsService->get('app_name');

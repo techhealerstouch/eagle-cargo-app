@@ -67,4 +67,31 @@ class BoxBulkUpdateTest extends TestCase
         $this->assertEquals(BoxStatus::Collected, $box2->fresh()->status);
         $this->assertEquals(BoxStatus::Pending, $box3->fresh()->status); // Should remain untouched as it is in Cebu
     }
+
+    public function test_admin_can_filter_boxes_by_unpaid_payment_status(): void
+    {
+        $admin = User::factory()->create(['role' => Role::Admin]);
+
+        $unpaidBooking = \App\Models\Booking::factory()->create([
+            'payment_status' => \App\Enums\PaymentStatus::Pending,
+        ]);
+        $paidBooking = \App\Models\Booking::factory()->create([
+            'payment_status' => \App\Enums\PaymentStatus::Paid,
+        ]);
+
+        $unpaidBox = Box::factory()->create(['booking_id' => $unpaidBooking->id]);
+        $paidBox = Box::factory()->create(['booking_id' => $paidBooking->id]);
+
+        $response = $this->actingAs($admin)->get('/admin/boxes?payment_status=unpaid');
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('admin/boxes/index')
+            ->has('boxes.data')
+            ->where('boxes.data', fn ($boxes) =>
+                collect($boxes)->pluck('id')->contains($unpaidBox->id) &&
+                !collect($boxes)->pluck('id')->contains($paidBox->id)
+            )
+        );
+    }
 }

@@ -396,8 +396,8 @@ export default function BoxesIndex({
                         </TabsList>
                     </Tabs>
 
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                        <div className="flex flex-1 flex-wrap items-end gap-3">
                             <SearchFilter
                                 routeName="/admin/boxes"
                                 queryParams={filters}
@@ -442,23 +442,31 @@ export default function BoxesIndex({
                                     }))
                                 ]}
                             />
-                            <select
-                                className="h-9 px-3 text-xs rounded-lg border border-zinc-200 bg-white text-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-900/10"
-                                value={filters.area_id || ''}
-                                onChange={(e) => {
-                                    router.get('/admin/boxes', { ...filters, area_id: e.target.value }, { preserveState: true });
-                                }}
-                            >
-                                <option value="">All Areas</option>
-                                {areas.map(area => (
-                                    <option key={area.id} value={area.id}>{area.name}</option>
-                                ))}
-                            </select>
+                            <FilterSelect
+                                label="Area"
+                                routeName="/admin/boxes"
+                                paramName="area_id"
+                                queryParams={filters}
+                                placeholder="All Areas"
+                                options={areas.map((area: any) => ({
+                                    label: area.name,
+                                    value: String(area.id),
+                                }))}
+                            />
                         </div>
                     </div>
                     <ActiveFilterChips
                         routeName="/admin/boxes"
                         queryParams={filters}
+                        labels={{
+                            payment_status: 'Payment',
+                            declaration_form_status: 'Declaration',
+                            batch_id: 'Batch',
+                            area_id: 'Area',
+                            search: 'Search',
+                            status: 'Status',
+                            trashed: 'Status',
+                        }}
                     />
                 </div>
 

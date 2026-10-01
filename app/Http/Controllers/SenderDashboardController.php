@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\BatchStatus;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
@@ -14,10 +15,12 @@ use App\Models\Booking;
 use App\Models\Box;
 use App\Models\DataIntegrityWarning;
 use App\Models\Enquiry;
+use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\Runsheet;
 use App\Models\Sender;
 use App\Models\User;
+use App\Services\DeveloperAccess;
 use App\Services\ReferenceDataService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -35,8 +38,8 @@ class SenderDashboardController extends Controller
         /** @var User $user */
         $user = Auth::user();
 
-        // Admin/Super Admin — render the admin dashboard with real stats
-        if ($isAdmin = in_array($user->role, [Role::Admin, Role::SuperAdmin])) {
+        // Admin/Super Admin / Developer — render the admin dashboard with real stats
+        if ($isAdmin = app(DeveloperAccess::class)->isDeveloperOrAdmin($user)) {
             return $this->adminDashboard();
         }
 
@@ -60,7 +63,7 @@ class SenderDashboardController extends Controller
             return redirect()->route('warehouse.dashboard');
         }
 
-        $sender = $user->sender()->with(['recipients.area', 'pickupZone'])->first();
+        $sender = $user->sender()->with('recipients.area')->first();
         $activeBoxStatuses = array_map(fn (BoxStatus $status) => $status->value, [
             BoxStatus::Collected,
             BoxStatus::ReceivedByWarehouse,
@@ -170,7 +173,8 @@ class SenderDashboardController extends Controller
             'boxTypes' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeBoxTypes()),
             'boxPrices' => Inertia::lazy(fn () => app(ReferenceDataService::class)->boxPrices()),
             'pickupZones' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activePickupZones()),
-            'provinces' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeProvinces()->load('area:id,name,door_to_door_fee')),
+            'suburbs' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeSuburbs()),
+            'provinces' => Inertia::lazy(fn () => app(ReferenceDataService::class)->activeProvinces()),
             'pageTitle' => 'Dashboard',
             'breadcrumbs' => [
                 ['title' => 'Home', 'href' => route('dashboard')],
@@ -178,7 +182,7 @@ class SenderDashboardController extends Controller
         ]);
     }
 
-    public const DASHBOARD_CACHE_KEY = 'dashboard.admin.summary';
+    public const DASHBOARD_CACHE_KEY = 'dashboard.admin.summary.v2';
 
     /**
      * Admin dashboard with real database stats.
@@ -190,6 +194,31 @@ class SenderDashboardController extends Controller
             $pendingCollections = Booking::where('status', BookingStatus::Pending)->doesntHave('runsheets')->count();
             $batchesInTransit = Batch::where('status', BatchStatus::Sailed)->count();
             $totalSenders = Sender::count();
+
+            $missingDeclarations = Booking::whereNotIn('status', [BookingStatus::Draft, BookingStatus::Cancelled])
+                ->where(function ($q) {
+                    $q->where('declaration_form_status', 'missing')
+                        ->orWhereNull('declaration_form_status');
+                })
+                ->whereNull('declaration_form_path')
+                ->where(function ($q) {
+                    $q->whereNull('declaration_data')
+                        ->orWhere('declaration_data', '[]')
+                        ->orWhere('declaration_data', '');
+                })
+                ->count();
+
+            $outstandingPayments = Booking::whereNotIn('status', [BookingStatus::Draft, BookingStatus::Cancelled])
+                ->whereIn('payment_status', [
+                    PaymentStatus::Pending,
+                    PaymentStatus::CashOnPickup,
+                    PaymentStatus::BalancePending,
+                    PaymentStatus::PartiallyPaid,
+                ])
+                ->count();
+
+            $unpaidInvoicesSum = (float) Invoice::whereIn('status', [InvoiceStatus::Unpaid, InvoiceStatus::Partial])
+                ->sum('amount');
 
             $recentBookings = Booking::with(['sender', 'boxes.recipient'])
                 ->where('status', '!=', BookingStatus::Draft)
@@ -225,6 +254,9 @@ class SenderDashboardController extends Controller
                     'pendingCollections' => $pendingCollections,
                     'batchesInTransit' => $batchesInTransit,
                     'totalSenders' => $totalSenders,
+                    'missingDeclarations' => $missingDeclarations,
+                    'outstandingPayments' => $outstandingPayments,
+                    'outstandingBalance' => $unpaidInvoicesSum > 0 ? '$'.number_format($unpaidInvoicesSum, 2) : null,
                 ],
                 'recentBookings' => $recentBookings,
                 'todaysRunsheets' => $todaysRunsheets,

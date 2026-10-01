@@ -46,7 +46,12 @@ class HandleInertiaRequests extends Middleware
         if ($request->isMethod('GET') && $request->route()) {
             $routeName = $request->route()->getName() ?? '';
             if (str_starts_with($routeName, 'admin.') && (str_ends_with($routeName, '.index') || in_array($routeName, ['admin.runsheets.pickups', 'admin.runsheets.deliveries', 'admin.runsheets.pickups.calendar', 'admin.runsheets.deliveries.calendar']))) {
-                $request->session()->put("admin_return_urls.{$routeName}", $request->fullUrl());
+                $urlsMap = $request->session()->get('admin_return_urls_map', []);
+                if (!is_array($urlsMap)) {
+                    $urlsMap = [];
+                }
+                $urlsMap[$routeName] = $request->fullUrl();
+                $request->session()->put('admin_return_urls_map', $urlsMap);
                 $request->session()->put('admin_return_url', $request->fullUrl());
             }
         }
@@ -202,10 +207,29 @@ class HandleInertiaRequests extends Middleware
                     'serial-numbers' => 'admin.serial-numbers.index',
                 ];
 
+                $urlsMap = $request->session()->get('admin_return_urls_map', []);
+                $resolveUrl = function (string $target) use ($urlsMap, $request) {
+                    if (is_array($urlsMap) && !empty($urlsMap[$target]) && is_string($urlsMap[$target])) {
+                        return $urlsMap[$target];
+                    }
+                    $url = $request->session()->get("admin_return_urls.{$target}");
+                    if (is_string($url)) {
+                        return $url;
+                    }
+                    if (is_array($url)) {
+                        $flat = \Illuminate\Support\Arr::flatten($url);
+                        foreach ($flat as $u) {
+                            if (is_string($u) && filter_var($u, FILTER_VALIDATE_URL)) {
+                                return $u;
+                            }
+                        }
+                    }
+                    return \Illuminate\Support\Facades\Route::has($target) ? route($target) : null;
+                };
+
                 foreach ($resourceIndexMap as $resource => $indexRoute) {
                     if (str_starts_with($route, "admin.{$resource}.")) {
-                        return $request->session()->get("admin_return_urls.{$indexRoute}")
-                            ?? (\Illuminate\Support\Facades\Route::has($indexRoute) ? route($indexRoute) : null);
+                        return $resolveUrl($indexRoute);
                     }
                 }
 
@@ -217,14 +241,13 @@ class HandleInertiaRequests extends Middleware
                             || $type === 'delivery'
                             || (is_string($type) && strtolower($type) === 'delivery');
                         $targetRoute = $isDelivery ? 'admin.runsheets.deliveries' : 'admin.runsheets.pickups';
-                        return $request->session()->get("admin_return_urls.{$targetRoute}")
-                            ?? (\Illuminate\Support\Facades\Route::has($targetRoute) ? route($targetRoute) : null);
+                        return $resolveUrl($targetRoute);
                     }
-                    return $request->session()->get('admin_return_urls.admin.runsheets.pickups')
-                        ?? (\Illuminate\Support\Facades\Route::has('admin.runsheets.pickups') ? route('admin.runsheets.pickups') : null);
+                    return $resolveUrl('admin.runsheets.pickups');
                 }
 
-                return $request->session()->get('admin_return_url');
+                $fb = $request->session()->get('admin_return_url');
+                return is_string($fb) ? $fb : null;
             },
         ];
     }
