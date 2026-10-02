@@ -110,17 +110,29 @@ class SettingsService
     {
         $settings = $this->getGroup('logistics');
 
+        $rawWindows = $settings->get('logistics_pickup_windows', []);
+        $parsed = $this->parsePickupWindows($rawWindows);
+
         $result = [
             'leadTimeDays' => (int) $settings->get('logistics_lead_time_days', 2),
-            'pickupWindows' => $settings->get('logistics_pickup_windows', []),
+            'pickupWindows' => $parsed['weekly'],
+            'specificDates' => $parsed['specific_dates'],
             'blackoutDates' => $settings->get('logistics_blackout_dates', []),
+            'depotAddress' => $settings->get('logistics_depot_address', '6 Ivan St, Arundel QLD 4214'),
+            'depotInstructions' => $settings->get('logistics_depot_instructions', ''),
         ];
 
         if ($pickupZoneId) {
             $zone = \App\Models\PickupZone::find($pickupZoneId);
             if ($zone) {
                 if (! empty($zone->pickup_windows)) {
-                    $result['pickupWindows'] = $zone->pickup_windows;
+                    $zoneParsed = $this->parsePickupWindows($zone->pickup_windows);
+                    if (! empty($zoneParsed['weekly'])) {
+                        $result['pickupWindows'] = $zoneParsed['weekly'];
+                    }
+                    if (! empty($zoneParsed['specific_dates'])) {
+                        $result['specificDates'] = array_merge($result['specificDates'], $zoneParsed['specific_dates']);
+                    }
                 }
                 if (! empty($zone->blackout_dates)) {
                     $result['blackoutDates'] = $zone->blackout_dates;
@@ -132,6 +144,47 @@ class SettingsService
         }
 
         return $result;
+    }
+
+    /**
+     * Parse raw pickup windows data into recurring weekly windows and date-specific overrides.
+     */
+    protected function parsePickupWindows(mixed $rawWindows): array
+    {
+        $weekly = [];
+        $specificDates = [];
+
+        if (is_string($rawWindows)) {
+            $rawWindows = json_decode($rawWindows, true) ?: [];
+        }
+
+        if (is_array($rawWindows)) {
+            if (isset($rawWindows['weekly']) || isset($rawWindows['specific_dates'])) {
+                $weekly = $rawWindows['weekly'] ?? [];
+                $specificDates = $rawWindows['specific_dates'] ?? [];
+            } else {
+                foreach ($rawWindows as $w) {
+                    if (! is_array($w)) {
+                        continue;
+                    }
+                    if (! empty($w['date'])) {
+                        $specificDates[$w['date']] = [
+                            'available' => $w['available'] ?? true,
+                            'time_start' => $w['time_start'] ?? '08:00',
+                            'time_end' => $w['time_end'] ?? '17:00',
+                            'label' => $w['label'] ?? null,
+                        ];
+                    } else {
+                        $weekly[] = $w;
+                    }
+                }
+            }
+        }
+
+        return [
+            'weekly' => $weekly,
+            'specific_dates' => $specificDates,
+        ];
     }
 
     /**

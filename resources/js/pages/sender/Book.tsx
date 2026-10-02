@@ -416,22 +416,124 @@ export default function Book(props?: PageProps) {
     }));
   };
 
+  const parseLogisticsWindows = (rawWindows: any[] = []) => {
+    const recurring: any[] = [];
+    const specificDates: Record<string, { available: boolean; time_start?: string; time_end?: string; label?: string }> = {};
+
+    (rawWindows || []).forEach((w: any) => {
+      if (w.date) {
+        const isAvail = w.available ?? w.enabled ?? true;
+        specificDates[w.date] = {
+          available: Boolean(isAvail),
+          time_start: w.time_start || '08:00',
+          time_end: w.time_end || '17:00',
+          label: w.label,
+        };
+      } else if (Array.isArray(w.days) && w.days.length > 0) {
+        recurring.push(w);
+      }
+    });
+
+    return { recurring, specificDates };
+  };
+
+  const evaluateDateAvailability = (
+    dateInput: Date | string,
+    logisticsObj: any
+  ): { isInvalid: boolean; message?: string; timeStart?: string; timeEnd?: string } => {
+    if (!logisticsObj) return { isInvalid: false };
+
+    const date = new Date(dateInput);
+    if (isNaN(date.getTime())) return { isInvalid: true, message: 'Invalid date' };
+
+    // Lead time check
+    const leadTimeDate = new Date();
+    leadTimeDate.setHours(0, 0, 0, 0);
+    leadTimeDate.setDate(leadTimeDate.getDate() + (logisticsObj.leadTimeDays || 2));
+
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    if (checkDate < leadTimeDate) {
+      return { isInvalid: true, message: `Minimum ${logisticsObj.leadTimeDays || 2} days lead time required` };
+    }
+
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+
+    // Blackout check
+    if (logisticsObj.blackoutDates?.includes(dateStr)) {
+      return { isInvalid: true, message: 'The selected date is an unavailable blackout date' };
+    }
+
+    // Specific date overrides (highest priority)
+    const specificDates = logisticsObj.specificDates || {};
+    if (specificDates[dateStr] !== undefined) {
+      const override = specificDates[dateStr];
+      const isAvail = typeof override === 'object' ? override.available : Boolean(override);
+      if (!isAvail) {
+        return { isInvalid: true, message: 'No pickup service available on the selected date' };
+      }
+      return { isInvalid: false, timeStart: override.time_start || '08:00', timeEnd: override.time_end || '17:00' };
+    }
+
+    // Recurring weekly windows check
+    const windows = logisticsObj.pickupWindows || [];
+    const hasSpecific = Object.keys(specificDates).length > 0;
+
+    if (windows.length > 0) {
+      const dayOfWeek = date.getDay();
+      const weekOfMonth = Math.ceil(date.getDate() / 7);
+
+      const matchingWindow = windows.find((w: any) =>
+        w.enabled !== false &&
+        Array.isArray(w.days) &&
+        w.days.includes(dayOfWeek) &&
+        (w.weeks_of_month || [1, 2, 3, 4, 5]).includes(weekOfMonth)
+      );
+
+      if (!matchingWindow) {
+        return { isInvalid: true, message: 'No pickup service available on the selected day' };
+      }
+
+      return {
+        isInvalid: false,
+        timeStart: matchingWindow.time_start || '08:00',
+        timeEnd: matchingWindow.time_end || '17:00',
+      };
+    } else if (hasSpecific) {
+      // Specific calendar dates are configured for this area, but this date is not on the schedule
+      return { isInvalid: true, message: 'No pickup service scheduled on the selected date' };
+    }
+
+    return { isInvalid: false, timeStart: '08:00', timeEnd: '17:00' };
+  };
+
   const getInitialValidDate = (zoneId?: string) => {
     let currentLogistics = logistics;
 
     // Auto-detect zone from suburb if not provided
     if (!zoneId && (sender?.suburb || editingBooking?.sender?.suburb)) {
-        zoneId = detectPickupZoneBySuburb(sender?.suburb || editingBooking?.sender?.suburb || '');
+      zoneId = detectPickupZoneBySuburb(sender?.suburb || editingBooking?.sender?.suburb || '');
     }
 
     if (zoneId) {
       const zone = pickupZones?.find((z: any) => z.id.toString() === zoneId.toString());
       if (zone) {
+        const rawWindows = zone.pickup_windows?.length > 0 ? zone.pickup_windows : (logistics?.pickupWindows || []);
+        const { recurring, specificDates: zoneSpecific } = parseLogisticsWindows(rawWindows);
+
         currentLogistics = {
           ...logistics,
-          pickupWindows: zone.pickup_windows?.length > 0 ? zone.pickup_windows : logistics.pickupWindows,
-          blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : logistics.blackoutDates,
-          leadTimeDays: zone.lead_time_days ?? logistics.leadTimeDays,
+          pickupWindows: recurring.length > 0 ? recurring : (logistics?.pickupWindows || []),
+          specificDates: {
+            ...(logistics?.specificDates || {}),
+            ...zoneSpecific,
+          },
+          blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : (logistics?.blackoutDates || []),
+          leadTimeDays: zone.lead_time_days ?? (logistics?.leadTimeDays ?? 2),
         };
       }
     }
@@ -441,43 +543,18 @@ export default function Book(props?: PageProps) {
     }
 
     let date = new Date(Date.now() + 86400000 * (currentLogistics.leadTimeDays || 2));
-    const windows = currentLogistics.pickupWindows || [];
-
-    // Keep shifting date if it doesn't match any window or is a blackout date
     let attempts = 0;
 
-    while (attempts < 365) { // safety break
+    while (attempts < 365) {
       attempts++;
-      const dateStr = date.toISOString().slice(0, 10);
-      const dayOfWeek = date.getDay();
-      const weekOfMonth = Math.ceil(date.getDate() / 7);
-
-      // Blackout check
-      if (currentLogistics.blackoutDates?.includes(dateStr)) {
+      const evalResult = evaluateDateAvailability(date, currentLogistics);
+      if (evalResult.isInvalid) {
         date = new Date(date.getTime() + 86400000);
         continue;
       }
 
-      // Windows check - if windows are defined, must match at least one
-      if (windows.length > 0) {
-        const matchingWindow = windows.find((w: any) =>
-          w.enabled &&
-          w.days.includes(dayOfWeek) &&
-          (w.weeks_of_month || [1,2,3,4,5]).includes(weekOfMonth)
-        );
-
-        if (!matchingWindow) {
-          date = new Date(date.getTime() + 86400000);
-          continue;
-        }
-
-        // Use the first matching window's start time
-        const [hh, mm] = matchingWindow.time_start.split(':');
-        date.setHours(parseInt(hh), parseInt(mm), 0, 0);
-      } else {
-        date.setHours(9, 0, 0, 0); // default if no windows
-      }
-
+      const [hh, mm] = (evalResult.timeStart || '08:00').split(':');
+      date.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
       break;
     }
 
@@ -550,11 +627,18 @@ export default function Book(props?: PageProps) {
     const zone = pickupZones?.find((z: any) => z.id.toString() === currentZoneId.toString());
     if (!zone) return logistics;
 
+    const rawWindows = zone.pickup_windows?.length > 0 ? zone.pickup_windows : (logistics?.pickupWindows || []);
+    const { recurring, specificDates: zoneSpecific } = parseLogisticsWindows(rawWindows);
+
     return {
       ...logistics,
-      pickupWindows: zone.pickup_windows?.length > 0 ? zone.pickup_windows : logistics.pickupWindows,
-      blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : logistics.blackoutDates,
-      leadTimeDays: zone.lead_time_days ?? logistics.leadTimeDays,
+      pickupWindows: recurring.length > 0 ? recurring : (logistics?.pickupWindows || []),
+      specificDates: {
+        ...(logistics?.specificDates || {}),
+        ...zoneSpecific,
+      },
+      blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : (logistics?.blackoutDates || []),
+      leadTimeDays: zone.lead_time_days ?? (logistics?.leadTimeDays ?? 2),
     };
   }, [data.booking_type, data?.pickup_zone_id, detectedZoneId, pickupZones, logistics]);
 
@@ -578,40 +662,7 @@ export default function Book(props?: PageProps) {
     if (!data.preferred_date || !activeLogistics) return;
 
     const date = new Date(data.preferred_date);
-    let isInvalid = false;
-
-    // Lead time check
-    const leadTimeDate = new Date(Date.now() + 86400000 * (activeLogistics.leadTimeDays || 2));
-    leadTimeDate.setHours(0, 0, 0, 0);
-
-    if (date < leadTimeDate) {
-      isInvalid = true;
-    } else {
-      // Blackout check
-      const offset = date.getTimezoneOffset() * 60000;
-      const localDateStr = new Date(date.getTime() - offset).toISOString().slice(0, 10);
-
-      if (activeLogistics.blackoutDates?.includes(localDateStr)) {
-        isInvalid = true;
-      } else {
-        // Pickup windows check
-        const windows = activeLogistics.pickupWindows || [];
-        if (windows.length > 0) {
-          const dayOfWeek = date.getDay();
-          const weekOfMonth = Math.ceil(date.getDate() / 7);
-
-          const hasMatchingWindow = windows.some((w: any) =>
-            w.enabled &&
-            w.days.includes(dayOfWeek) &&
-            (w.weeks_of_month || [1,2,3,4,5]).includes(weekOfMonth)
-          );
-
-          if (!hasMatchingWindow) {
-            isInvalid = true;
-          }
-        }
-      }
-    }
+    const { isInvalid } = evaluateDateAvailability(date, activeLogistics);
 
     if (isInvalid) {
       const newValidDate = getInitialValidDate(data.pickup_zone_id);
@@ -623,8 +674,18 @@ export default function Book(props?: PageProps) {
 
   const PickupScheduleSummary = () => {
     const windows = activeLogistics?.pickupWindows || [];
+    const specificDates = activeLogistics?.specificDates || {};
+    const validWindows = windows.filter((w: any) => w.enabled !== false && Array.isArray(w.days) && w.days.length > 0);
 
-    if (windows.length === 0) {
+    const upcomingSpecific = Object.entries(specificDates)
+      .filter(([dateStr, config]: [string, any]) => {
+        const isAvail = typeof config === 'object' ? config.available : Boolean(config);
+        return isAvail && dateStr >= new Date().toISOString().slice(0, 10);
+      })
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(0, 4);
+
+    if (validWindows.length === 0 && upcomingSpecific.length === 0) {
       return null;
     }
 
@@ -634,10 +695,10 @@ export default function Book(props?: PageProps) {
       <div className="mt-4 rounded-xl border border-sky-100 dark:border-sky-900/30 bg-sky-50/50 dark:bg-sky-950/20 p-4">
         <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">Our Collection Schedule</p>
         <ul className="space-y-2">
-          {windows.filter((w: any) => w.enabled).map((window: any) => (
+          {validWindows.map((window: any) => (
             <li key={window.id} className="text-xs text-zinc-600 dark:text-zinc-400">
-              <span className="font-bold text-zinc-900 dark:text-zinc-100">{window.label}: </span>
-              {window.days.map((d: number) => daysOfWeek[d]).join(', ')}
+              <span className="font-bold text-zinc-900 dark:text-zinc-100">{window.label || 'Regular Window'}: </span>
+              {(window.days || []).map((d: number) => daysOfWeek[d]).join(', ')}
               <span className="mx-1 text-zinc-400 dark:text-zinc-600">·</span>
               {formatTime(window.time_start)} – {formatTime(window.time_end)}
               {window.weeks_of_month && window.weeks_of_month.length < 5 && (
@@ -645,6 +706,15 @@ export default function Book(props?: PageProps) {
                   ({window.weeks_of_month.map((w: number) => w === 1 ? '1st' : w === 2 ? '2nd' : w === 3 ? '3rd' : w === 4 ? '4th' : '5th (29+)').join(', ')} week only)
                 </span>
               )}
+            </li>
+          ))}
+          {upcomingSpecific.map(([dateStr, config]: [string, any]) => (
+            <li key={dateStr} className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
+              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
+              <span className="font-bold text-zinc-900 dark:text-zinc-100">
+                {new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', month: 'short', day: 'numeric' })}:
+              </span>
+              <span>{formatTime(config.time_start || '08:00')} – {formatTime(config.time_end || '17:00')}</span>
             </li>
           ))}
         </ul>
@@ -1485,49 +1555,14 @@ field = 'recipient mobile number';
         const now = new Date();
 
         if (selectedDate < now) {
-            setError('preferred_date', isDropOff ? 'Drop-off date cannot be in the past' : 'Pickup date cannot be in the past');
-            hasErrors = true;
+          setError('preferred_date', isDropOff ? 'Drop-off date cannot be in the past' : 'Pickup date cannot be in the past');
+          hasErrors = true;
         } else if (activeLogistics) {
-            // Lead time check
-            const leadTimeDate = new Date(Date.now() + 86400000 * (activeLogistics.leadTimeDays || 2));
-            leadTimeDate.setHours(0, 0, 0, 0);
-
-            const checkDate = new Date(selectedDate);
-            checkDate.setHours(0, 0, 0, 0);
-
-            if (checkDate < leadTimeDate) {
-                setError('preferred_date', `Minimum ${activeLogistics.leadTimeDays || 2} days lead time required`);
-                hasErrors = true;
-            }
-
-            // Blackout check
-
-            const offset = selectedDate.getTimezoneOffset() * 60000;
-            const localDateStr = new Date(selectedDate.getTime() - offset).toISOString().slice(0, 10);
-
-            if (activeLogistics.blackoutDates?.includes(localDateStr)) {
-              setError('preferred_date', 'The selected date is an unavailable blackout date');
-              hasErrors = true;
-            }
-
-            // Pickup windows check
-            const windows = activeLogistics.pickupWindows || [];
-
-            if (windows.length > 0) {
-                const dayOfWeek = selectedDate.getDay();
-                const weekOfMonth = Math.ceil(selectedDate.getDate() / 7);
-
-                const hasMatchingWindow = windows.some((w: any) =>
-                    w.enabled &&
-                    w.days.includes(dayOfWeek) &&
-                    (w.weeks_of_month || [1,2,3,4,5]).includes(weekOfMonth)
-                );
-
-                if (!hasMatchingWindow) {
-                    setError('preferred_date', 'No pickup service available on the selected day');
-                    hasErrors = true;
-                }
-            }
+          const evalResult = evaluateDateAvailability(selectedDate, activeLogistics);
+          if (evalResult.isInvalid && evalResult.message) {
+            setError('preferred_date', evalResult.message);
+            hasErrors = true;
+          }
         }
       }
 
@@ -2327,40 +2362,7 @@ if (step === 2) {
                                 if (!activeLogistics) {
                                   return false;
                                 }
-
-                                // Lead time check
-                                const leadTimeDate = new Date(Date.now() + 86400000 * (activeLogistics.leadTimeDays || 2));
-                                leadTimeDate.setHours(0, 0, 0, 0);
-
-                                if (date < leadTimeDate) {
-                                  return true;
-                                }
-
-                                // Blackout check
-                                const offset = date.getTimezoneOffset() * 60000;
-                                const localDateStr = new Date(date.getTime() - offset).toISOString().slice(0, 10);
-
-                                if (activeLogistics.blackoutDates?.includes(localDateStr)) {
-                                  return true;
-                                }
-
-                                // Pickup windows check
-                                const windows = activeLogistics.pickupWindows || [];
-
-                                if (windows.length === 0) {
-                                  return false;
-                                }
-
-                                const dayOfWeek = date.getDay();
-                                const weekOfMonth = Math.ceil(date.getDate() / 7);
-
-                                const hasMatchingWindow = windows.some((w: { enabled: boolean; days: number[]; weeks_of_month?: number[] }) =>
-                                  w.enabled &&
-                                  w.days.includes(dayOfWeek) &&
-                                  (w.weeks_of_month || [1,2,3,4,5]).includes(weekOfMonth)
-                                );
-
-                                return !hasMatchingWindow;
+                                return evaluateDateAvailability(date, activeLogistics).isInvalid;
                               }}
                               initialFocus
                             />
