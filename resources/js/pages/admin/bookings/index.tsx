@@ -1,11 +1,13 @@
 import { Head, Link, useForm, router, usePage } from '@inertiajs/react';
 import { formatDistanceToNow } from 'date-fns';
-import { BookOpen, Plus, Pencil, CheckCircle, UserPlus, Search, Ban, CheckSquare, Eye, Clock, Package, Ship, Truck, ListFilter, AlertTriangle, Calendar, MapPin, User, FileText, DollarSign, Sparkles } from 'lucide-react';
+import { BookOpen, Plus, Pencil, CheckCircle, UserPlus, Search, Ban, CheckSquare, Eye, Clock, Package, Ship, Truck, ListFilter, AlertTriangle, Calendar, MapPin, User, FileText, DollarSign, Sparkles, Upload } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import ConfirmModal from '@/components/common/confirm-modal';
+import BookingExportModal from '@/components/bookings/booking-export-modal';
+import ExcelImportModal from '@/components/common/excel-import-modal';
 import FilterSelect from '@/components/common/filter-select';
 import Heading from '@/components/common/heading';
 import Pagination, { PaginationData } from '@/components/common/pagination';
@@ -37,13 +39,16 @@ interface Booking {
     sender: {
         first_name: string;
         last_name: string;
+        mobile?: string | null;
+        user_id?: number | null;
     };
     status: string;
+    booking_type: string;
     payment_status: string;
     service_type: string;
-    booking_type?: string;
     destination: string;
     preferred_date: string | null;
+    is_guest?: boolean;
     is_potential_duplicate?: boolean;
     has_completed_pickup_runsheet?: boolean;
     has_active_pickup_runsheet?: boolean;
@@ -57,7 +62,6 @@ interface Booking {
     declaration_form_status: string;
     declaration_data?: any;
     box_count: number;
-    is_guest?: boolean;
     admin_notes?: string | null;
     created_at: string;
     runsheets?: {
@@ -118,12 +122,13 @@ export default function BookingsIndex({
     filters?: {
         search?: string;
         status?: string;
+        payment_status?: string;
+        booking_type?: string;
+        declaration_form_status?: string;
+        customer_type?: string;
         sort?: string;
         direction?: string;
         trashed?: boolean | string;
-        payment_status?: string;
-        declaration_form_status?: string;
-        customer_type?: string;
     };
 }) {
     const { post, processing, data: formData, setData } = useForm({
@@ -160,6 +165,7 @@ export default function BookingsIndex({
     const [pickerSearch, setPickerSearch] = useState('');
     const [courierSearch, setCourierSearch] = useState('');
     const [isBulkAcceptModalOpen, setIsBulkAcceptModalOpen] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
     const [isBulkCancelModalOpen, setIsBulkCancelModalOpen] = useState(false);
     const [isSingleCancelModalOpen, setIsSingleCancelModalOpen] = useState(false);
     const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
@@ -389,11 +395,9 @@ export default function BookingsIndex({
                 }}
                 onConfirm={handleSingleCancelConfirm}
                 title="Cancel Booking"
-                description={
-                    selectedBooking
-                        ? `Are you sure you want to cancel booking ${selectedBooking.reference_number}? It is currently ${humanize(selectedBooking.status)} with payment status ${humanize(selectedBooking.payment_status)}.`
-                        : 'Are you sure you want to cancel this booking?'
-                }
+                description={selectedBooking
+                    ? `Cancel booking ${selectedBooking.reference_number}? Current logistics status: ${selectedBooking.status}. Current payment status: ${selectedBooking.payment_status}. Cancellation bypasses normal workflow progression and may affect active operational work.`
+                    : 'Cancel this booking?'}
                 confirmText="Cancel Booking"
                 variant="destructive"
                 loading={isProcessing}
@@ -427,6 +431,16 @@ export default function BookingsIndex({
                 loading={isProcessing}
             />
 
+            <ExcelImportModal
+                isOpen={isImportModalOpen}
+                onClose={() => setIsImportModalOpen(false)}
+                title="Import Bookings"
+                description="Upload an Excel (.xlsx) file to create new or update existing bookings."
+                importUrl="/admin/bookings/import-excel"
+                templateUrl="/admin/bookings/import-template"
+                entityName="Bookings"
+            />
+
             <div className="flex h-full flex-1 flex-col gap-5 p-4 sm:p-6 md:p-8 min-w-0 w-full">
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-4 border-b border-zinc-200/80 pb-5">
                     <Heading
@@ -434,13 +448,32 @@ export default function BookingsIndex({
                         title="Logistics Bookings"
                         description="Manage sender box bookings, schedules, and carrier assignments."
                     />
-                    <Link
-                        href="/admin/bookings/create"
-                        className="h-9 px-4 rounded-lg bg-brand-rust text-white text-xs font-medium hover:bg-brand-rust/90 flex items-center gap-1.5 transition-colors shadow-2xs shrink-0"
-                    >
-                        <Plus className="size-3.5" />
-                        New Booking
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <BookingExportModal
+                            exportUrl="/admin/bookings/export-excel"
+                            selectedIds={selectedIds}
+                            filters={filters}
+                            label="Export"
+                            size="sm"
+                        />
+                        {/* <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsImportModalOpen(true)}
+                            className="gap-1.5"
+                        >
+                            <Upload className="size-3.5 text-blue-600 dark:text-blue-400" />
+                            <span>Import</span>
+                        </Button> */}
+                        <Link
+                            href="/admin/bookings/create"
+                            className="h-8 px-3 rounded-lg bg-brand-rust text-white text-xs font-medium hover:bg-brand-rust/90 flex items-center gap-1.5 transition-colors shadow-2xs shrink-0"
+                        >
+                            <Plus className="size-3.5" />
+                            New Booking
+                        </Link>
+                    </div>
                 </div>
 
                 <div className="flex flex-col gap-4">
@@ -460,37 +493,37 @@ export default function BookingsIndex({
                         }}
                         className="w-full"
                     >
-                        <TabsList className="h-10 inline-flex items-center gap-1 rounded-xl border border-zinc-200/80 bg-zinc-50/80 p-1 w-auto overflow-x-auto">
-                            <TabsTrigger value="all" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                        <TabsList className="h-10 inline-flex items-center gap-1 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 p-1 w-auto overflow-x-auto">
+                            <TabsTrigger value="all" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <ListFilter className="size-3.5" />
                                 All
                             </TabsTrigger>
-                            <TabsTrigger value="pending" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                            <TabsTrigger value="pending" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <Clock className="size-3.5" />
                                 Pending
                             </TabsTrigger>
-                            <TabsTrigger value="confirmed" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                            <TabsTrigger value="confirmed" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <CheckCircle className="size-3.5" />
                                 Confirmed
                             </TabsTrigger>
-                            <TabsTrigger value="collected" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                            <TabsTrigger value="collected" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <Package className="size-3.5" />
                                 Collected
                             </TabsTrigger>
-                            <TabsTrigger value="shipped" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                            <TabsTrigger value="shipped" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <Ship className="size-3.5" />
                                 Shipped
                             </TabsTrigger>
-                            <TabsTrigger value="delivered" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                            <TabsTrigger value="delivered" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <Truck className="size-3.5" />
                                 Delivered
                             </TabsTrigger>
-                            <TabsTrigger value="cancelled" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                            <TabsTrigger value="cancelled" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                 <Ban className="size-3.5" />
                                 Cancelled
                             </TabsTrigger>
                             {auth?.user?.role === 'super_admin' && (
-                                <TabsTrigger value="trashed" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                                <TabsTrigger value="trashed" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 transition-all data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-800 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 data-[state=active]:shadow-2xs gap-1.5">
                                     <AlertTriangle className="size-3.5" />
                                     Archived
                                 </TabsTrigger>
@@ -499,8 +532,9 @@ export default function BookingsIndex({
                     </Tabs>
 
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="flex flex-1 flex-wrap items-center gap-2">
+                        <div className="flex flex-1 flex-wrap items-end gap-2.5">
                             <SearchFilter
+                                label="Search"
                                 routeName="/admin/bookings"
                                 queryParams={filters}
                                 placeholder="Search reference or sender..."
@@ -531,7 +565,7 @@ export default function BookingsIndex({
                                 ]}
                             />
                             <FilterSelect
-                                label="Customer Type"
+                                label="Customer"
                                 routeName="/admin/bookings"
                                 paramName="customer_type"
                                 queryParams={filters}
@@ -550,18 +584,18 @@ export default function BookingsIndex({
                     />
                 </div>
 
-                <div className="rounded-xl border border-zinc-200/80 bg-white overflow-hidden shadow-2xs">
+                <div className="card overflow-hidden shadow-xs">
                     {bookings.data.length > 0 ? (
                         <div className="overflow-x-auto w-full">
                             <table className="w-full text-left border-collapse">
                                 <thead>
-                                    <tr className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold text-zinc-600">
+                                    <tr className="border-b border-border bg-brand-warm/10 dark:bg-brand-warm/20 text-xs font-semibold text-brand-text-mid">
                                         <th scope="col" className="px-4 py-3 w-10">
                                             <Checkbox
                                                 checked={selectedIds.length === bookings.data.length && bookings.data.length > 0}
                                                 onCheckedChange={toggleSelectAll}
                                                 aria-label="Select all"
-                                                className="size-4 rounded border-zinc-300"
+                                                className="size-4 rounded border-border"
                                             />
                                         </th>
                                         <th scope="col" className="px-4 py-3 font-semibold">Reference</th>
@@ -575,7 +609,7 @@ export default function BookingsIndex({
                                         <th scope="col" className="px-4 py-3 font-semibold text-right">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-zinc-100 text-xs font-normal">
+                                <tbody className="divide-y divide-border text-xs font-normal">
                                     {bookings.data.map((booking) => {
                                         const isNew = isNewBooking(booking.created_at);
 
@@ -584,8 +618,8 @@ export default function BookingsIndex({
                                                 key={booking.id}
                                                 className={`transition-colors ${
                                                     selectedIds.includes(booking.id)
-                                                        ? 'bg-zinc-50'
-                                                        : 'hover:bg-zinc-50/60'
+                                                        ? 'bg-brand-warm/30 dark:bg-brand-warm/40'
+                                                        : 'hover:bg-brand-cream/20 dark:hover:bg-brand-warm/20'
                                                 }`}
                                             >
                                                 <td className="px-4 py-3.5">
@@ -593,69 +627,53 @@ export default function BookingsIndex({
                                                         checked={selectedIds.includes(booking.id)}
                                                         onCheckedChange={() => toggleSelect(booking.id)}
                                                         aria-label={`Select booking ${booking.reference_number}`}
-                                                        className="size-4 rounded border-zinc-300"
+                                                        className="size-4 rounded border-border"
                                                     />
                                                 </td>
-                                                <td className="px-4 py-3.5 font-semibold text-zinc-900">
-                                                    <div className="flex items-center gap-1.5">
-                                                        <Link href={`/admin/bookings/${booking.id}`} className="font-mono text-xs font-semibold text-zinc-900 hover:text-brand-rust transition-colors">
+                                                <td className="px-4 py-3.5 font-semibold text-brand-text">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                        <Link href={`/admin/bookings/${booking.id}`} className="font-mono text-xs font-semibold text-brand-text hover:text-brand-rust transition-colors">
                                                             {booking.reference_number}
                                                         </Link>
-                                                        {booking.is_guest && (
-                                                            <span className="inline-flex items-center rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-200 uppercase tracking-wide" title="Booked via Guest Checkout">
+                                                        <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground border border-border uppercase">
+                                                            {humanize(booking.booking_type || 'home_pickup')}
+                                                        </span>
+                                                        {Boolean(booking.is_guest || !booking.sender?.user_id) && (
+                                                            <span className="inline-flex items-center rounded-md bg-amber-50 dark:bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                                                                 Guest
                                                             </span>
                                                         )}
                                                         {isNew && (
-                                                            <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                                                            <span className="inline-flex items-center rounded-md bg-emerald-50 dark:bg-emerald-950/50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                                                                 New
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <span className="text-[10px] text-zinc-400 block font-normal mt-0.5">
+                                                    <span className="text-[10px] text-brand-text-light/60 block font-normal mt-0.5">
                                                         {formatDistanceToNow(new Date(booking.created_at), { addSuffix: true })}
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex flex-col">
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="font-semibold text-zinc-900">{booking.sender.first_name} {booking.sender.last_name}</span>
-                                                            {booking.is_guest && (
-                                                                <span className="inline-flex items-center rounded px-1 text-[9px] font-medium bg-amber-50 text-amber-700 border border-amber-200/60">
-                                                                    Guest
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                                            <span className="text-zinc-500 text-[11px] font-normal">
-                                                                {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}
-                                                            </span>
-                                                            <span className="text-zinc-300">•</span>
-                                                            <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
-                                                                booking.booking_type === 'home_pickup'
-                                                                    ? 'bg-blue-50 text-blue-700'
-                                                                    : booking.booking_type === 'other'
-                                                                        ? 'bg-purple-50 text-purple-700'
-                                                                        : 'bg-zinc-100 text-zinc-600'
-                                                            }`}>
-                                                                {booking.booking_type === 'home_pickup' ? 'Pick-Up' : booking.booking_type === 'other' ? 'Other' : 'Drop-Off'}
-                                                            </span>
-                                                        </div>
+                                                        <span className="font-semibold text-brand-text">{booking.sender.first_name} {booking.sender.last_name}</span>
+                                                        <span className="text-brand-text-mid text-[11px] font-normal mt-0.5">
+                                                            {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}
+                                                        </span>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-600">
+                                                <td className="px-4 py-3.5 text-brand-text-mid">
                                                     {booking.destination}
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-700 border border-zinc-200 capitalize">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border capitalize">
                                                         {humanize(booking.status)}
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                                                        booking.declaration_form_status === 'submitted_online' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
-                                                        booking.declaration_form_status === 'physical_copy_received' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                                        'bg-zinc-100 text-zinc-500 border border-zinc-200'
+                                                        booking.declaration_form_status === 'submitted_online' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800' :
+                                                        booking.declaration_form_status === 'physical_copy_received' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' :
+                                                        'bg-muted text-muted-foreground border border-border'
                                                     }`}>
                                                         {booking.declaration_form_status === 'missing' ? 'Missing' :
                                                          booking.declaration_form_status === 'submitted_online' ? 'Digital' : 'Physical'}
@@ -663,23 +681,23 @@ export default function BookingsIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                                                         booking.payment_status === 'paid' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                                         booking.payment_status === 'pending' ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                                                         'bg-zinc-100 text-zinc-700 border border-zinc-200'
+                                                         booking.payment_status === 'paid' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' :
+                                                         booking.payment_status === 'pending' ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800' :
+                                                         'bg-muted text-muted-foreground border border-border'
                                                     }`}>
                                                         {humanize(booking.payment_status)}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-600 whitespace-nowrap">
+                                                <td className="px-4 py-3.5 text-brand-text-mid whitespace-nowrap">
                                                     {booking.preferred_date
                                                         ? new Date(booking.preferred_date).toLocaleDateString()
                                                         : 'N/A'}
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-600 max-w-[150px] truncate" title={booking.admin_notes || ''}>
+                                                <td className="px-4 py-3.5 text-brand-text-mid max-w-[150px] truncate" title={booking.admin_notes || ''}>
                                                     {booking.admin_notes ? (
                                                         <span className="text-xs">{booking.admin_notes}</span>
                                                     ) : (
-                                                        <span className="text-xs text-zinc-400 italic">None</span>
+                                                        <span className="text-xs text-brand-text-light/60 italic">None</span>
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3.5 text-right whitespace-nowrap">
@@ -694,7 +712,7 @@ export default function BookingsIndex({
                                                                     size="sm"
                                                                     variant="outline"
                                                                     onClick={() => openAcceptModal(booking.id)}
-                                                                    className="h-8 px-3 text-xs font-medium rounded-lg text-emerald-700 bg-emerald-50 border-emerald-200/80 hover:bg-emerald-100/80 transition-colors shadow-2xs gap-1.5"
+                                                                    className="h-8 px-3 text-xs font-medium rounded-lg text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/80 dark:border-emerald-800/80 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/50 transition-colors shadow-2xs gap-1.5"
                                                                 >
                                                                     <CheckCircle className="size-3.5" />
                                                                     Accept
@@ -710,8 +728,8 @@ export default function BookingsIndex({
                                                                 disabled={!booking.can_assign_picker}
                                                                 className={`h-8 px-3 text-xs font-medium rounded-lg gap-1.5 transition-colors shadow-2xs ${
                                                                     booking.can_assign_picker
-                                                                        ? 'text-amber-700 bg-amber-50 border-amber-200/80 hover:bg-amber-100/80'
-                                                                        : 'text-zinc-400 bg-zinc-50 border-zinc-200/60 cursor-not-allowed'
+                                                                        ? 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-amber-200/80 dark:border-amber-800/80 hover:bg-amber-100/80 dark:hover:bg-amber-900/50'
+                                                                        : 'text-brand-text-light/50 bg-muted/50 border-border cursor-not-allowed'
                                                                 }`}
                                                             >
                                                                 <UserPlus className="size-3.5" />
@@ -724,7 +742,7 @@ export default function BookingsIndex({
                                                                 size="sm"
                                                                 variant="outline"
                                                                 onClick={() => router.get('/admin/runsheets/create', { type: 'delivery', booking_id: booking.id })}
-                                                                className="h-8 px-3 text-xs font-medium rounded-lg text-blue-700 bg-blue-50 border-blue-200/80 hover:bg-blue-100/80 transition-colors shadow-2xs gap-1.5"
+                                                                className="h-8 px-3 text-xs font-medium rounded-lg text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/40 border-blue-200/80 dark:border-blue-800/80 hover:bg-blue-100/80 dark:hover:bg-blue-900/50 transition-colors shadow-2xs gap-1.5"
                                                             >
                                                                 <UserPlus className="size-3.5" />
                                                                 Assign
@@ -737,7 +755,7 @@ export default function BookingsIndex({
                                                                 size="sm"
                                                                 variant="outline"
                                                                 title="Restore booking"
-                                                                className="h-8 px-3 text-xs font-medium text-emerald-700 bg-emerald-50 border-emerald-200/80 hover:bg-emerald-100/80 rounded-lg shadow-2xs"
+                                                                className="h-8 px-3 text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/80 dark:border-emerald-800/80 hover:bg-emerald-100/80 dark:hover:bg-emerald-900/50 rounded-lg shadow-2xs"
                                                                 onClick={() => {
                                                                     setSelectedBookingId(booking.id);
                                                                     setIsRestoreModalOpen(true);
@@ -750,7 +768,7 @@ export default function BookingsIndex({
                                                                 <Link
                                                                     href={`/admin/bookings/${booking.id}`}
                                                                     title="View details"
-                                                                    className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                                    className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                                 >
                                                                     <Eye className="size-3.5" />
                                                                 </Link>
@@ -758,16 +776,16 @@ export default function BookingsIndex({
                                                                 <Link
                                                                     href={`/admin/bookings/${booking.id}/edit`}
                                                                     title="Edit booking"
-                                                                    className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-brand-rust hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                                    className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                                 >
                                                                     <Pencil className="size-3.5" />
                                                                 </Link>
 
-                                                                {['pending', 'draft'].includes(booking.status) && (
+                                                                {['pending', 'draft', 'confirmed'].includes(booking.status) && (
                                                                     <button
                                                                         type="button"
                                                                         title="Cancel booking"
-                                                                        className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-red-600 hover:bg-red-50 hover:border-red-200 transition-all flex items-center justify-center shadow-2xs"
+                                                                        className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:border-red-200 dark:hover:border-red-800 transition-all flex items-center justify-center shadow-2xs"
                                                                         onClick={() => {
                                                                             setSelectedBookingId(booking.id);
                                                                             setIsSingleCancelModalOpen(true);
@@ -781,7 +799,7 @@ export default function BookingsIndex({
                                                                     <button
                                                                         type="button"
                                                                         title="Archive booking (Super Admin)"
-                                                                        className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-200 transition-all flex items-center justify-center shadow-2xs"
+                                                                        className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:border-amber-200 dark:hover:border-amber-800 transition-all flex items-center justify-center shadow-2xs"
                                                                         onClick={() => {
                                                                             setSelectedBookingId(booking.id);
                                                                             setIsArchiveModalOpen(true);
@@ -801,7 +819,7 @@ export default function BookingsIndex({
                             </table>
                         </div>
                     ) : (
-                        <div className="px-4 py-8 text-center text-xs text-zinc-400 italic">
+                        <div className="px-4 py-8 text-center text-xs text-brand-text-light/60 italic">
                             No bookings found.
                         </div>
                     )}
@@ -827,7 +845,7 @@ export default function BookingsIndex({
                     }
                 ]}
             />
-            
+
             <BookingBulkUpdateModal
                 isOpen={isBulkUpdateModalOpen}
                 onClose={() => setIsBulkUpdateModalOpen(false)}

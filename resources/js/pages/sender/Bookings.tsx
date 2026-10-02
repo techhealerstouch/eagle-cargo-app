@@ -1,9 +1,11 @@
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { Package, Search, PlusCircle, ArrowRight, User, Edit2, Trash2, AlertCircle, FileEdit, FileText, CheckCircle2, Printer, SlidersHorizontal, CreditCard, Filter, Ban } from 'lucide-react';
-import { useEffect, useState, useMemo } from 'react';
+import { Package, Search, PlusCircle, ArrowRight, User, Edit2, Trash2, AlertCircle, FileEdit, FileText, CheckCircle2, Printer, SlidersHorizontal, CreditCard, Filter, Ban, Tag, Upload, Eye, X, Building2, Loader2, Hash, Copy, Check } from 'lucide-react';
+import { useEffect, useState, useMemo, useRef } from 'react';
+import { toast } from 'sonner';
 import ConfirmModal from '@/components/common/confirm-modal';
 import DeclarationPromptModal from '@/components/common/declaration-prompt-modal';
 import Heading from '@/components/common/heading';
+import BoxProgressStepper from '@/components/admin/box-progress-stepper';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import {
@@ -14,9 +16,8 @@ import {
     DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 import AppLayout from '@/layouts/app-layout';
-import { cn, humanize } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
-import { getSenderBookingStatusIndex, getContinuousProgressInfo } from './sender-dashboard-statuses';
 
 export default function Bookings({ sender, history, filters = {}, pageTitle = 'My Bookings', breadcrumbs = [] }: any) {
     const { delete: destroy } = useForm();
@@ -30,30 +31,18 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
     const [pendingAction, setPendingAction] = useState<{ id: number, type: 'cancel' | 'delete' } | null>(null);
     const [isProcessing, setIsProcessing] = useState(false);
     const [highlightedId, setHighlightedId] = useState<string | null>(null);
+    const [uploadingProofFor, setUploadingProofFor] = useState<any>(null);
+    const [declarationPromptBookingId, setDeclarationPromptBookingId] = useState<number | null>(null);
+    const [copiedRef, setCopiedRef] = useState(false);
+    const initialUrlHandled = useRef(false);
 
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        const highlight = params.get('highlight');
-        if (highlight) {
-            setHighlightedId(highlight);
-            
-            const timerScroll = setTimeout(() => {
-                const element = document.getElementById(`booking-${highlight}`);
-                if (element) {
-                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-            }, 300);
-
-            const timerClear = setTimeout(() => {
-                setHighlightedId(null);
-            }, 5000);
-
-            return () => {
-                clearTimeout(timerScroll);
-                clearTimeout(timerClear);
-            };
-        }
-    }, []);
+    const handleCopyReference = (ref: string) => {
+        if (!ref) return;
+        navigator.clipboard.writeText(ref);
+        setCopiedRef(true);
+        toast.success(`Reference "${ref}" copied to clipboard!`);
+        setTimeout(() => setCopiedRef(false), 2000);
+    };
 
     const cancelBooking = (id: number) => {
         setPendingAction({ id, type: 'cancel' });
@@ -81,6 +70,48 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
     };
 
     const bookings = Array.isArray(history) ? history : history?.data || [];
+
+    useEffect(() => {
+        if (initialUrlHandled.current) {
+            return;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const highlight = params.get('highlight');
+        const uploadProof = params.get('upload_proof');
+        const action = params.get('action');
+
+        const targetRef = uploadProof || highlight;
+        if (targetRef) {
+            initialUrlHandled.current = true;
+            setHighlightedId(targetRef);
+
+            const timerScroll = setTimeout(() => {
+                const element = document.getElementById(`booking-${targetRef}`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 300);
+
+            const targetBooking = bookings.find((b: any) =>
+                (b.reference_number && b.reference_number.toLowerCase() === targetRef.toLowerCase()) ||
+                String(b.id) === targetRef
+            );
+
+            if (targetBooking && targetBooking.payment_status !== 'paid') {
+                openProofModalFor(targetBooking);
+            }
+
+            const timerClear = setTimeout(() => {
+                setHighlightedId(null);
+            }, 5000);
+
+            return () => {
+                clearTimeout(timerScroll);
+                clearTimeout(timerClear);
+            };
+        }
+    }, [bookings]);
     
     // Status counts
     const statusCounts = useMemo(() => {
@@ -154,11 +185,37 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
         return () => window.clearTimeout(timeout);
     }, [filters.search, searchTerm]);
 
-    const [uploadingProofFor, setUploadingProofFor] = useState<any>(null);
-    const [declarationPromptBookingId, setDeclarationPromptBookingId] = useState<number | null>(null);
+    const [proofPreview, setProofPreview] = useState<string | null>(null);
     const { data: proofData, setData: setProofData, post: postProof, processing: uploadingProof, errors: proofErrors, reset: resetProof } = useForm({
         proof_of_payment: null as File | null,
+        payment_reference: '',
     });
+
+    const openProofModalFor = (booking: any) => {
+        setUploadingProofFor(booking);
+        setProofData({
+            proof_of_payment: null,
+            payment_reference: booking.payment_reference || '',
+        });
+        setProofPreview(null);
+    };
+
+    const handleProofFileSelect = (file: File | null) => {
+        setProofData('proof_of_payment', file);
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (ev) => setProofPreview(ev.target?.result as string);
+            reader.readAsDataURL(file);
+        } else {
+            setProofPreview(null);
+        }
+    };
+
+    const handleCloseProofModal = () => {
+        setUploadingProofFor(null);
+        resetProof();
+        setProofPreview(null);
+    };
 
     const submitProof = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -167,22 +224,25 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
             return;
         }
 
-        const targetBooking = uploadingProofFor;
+        if (!proofData.proof_of_payment && !proofData.payment_reference.trim() && !uploadingProofFor.proof_of_payment) {
+            toast.error('Please select a receipt file or provide a transaction reference number.');
+            return;
+        }
 
-        postProof(`/bookings/${targetBooking.id}/upload-proof`, {
+        postProof(`/bookings/${uploadingProofFor.id}/upload-proof`, {
             preserveScroll: true,
+            forceFormData: true,
             onSuccess: () => {
-                setUploadingProofFor(null);
-                resetProof();
-                const isSubmitted =
-                    targetBooking.declaration_form_status === 'submitted_online' ||
-                    targetBooking.declaration_form_status === 'physical_copy_received' ||
-                    Boolean(targetBooking.declaration_data) ||
-                    Boolean(targetBooking.declaration_form_path);
-
-                if (!isSubmitted) {
+                const targetBooking = uploadingProofFor;
+                handleCloseProofModal();
+                const isDeclarationMissing = !targetBooking?.declaration_form_status || targetBooking.declaration_form_status === 'missing';
+                if (targetBooking?.id && isDeclarationMissing) {
                     setDeclarationPromptBookingId(targetBooking.id);
                 }
+            },
+            onError: (errs) => {
+                const firstErr = Object.values(errs)[0];
+                toast.error(typeof firstErr === 'string' ? firstErr : 'Failed to submit payment details.');
             },
         });
     };
@@ -235,15 +295,29 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                     isDraft ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40' :
                                     isCancelled ? 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border-red-200 dark:border-red-900/40' :
                                     isPending ? 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40' :
-                                    bStatus === 'confirmed' || bStatus === 'delivered' ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40' :
-                                    bStatus === 'shipped' || bStatus === 'collected' ? 'bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/40' :
+                                    isConfirmed ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40' :
                                     'bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800'
                                 )}>
-                                    {isDraft ? 'DRAFT' : isCancelled ? 'CANCELLED' : isPending ? 'PENDING' : bStatus === 'confirmed' ? 'CONFIRMED' : humanize(bStatus).toUpperCase()}
+                                    {isDraft ? 'DRAFT' : isCancelled ? 'CANCELLED' : isPending ? 'PENDING' : isConfirmed ? 'CONFIRMED' : 'ACTIVE'}
                                 </span>
+                                {!isDraft && !isCancelled && (booking.promo_code || Number(booking.discount_amount || 0) > 0) && (
+                                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40 flex items-center gap-1">
+                                        <Tag className="size-3" /> {booking.promo_code || 'Promo Applied'}
+                                    </span>
+                                )}
                                 {!isDraft && !isCancelled && booking.payment_status === 'pending' && (
                                     <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-900/40 flex items-center gap-1">
                                         <CreditCard className="size-3" /> Unpaid
+                                    </span>
+                                )}
+                                {!isDraft && !isCancelled && booking.payment_status === 'pending' && booking.proof_of_payment && (
+                                    <span className="px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full border bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40 flex items-center gap-1">
+                                        <CheckCircle2 className="size-3" /> Proof Uploaded
+                                    </span>
+                                )}
+                                {!isDraft && !isCancelled && booking.payment_reference && (
+                                    <span className="px-2.5 py-0.5 text-[10px] font-bold tracking-wider rounded-full border bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 flex items-center gap-1 font-mono">
+                                        <Hash className="size-3 text-zinc-400" /> Ref: {booking.payment_reference}
                                     </span>
                                 )}
                             </div>
@@ -273,12 +347,41 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                 <PlusCircle className="size-3.5" /> Rebook
                             </Link>
                         ) : !isCancelled && booking.payment_status === 'pending' ? (
-                            <Link
-                                href={`/bookings/${booking.id}/pay`}
-                                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-brand-rust px-5 h-10 text-xs font-bold text-white shadow-sm hover:bg-brand-rust/90 transition-all active:scale-95"
-                            >
-                                <CreditCard className="size-3.5" /> Pay Online
-                            </Link>
+                            <>
+                                {booking.payment_method === 'bank_transfer' ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => openProofModalFor(booking)}
+                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-brand-rust px-5 h-10 text-xs font-bold text-white shadow-sm hover:bg-brand-rust/90 transition-all active:scale-95 cursor-pointer"
+                                        >
+                                            <Upload className="size-3.5" /> {booking.proof_of_payment ? 'Update Proof' : 'Upload Proof'}
+                                        </button>
+                                        <Link
+                                            href={`/bookings/${booking.id}/pay`}
+                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 h-10 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95"
+                                        >
+                                            <CreditCard className="size-3.5" /> Pay Online
+                                        </Link>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => openProofModalFor(booking)}
+                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 h-10 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all active:scale-95 cursor-pointer"
+                                        >
+                                            <Upload className="size-3.5" /> {booking.proof_of_payment ? 'Update Proof' : 'Upload Proof'}
+                                        </button>
+                                        <Link
+                                            href={`/bookings/${booking.id}/pay`}
+                                            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-brand-rust px-5 h-10 text-xs font-bold text-white shadow-sm hover:bg-brand-rust/90 transition-all active:scale-95"
+                                        >
+                                            <CreditCard className="size-3.5" /> Pay Online
+                                        </Link>
+                                    </>
+                                )}
+                            </>
                         ) : (
                             <Link
                                 href={`/track?tracking_number=${booking.reference_number}`}
@@ -310,6 +413,28 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                         </div>
                                         <DropdownMenuSeparator className="my-1.5 dark:border-zinc-800" />
                                     </>
+                                )}
+
+                                {!isCancelled && booking.payment_status === 'pending' && (
+                                    <DropdownMenuItem
+                                        onClick={() => openProofModalFor(booking)}
+                                        className="rounded-xl flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                                    >
+                                        <Upload className="size-4" /> {booking.proof_of_payment ? 'Update Proof of Payment' : 'Upload Proof of Payment'}
+                                    </DropdownMenuItem>
+                                )}
+
+                                {booking.proof_of_payment && (
+                                    <DropdownMenuItem asChild className="rounded-xl">
+                                        <a
+                                            href={`/storage/${booking.proof_of_payment}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center gap-2.5 px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 cursor-pointer"
+                                        >
+                                            <Eye className="size-4" /> View Uploaded Proof
+                                        </a>
+                                    </DropdownMenuItem>
                                 )}
 
                                 {!isCancelled && (
@@ -440,9 +565,8 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                             {booking.boxes?.map((box: any) => {
-                                const isBoxCancelled = isCancelled || (box.status || '').toLowerCase() === 'cancelled';
-                                const progressInfo = getContinuousProgressInfo(box.status, booking.status);
-                                const isDelivered = progressInfo.isDelivered;
+                                const isDelivered = box.status === 'delivered';
+                                const isCancelled = box.status === 'cancelled';
 
                                 return (
                                     <div key={box.id} className="bg-white dark:bg-zinc-950 border border-zinc-200/70 dark:border-zinc-900 p-5 rounded-2xl flex flex-col justify-between gap-5 hover:border-zinc-300 dark:hover:border-zinc-800 transition-all duration-300 shadow-2xs">
@@ -461,44 +585,19 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                             </div>
                                         </div>
 
-                                        {/* Status Progress Bar */}
-                                        {isBoxCancelled ? (
+                                        {/* Status Progress Stepper */}
+                                        {isCancelled ? (
                                             <div className="flex items-center gap-3 p-3 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200/60 dark:border-zinc-800 rounded-xl">
                                                 <AlertCircle className="size-4 text-zinc-400 shrink-0" />
                                                 <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-400">Shipment Cancelled</span>
                                             </div>
                                         ) : (
-                                            <div className="space-y-2 pt-1">
-                                                <div className="flex items-center justify-between text-xs">
-                                                    <span className={cn(
-                                                        "font-bold text-xs tracking-tight transition-colors",
-                                                        progressInfo.isDelivered
-                                                            ? "text-emerald-600 dark:text-emerald-400"
-                                                            : "text-sky-600 dark:text-sky-400"
-                                                    )}>
-                                                        {progressInfo.label}
-                                                    </span>
-                                                    <span className="font-extrabold text-xs text-zinc-900 dark:text-zinc-100 font-mono">
-                                                        {progressInfo.percent}%
-                                                    </span>
-                                                </div>
-                                                <div
-                                                    className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden"
-                                                    role="progressbar"
-                                                    aria-valuenow={progressInfo.percent}
-                                                    aria-valuemin={0}
-                                                    aria-valuemax={100}
-                                                    aria-label={`Shipment progress: ${progressInfo.label} (${progressInfo.percent}%)`}
-                                                >
-                                                    <div
-                                                        className={cn(
-                                                            "h-full rounded-full transition-all duration-700 ease-out",
-                                                            progressInfo.barColor
-                                                        )}
-                                                        style={{ width: `${progressInfo.percent}%` }}
-                                                    />
-                                                </div>
-                                            </div>
+                                            <BoxProgressStepper 
+                                                status={box.status} 
+                                                trackingStepKey={box.tracking_step_key} 
+                                                size="md"
+                                                className="w-full" 
+                                            />
                                         )}
 
                                         {/* Recipient Details */}
@@ -671,59 +770,267 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                 open={!!uploadingProofFor}
                 onOpenChange={(open) => {
                     if (!open) {
-                        setUploadingProofFor(null);
-                        resetProof();
+                        handleCloseProofModal();
                     }
                 }}
             >
-                <DialogContent className="max-w-md p-6 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl">
-                    <DialogHeader className="mb-6">
-                        <DialogTitle className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight">Upload Proof of Payment</DialogTitle>
-                        <DialogDescription className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 flex items-center gap-1.5">
-                            <FileText className="size-3.5" />
-                            Booking Ref: <span className="text-zinc-900 dark:text-white font-mono font-bold">{uploadingProofFor?.reference_number}</span>
-                        </DialogDescription>
-                    </DialogHeader>
+                <DialogContent className="max-w-lg p-0 overflow-hidden border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl">
+                    {/* Header with accent decoration */}
+                    <div className="p-6 pb-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/60">
+                        <div className="flex items-center gap-3.5">
+                            <div className="h-11 w-11 rounded-2xl bg-brand-rust/10 text-brand-rust flex items-center justify-center shrink-0">
+                                <Upload className="size-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <DialogTitle className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight">
+                                    Upload Proof of Payment
+                                </DialogTitle>
+                                <DialogDescription className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 flex items-center gap-2">
+                                    <span>Booking Ref:</span>
+                                    <span className="font-mono font-bold text-zinc-800 dark:text-zinc-200 bg-zinc-200/70 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-[11px]">
+                                        {uploadingProofFor?.reference_number}
+                                    </span>
+                                </DialogDescription>
+                            </div>
+                        </div>
 
-                    <form onSubmit={submitProof} className="space-y-6">
-                        <div className="space-y-2">
-                            <label htmlFor="proof-file" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Select Payment Screenshot</label>
-                            <input
-                                id="proof-file"
-                                type="file"
-                                accept="image/jpeg,image/png,image/jpg"
-                                capture="environment"
-                                onChange={e => setProofData('proof_of_payment', e.target.files ? e.target.files[0] : null)}
-                                className="w-full text-xs font-medium border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-3 bg-zinc-50 dark:bg-zinc-900 focus:ring-2 focus:ring-brand-rust/20 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-zinc-900 dark:file:bg-zinc-100 file:text-white dark:file:text-zinc-900 hover:file:opacity-90 transition-all cursor-pointer text-zinc-900 dark:text-white"
-                            />
-                            {proofErrors.proof_of_payment && (
-                                <p className="text-xs text-red-600 font-medium mt-1">{proofErrors.proof_of_payment}</p>
-                            )}
-                            {uploadingProofFor?.proof_of_payment && (
-                                <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium mt-2 flex items-center gap-1.5">
-                                    <CheckCircle2 className="size-3.5" />
-                                    A proof was already uploaded. Submitting a new one will replace it.
+                        {/* Booking Context Pill */}
+                        {uploadingProofFor && (
+                            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3.5 rounded-2xl bg-white dark:bg-zinc-850 border border-zinc-200/80 dark:border-zinc-800 shadow-2xs">
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Amount Due</p>
+                                    <p className="text-sm font-black text-zinc-900 dark:text-white">
+                                        ${uploadingProofFor?.invoice?.amount != null
+                                            ? Number(uploadingProofFor.invoice.amount).toFixed(2)
+                                            : (uploadingProofFor?.boxes?.reduce((sum: number, b: any) => sum + parseFloat(b.price_charged || '0'), 0)?.toFixed(2) || '0.00')}
+                                    </p>
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Payment Method</p>
+                                    <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200 capitalize flex items-center gap-1.5 truncate">
+                                        <Building2 className="size-3.5 text-zinc-400 shrink-0" />
+                                        {(uploadingProofFor?.payment_method || 'bank_transfer').replace('_', ' ')}
+                                    </p>
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">Transfer Reference</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleCopyReference(uploadingProofFor.reference_number)}
+                                        className="inline-flex items-center gap-1.5 text-xs font-mono font-bold text-brand-rust hover:underline group/copy cursor-pointer"
+                                        title="Click to copy transfer reference"
+                                    >
+                                        <span>{uploadingProofFor.reference_number}</span>
+                                        {copiedRef ? (
+                                            <Check className="size-3.5 text-emerald-600" />
+                                        ) : (
+                                            <Copy className="size-3 text-zinc-400 group-hover/copy:text-brand-rust transition-colors" />
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <form onSubmit={submitProof} className="p-6 pt-4 space-y-4">
+                        {/* Existing Proof Notice */}
+                        {uploadingProofFor?.proof_of_payment && (
+                            <div className="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 text-xs text-emerald-800 dark:text-emerald-300 flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-2.5">
+                                    <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+                                    <div>
+                                        <p className="font-bold">Proof Already Uploaded</p>
+                                        <p className="text-[11px] text-emerald-700/90 dark:text-emerald-400/90 mt-0.5">
+                                            A receipt is currently attached. Submitting a new file will replace it.
+                                        </p>
+                                    </div>
+                                </div>
+                                <a
+                                    href={`/storage/${uploadingProofFor.proof_of_payment}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0 text-xs"
+                                >
+                                    <Eye className="size-3.5" /> View Current
+                                </a>
+                            </div>
+                        )}
+
+                        {/* Transaction Reference Input */}
+                        <div className="space-y-1.5">
+                            <label htmlFor="payment_reference" className="text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center justify-between">
+                                <span className="flex items-center gap-1.5">
+                                    <Hash className="size-3.5 text-zinc-400" />
+                                    Transaction Reference / Receipt No.
+                                </span>
+                                <span className="text-[11px] font-normal text-zinc-400">
+                                    {proofData.proof_of_payment ? 'Optional if on receipt' : 'Required if no file'}
+                                </span>
+                            </label>
+                            <div className="relative">
+                                <input
+                                    id="payment_reference"
+                                    type="text"
+                                    value={proofData.payment_reference}
+                                    onChange={e => setProofData('payment_reference', e.target.value)}
+                                    placeholder="e.g. CBA-984214, PayID Ref, or Receipt #"
+                                    className="w-full h-11 px-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-brand-rust/30 focus:border-brand-rust transition-all"
+                                />
+                            </div>
+                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                Enter the transaction ID or receipt reference provided by your bank app to speed up verification.
+                            </p>
+                            {proofErrors.payment_reference && (
+                                <p className="text-xs text-red-600 dark:text-red-400 font-semibold mt-1 flex items-center gap-1.5">
+                                    <AlertCircle className="size-3.5 shrink-0" />
+                                    {proofErrors.payment_reference}
                                 </p>
                             )}
                         </div>
 
-                        <div className="flex justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-900">
+                        {/* Interactive Dropzone */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                    Select Payment Screenshot or Receipt
+                                </label>
+                                <span className="text-[11px] font-normal text-zinc-400">Max 5MB</span>
+                            </div>
+
+                            <div className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-brand-rust/50 dark:hover:border-brand-rust/50 rounded-2xl p-6 text-center hover:bg-zinc-50/60 dark:hover:bg-zinc-850/30 transition-all cursor-pointer relative group">
+                                <input
+                                    id="proof-file"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/jpg,application/pdf,.pdf"
+                                    capture="environment"
+                                    onChange={e => handleProofFileSelect(e.target.files ? e.target.files[0] : null)}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10"
+                                    title="Upload proof of payment"
+                                    aria-label="Upload proof of payment"
+                                />
+
+                                {!proofData.proof_of_payment ? (
+                                    <div className="space-y-3 pointer-events-none">
+                                        <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400 group-hover:text-brand-rust group-hover:scale-105 transition-all flex items-center justify-center mx-auto shadow-2xs">
+                                            <Upload className="size-6" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                                                Click to upload or drag & drop
+                                            </p>
+                                            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                                                Bank transfer receipt, screenshot, or PDF
+                                            </p>
+                                        </div>
+                                        <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-3 py-1 rounded-full">
+                                            <span>JPG, PNG, PDF</span>
+                                            <span>•</span>
+                                            <span>Up to 5MB</span>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="relative z-20 space-y-3">
+                                        {proofPreview ? (
+                                            <div className="relative inline-block group/preview">
+                                                <img
+                                                    src={proofPreview}
+                                                    alt="Receipt preview"
+                                                    className="max-h-40 max-w-full rounded-xl mx-auto border border-zinc-200 dark:border-zinc-700 shadow-sm object-contain"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleProofFileSelect(null);
+                                                    }}
+                                                    className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow-md transition-all active:scale-95"
+                                                    title="Remove file"
+                                                >
+                                                    <X className="size-3.5" />
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center justify-center gap-3 p-3.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                                                <div className="h-10 w-10 rounded-xl bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                                                    <FileText className="size-5" />
+                                                </div>
+                                                <div className="text-left flex-1 min-w-0">
+                                                    <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
+                                                        {proofData.proof_of_payment.name}
+                                                    </p>
+                                                    <p className="text-[11px] text-zinc-500">
+                                                        {(proofData.proof_of_payment.size / 1024 / 1024).toFixed(2)} MB
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleProofFileSelect(null);
+                                                    }}
+                                                    className="text-zinc-400 hover:text-red-500 p-1.5 transition-colors rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                                                    title="Remove file"
+                                                >
+                                                    <X className="size-4" />
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        <p className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center justify-center gap-1">
+                                            <CheckCircle2 className="size-3.5" /> File selected and ready to submit
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {proofErrors.proof_of_payment && (
+                                <p className="text-xs text-red-600 dark:text-red-400 font-semibold mt-1 flex items-center gap-1.5">
+                                    <AlertCircle className="size-3.5 shrink-0" />
+                                    {proofErrors.proof_of_payment}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Helper instructions */}
+                        <div className="p-3 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 text-[11px] text-blue-900 dark:text-blue-300 space-y-1">
+                            <p className="font-bold flex items-center gap-1.5">
+                                <AlertCircle className="size-3 text-blue-600 shrink-0" /> Verification Tip
+                            </p>
+                            <p className="text-blue-800/80 dark:text-blue-300/80 leading-relaxed">
+                                Please ensure the transfer amount, date, and reference (<span className="font-mono font-bold text-blue-950 dark:text-blue-200">{uploadingProofFor?.reference_number}</span>) are legible. Our dispatch team will verify and confirm your booking.
+                            </p>
+                        </div>
+
+                        {/* Footer Buttons */}
+                        <div className="flex items-center justify-end gap-3 pt-3 border-t border-zinc-100 dark:border-zinc-800">
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setUploadingProofFor(null);
-                                    resetProof();
-                                }}
-                                className="px-4 h-10 rounded-xl text-xs font-semibold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors"
+                                onClick={handleCloseProofModal}
+                                className="px-4 h-11 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             >
                                 Cancel
                             </button>
                             <button
                                 type="submit"
-                                disabled={uploadingProof || !proofData.proof_of_payment}
-                                className="px-6 h-10 rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs font-bold hover:opacity-90 transition-all disabled:opacity-40 shadow-xs"
+                                disabled={uploadingProof || (!proofData.proof_of_payment && !proofData.payment_reference.trim() && !uploadingProofFor?.proof_of_payment)}
+                                className="px-6 h-11 rounded-xl bg-brand-rust hover:bg-brand-rust/90 text-white text-xs font-bold transition-all disabled:opacity-40 shadow-sm inline-flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
                             >
-                                {uploadingProof ? 'Uploading...' : 'Submit Proof'}
+                                {uploadingProof ? (
+                                    <>
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                        Uploading Proof...
+                                    </>
+                                ) : uploadingProofFor?.proof_of_payment ? (
+                                    <>
+                                        <Upload className="size-3.5" />
+                                        Update Proof
+                                    </>
+                                ) : (
+                                    <>
+                                        <Upload className="size-3.5" />
+                                        Submit Proof
+                                    </>
+                                )}
                             </button>
                         </div>
                     </form>
@@ -745,11 +1052,12 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                 confirmText={pendingAction?.type === 'cancel' ? 'Cancel Booking' : 'Delete Draft'}
             />
 
-            {/* Customs Declaration Prompt Modal */}
+            {/* Declaration Prompt Modal on Payment Proof Submission */}
             <DeclarationPromptModal
-                isOpen={Boolean(declarationPromptBookingId)}
+                isOpen={declarationPromptBookingId !== null}
                 onClose={() => setDeclarationPromptBookingId(null)}
                 bookingId={declarationPromptBookingId}
+                badgeText="Payment Initiated"
             />
         </AppLayout>
     );

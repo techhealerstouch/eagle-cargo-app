@@ -1,5 +1,5 @@
-import { Head, Link, useForm } from '@inertiajs/react';
-import { ArrowLeft, Printer, Pencil, MapPin, Calendar, CreditCard, Package, Mail, Phone, Clock, Share2, FileText, CheckCircle2, AlertCircle, Info, Eye, CheckCircle, Loader2, Download, AlertTriangle } from 'lucide-react';
+import { Head, Link, useForm, router } from '@inertiajs/react';
+import { ArrowLeft, Printer, Pencil, MapPin, Calendar, CreditCard, Package, Mail, Phone, Clock, Share2, FileText, CheckCircle2, AlertCircle, Info, Eye, CheckCircle, Loader2, Download, AlertTriangle, Tag } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -24,7 +24,6 @@ interface Recipient {
     province: string;
     zip_code: string;
     phone_number?: string;
-    secondary_phone_number?: string;
     phone?: string;
     email?: string;
 }
@@ -57,6 +56,7 @@ interface Booking {
     id: number;
     reference_number: string;
     status: string;
+    booking_type: string;
     recipient_name?: string;
     recipient_phone?: string;
     delivery_address?: string;
@@ -70,26 +70,26 @@ interface Booking {
     estimated_delivery?: string | null;
     shipping_method?: string;
     service_type?: string;
-    booking_type?: string;
     declaration_form_status: string;
     declaration_form_path?: string | null;
     declaration_data?: any;
-    is_guest?: boolean;
     created_at: string;
     updated_at: string;
+    promo_code?: string | null;
+    discount_amount?: number | null;
+    is_guest?: boolean;
+    guest_token?: string | null;
     sender: {
-        id?: number;
-        user_id?: number | null;
         first_name: string;
         last_name: string;
         email?: string;
         phone?: string;
         mobile?: string;
-        secondary_mobile?: string;
         address?: string;
         suburb?: string;
         state?: string;
         postcode?: string;
+        user_id?: number | null;
     };
     boxes: BoxItem[];
     proof_of_payment?: string | null;
@@ -97,6 +97,7 @@ interface Booking {
         id: number;
         invoice_number: string;
         amount: string | number;
+        discount_amount?: number | null;
         surcharge_amount?: number | null;
         status: string;
     } | null;
@@ -125,7 +126,7 @@ const BOX_PROGRESS_WIDTH_CLASS: Record<number, string> = {
     100: 'w-full',
 };
 
-export default function BookingShow({ booking }: { booking: Booking }) {
+export default function BookingShow({ booking, pendingPayment }: { booking: Booking; pendingPayment?: any }) {
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
@@ -137,6 +138,24 @@ export default function BookingShow({ booking }: { booking: Booking }) {
     const isPending = booking.status === 'pending';
     const hasDeclaration = booking.declaration_form_status !== 'missing';
     const isQualifiedForAcceptance = isPending;
+
+    const [confirmingPayment, setConfirmingPayment] = useState(false);
+
+    const handleConfirmPayment = () => {
+        if (!pendingPayment?.id) return;
+        setConfirmingPayment(true);
+        router.post(`/admin/payments/${pendingPayment.id}/confirm`, {}, {
+            preserveScroll: true,
+            onSuccess: () => {
+                toast.success('Payment confirmed successfully! Booking status updated to Paid.');
+                setConfirmingPayment(false);
+            },
+            onError: () => {
+                toast.error('Failed to confirm payment.');
+                setConfirmingPayment(false);
+            }
+        });
+    };
 
     const [isAcceptModalOpen, setIsAcceptModalOpen] = useState(false);
     const { post, processing, data, setData } = useForm({
@@ -170,7 +189,7 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                             <ArrowLeft className="size-5" />
                         </Link>
                         <div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 flex-wrap">
                                 <h1 className="text-2xl font-serif font-bold text-brand-rust">Booking Details</h1>
                                 <div className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
                                     booking.status === 'confirmed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
@@ -180,23 +199,10 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                     {booking.status === 'confirmed' ? <CheckCircle2 className="size-3" /> : <Clock className="size-3" />}
                                     {humanize(booking.status)}
                                 </div>
-                                <div className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                                    booking.booking_type === 'home_pickup'
-                                        ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                        : booking.booking_type === 'other'
-                                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                                            : 'bg-zinc-100 text-zinc-700 border border-zinc-200'
-                                }`}>
-                                    {booking.booking_type === 'home_pickup' ? 'Home Pick-Up' : booking.booking_type === 'other' ? 'Other' : 'Drop-Off'}
-                                </div>
-                                {booking.is_guest ? (
-                                    <div className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200" title="Booked via Guest Checkout">
+                                {Boolean(booking.is_guest || !booking.sender?.user_id) && (
+                                    <span className="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-950/50 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                                         Guest Booking
-                                    </div>
-                                ) : (
-                                    <div className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200" title="Registered User Account">
-                                        Registered Member
-                                    </div>
+                                    </span>
                                 )}
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-sm">
@@ -250,7 +256,7 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                 )}
 
                 {/* Quick Info Bar */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                     <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
                         <div className="size-9 rounded-lg bg-brand-rust/5 flex items-center justify-center text-brand-rust">
                             <Package className="size-5" />
@@ -300,6 +306,17 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                             </p>
                         </div>
                     </div>
+                    <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-3">
+                        <div className="size-9 rounded-lg bg-brand-rust/5 flex items-center justify-center text-brand-rust">
+                            <CheckCircle className="size-5" />
+                        </div>
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground opacity-60">Collection</p>
+                            <p className="font-bold text-brand-rust uppercase text-sm">
+                                {humanize(booking.booking_type || 'home_pickup')}
+                            </p>
+                        </div>
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                     {/* Booking Sidebar */}
@@ -312,20 +329,9 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                             <div className="divide-y divide-border">
                                 {/* Sender Details */}
                                 <div className="p-5">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <div className="flex items-center gap-2">
-                                            <div className="size-1.5 rounded-full bg-brand-rust"></div>
-                                            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Shipper</p>
-                                        </div>
-                                        {booking.is_guest ? (
-                                            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 border border-amber-200 uppercase tracking-wide">
-                                                {booking.sender?.user_id ? 'Guest (Account Linked)' : 'Guest (No Account)'}
-                                            </span>
-                                        ) : (
-                                            <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[10px] font-bold text-blue-700 border border-blue-200 uppercase tracking-wide">
-                                                Registered Member
-                                            </span>
-                                        )}
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <div className="size-1.5 rounded-full bg-brand-rust"></div>
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Shipper</p>
                                     </div>
                                     <div className="space-y-3">
                                         <div>
@@ -333,14 +339,14 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                             <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
                                                 <Mail className="size-3" /> {booking.sender.email || 'N/A'}
                                             </p>
-                                            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                                            <p className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-1.5">
                                                 <Phone className="size-3" /> {booking.sender.mobile || booking.sender.phone || 'N/A'}
+                                                {(booking.sender as any).secondary_mobile && (
+                                                    <span className="text-[11px] text-muted-foreground/80 font-mono">
+                                                        • Alt: {(booking.sender as any).secondary_mobile}
+                                                    </span>
+                                                )}
                                             </p>
-                                            {booking.sender.secondary_mobile && (
-                                                <p className="text-[11px] text-muted-foreground font-mono ml-4.5">
-                                                    Alt: {booking.sender.secondary_mobile}
-                                                </p>
-                                            )}
                                         </div>
                                         <div className="pt-2 flex items-start gap-1.5 text-xs text-brand-rust/80">
                                             <MapPin className="size-3.5 mt-0.5 shrink-0 text-muted-foreground" />
@@ -367,14 +373,14 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                             <p className="text-lg font-serif font-bold text-brand-rust leading-tight uppercase">
                                                 {booking.boxes?.[0]?.recipient?.name || booking.recipient_name || 'No Recipient'}
                                             </p>
-                                            <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+                                            <p className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-1.5">
                                                 <Phone className="size-3" /> {booking.boxes?.[0]?.recipient?.phone_number || booking.boxes?.[0]?.recipient?.phone || booking.recipient_phone || 'N/A'}
+                                                {(booking.boxes?.[0]?.recipient as any)?.secondary_phone_number && (
+                                                    <span className="text-[11px] text-muted-foreground/80 font-mono">
+                                                        • Alt: {(booking.boxes[0].recipient as any).secondary_phone_number}
+                                                    </span>
+                                                )}
                                             </p>
-                                            {booking.boxes?.[0]?.recipient?.secondary_phone_number && (
-                                                <p className="text-[11px] text-muted-foreground font-mono ml-4.5">
-                                                    Alt: {booking.boxes[0].recipient.secondary_phone_number}
-                                                </p>
-                                            )}
                                         </div>
                                         <div className="pt-2 flex items-start gap-1.5 text-xs text-brand-rust/80">
                                             <MapPin className="size-3.5 mt-0.5 shrink-0 text-muted-foreground" />
@@ -482,8 +488,16 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                         <div className="space-y-1 mb-6">
                                             <p className="text-[10px] font-bold text-muted-foreground uppercase">Invoice #{booking.invoice.invoice_number}</p>
                                             <p className="text-xl font-bold text-brand-rust">${Number(booking.invoice.amount).toFixed(2)}</p>
+                                            {(Number(booking.discount_amount || 0) > 0 || Number(booking.invoice?.discount_amount || 0) > 0) && (
+                                                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-bold mt-1">
+                                                    <Tag className="size-3" />
+                                                    <span>
+                                                        {booking.promo_code ? `${booking.promo_code} (-$${Number(booking.discount_amount || booking.invoice?.discount_amount).toFixed(2)})` : `Discount: -$${Number(booking.discount_amount || booking.invoice?.discount_amount).toFixed(2)}`}
+                                                    </span>
+                                                </div>
+                                            )}
                                             {Number(booking.invoice.surcharge_amount || 0) > 0 && (
-                                                <p className="text-[10px] text-brand-rust/70 uppercase font-bold tracking-widest">
+                                                <p className="text-[10px] text-brand-rust/70 uppercase font-bold tracking-widest mt-1">
                                                     Includes ${Number(booking.invoice.surcharge_amount || 0).toFixed(2)} Surcharge
                                                 </p>
                                             )}
@@ -502,6 +516,19 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                                 </div>
                                             )}
                                         </div>
+                                        {pendingPayment && (
+                                            <div className="mb-3 pt-3 border-t border-border">
+                                                <Button
+                                                    size="sm"
+                                                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold uppercase tracking-wider h-8 shadow-xs"
+                                                    disabled={confirmingPayment}
+                                                    onClick={handleConfirmPayment}
+                                                >
+                                                    <CheckCircle2 className="size-3.5 mr-1.5" />
+                                                    {confirmingPayment ? 'Confirming...' : 'Confirm Payment'}
+                                                </Button>
+                                            </div>
+                                        )}
                                         <div className="mt-auto flex flex-wrap gap-2">
                                             <Link
                                                 href={`/admin/invoices/${booking.invoice.id}`}
@@ -535,6 +562,20 @@ export default function BookingShow({ booking }: { booking: Booking }) {
                                                     <FileText className="size-3" /> View Proof of Payment
                                                 </a>
                                             )}
+                                        </div>
+                                    )}
+
+                                    {pendingPayment && (
+                                        <div className="mt-4 w-full">
+                                            <Button
+                                                size="sm"
+                                                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold uppercase tracking-wider h-8 shadow-xs"
+                                                disabled={confirmingPayment}
+                                                onClick={handleConfirmPayment}
+                                            >
+                                                <CheckCircle2 className="size-3.5 mr-1.5" />
+                                                {confirmingPayment ? 'Confirming...' : 'Confirm Payment'}
+                                            </Button>
                                         </div>
                                     )}
                                 </div>

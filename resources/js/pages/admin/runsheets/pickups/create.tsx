@@ -1,5 +1,5 @@
 import { Head, Link, useForm } from '@inertiajs/react';
-import { ArrowLeft, Box, Calendar, Check, CheckSquare, MapPin, Plus, Save, Search, Square, Trash2, User } from 'lucide-react';
+import { ArrowLeft, Box, Calendar, Check, CheckSquare, ChevronDown, ExternalLink, LayoutGrid, List, MapPin, Phone, Plus, Save, Search, Square, Trash2, User, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,14 @@ interface Picker {
     picker?: { id: number; user_id: number; mobile?: string; email?: string } | null;
 }
 
+interface PickupZone {
+    id: number;
+    name: string;
+    code?: string;
+    is_active?: boolean;
+    suburbs?: Array<{ id: number; name: string }>;
+}
+
 interface Booking {
     id: number;
     reference_number: string;
@@ -26,6 +34,16 @@ interface Booking {
         last_name: string;
         suburb?: string;
         state?: string;
+        pickup_zone?: {
+            id: number;
+            name: string;
+            code?: string;
+        } | null;
+        pickupZone?: {
+            id: number;
+            name: string;
+            code?: string;
+        } | null;
     };
     payment_status: string;
     preferred_date?: string;
@@ -35,10 +53,12 @@ interface Booking {
 export default function PickupRunsheetsCreate({
     pickers = [],
     pickupEligibleBookings = [],
+    pickupZones = [],
     recommendedStartingSerial,
 }: {
     pickers?: Picker[];
     pickupEligibleBookings?: Booking[];
+    pickupZones?: PickupZone[];
     recommendedStartingSerial?: string;
 }) {
     const { t } = useTranslations();
@@ -56,12 +76,52 @@ export default function PickupRunsheetsCreate({
 
     const [hasLoadedUrlParams, setHasLoadedUrlParams] = useState(false);
 
+    const findZoneForSender = (sender?: Booking['sender']) => {
+        if (!sender) return null;
+
+        // 1. Direct pickupZone relationship if present
+        const directZoneName = sender.pickup_zone?.name || sender.pickupZone?.name;
+        if (directZoneName) {
+            const found = pickupZones.find(z => z.name.toLowerCase() === directZoneName.toLowerCase());
+            if (found) return found.name;
+        }
+
+        // 2. Match sender suburb against covered suburbs in pickupZones
+        if (sender.suburb) {
+            const subLower = sender.suburb.trim().toLowerCase();
+            const foundBySuburb = pickupZones.find(z =>
+                z.suburbs?.some(s => s.name.toLowerCase() === subLower)
+            );
+            if (foundBySuburb) return foundBySuburb.name;
+
+            // 3. Fallback: match by zone name itself
+            const foundByName = pickupZones.find(z =>
+                z.name.toLowerCase() === subLower || z.name.toLowerCase().includes(subLower)
+            );
+            if (foundByName) return foundByName.name;
+        }
+
+        return null;
+    };
+
+    // Ensure area_description is always a valid PickupZone or empty
+    useEffect(() => {
+        if (data.area_description && pickupZones.length > 0) {
+            const isValid = pickupZones.some(z => z.name.toLowerCase() === data.area_description.toLowerCase());
+            if (!isValid) {
+                setData('area_description', '');
+            }
+        }
+    }, [pickupZones, data.area_description]);
+
     useEffect(() => {
         if (hasLoadedUrlParams) return;
 
         const urlParams = new URLSearchParams(window.location.search);
         const bookingId = urlParams.get('booking_id');
         const bookingIdsStr = urlParams.get('booking_ids');
+        const explicitDate = urlParams.get('scheduled_date');
+        const explicitPickerId = urlParams.get('picker_id');
 
         let updatedIds: number[] = [];
         let firstBooking: Booking | undefined;
@@ -81,45 +141,112 @@ export default function PickupRunsheetsCreate({
             }
         }
 
+        const newData: any = {};
+
         if (updatedIds.length > 0) {
-            const newData: any = { booking_ids: updatedIds };
+            newData.booking_ids = updatedIds;
 
             if (firstBooking) {
                 if (firstBooking.preferred_date) {
                     newData.scheduled_date = firstBooking.preferred_date.substring(0, 10);
                 }
-                if (firstBooking.sender) {
-                    const area = [firstBooking.sender.suburb, firstBooking.sender.state].filter(Boolean).join(', ');
-                    if (area) {
-                        newData.area_description = area;
-                    }
+                const matchedZone = findZoneForSender(firstBooking.sender);
+                if (matchedZone) {
+                    newData.area_description = matchedZone;
                 }
             }
+        }
 
+        if (explicitDate) {
+            newData.scheduled_date = explicitDate;
+        }
+
+        if (explicitPickerId) {
+            newData.picker_id = explicitPickerId;
+        }
+
+        if (Object.keys(newData).length > 0) {
             setData(data => ({ ...data, ...newData }));
         }
 
         setHasLoadedUrlParams(true);
-    }, [pickupEligibleBookings, hasLoadedUrlParams, setData]);
+    }, [pickupEligibleBookings, hasLoadedUrlParams, setData, pickupZones]);
 
     const searchInputRef = useRef<HTMLInputElement>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
+    const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
     const [assigneeSearchTerm, setAssigneeSearchTerm] = useState('');
     const [isPickerModalOpen, setIsPickerModalOpen] = useState(false);
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
 
     const selectedPicker = useMemo(() => {
         return pickers.find(p => String(p.id) === String(data.picker_id));
     }, [pickers, data.picker_id]);
 
-    // Compute unique suburbs / area counts for filter chips
-    const areaCounts = useMemo(() => {
+    // Helper to determine Pickup Area for a booking
+    const getBookingPickupArea = (booking: Booking): string => {
+        const directZone = booking.sender?.pickup_zone?.name || booking.sender?.pickupZone?.name;
+        if (directZone) return directZone;
+
+        const matchedZone = findZoneForSender(booking.sender);
+        if (matchedZone) return matchedZone;
+
+        return 'Unassigned';
+    };
+
+    // Helper to determine Pickup Date for a booking (YYYY-MM-DD or Unscheduled)
+    const getBookingPickupDate = (booking: Booking): string => {
+        if (!booking.preferred_date) return 'Unscheduled';
+        return booking.preferred_date.substring(0, 10);
+    };
+
+    // Compute unique Pickup Areas with counts for filter chips
+    const pickupAreaOptions = useMemo(() => {
         const counts: Record<string, number> = {};
         pickupEligibleBookings.forEach((booking) => {
-            const area = [booking.sender.suburb, booking.sender.state].filter(Boolean).join(', ') || 'Unspecified';
+            const area = getBookingPickupArea(booking);
             counts[area] = (counts[area] || 0) + 1;
         });
-        return counts;
+
+        return Object.entries(counts).map(([name, count]) => ({
+            name,
+            count,
+        })).sort((a, b) => {
+            if (a.name === 'Unassigned') return 1;
+            if (b.name === 'Unassigned') return -1;
+            return a.name.localeCompare(b.name);
+        });
+    }, [pickupEligibleBookings, pickupZones]);
+
+    // Compute unique Pickup Dates with counts & readable labels
+    const pickupDateOptions = useMemo(() => {
+        const counts: Record<string, number> = {};
+        pickupEligibleBookings.forEach((booking) => {
+            const dateStr = getBookingPickupDate(booking);
+            counts[dateStr] = (counts[dateStr] || 0) + 1;
+        });
+
+        return Object.entries(counts).map(([value, count]) => {
+            let label = value;
+            if (value === 'Unscheduled') {
+                label = 'Unscheduled';
+            } else {
+                try {
+                    const parsed = new Date(value + 'T00:00:00');
+                    if (!isNaN(parsed.getTime())) {
+                        label = parsed.toLocaleDateString('en-AU', { weekday: 'short', month: 'short', day: 'numeric' });
+                    }
+                } catch {
+                    label = value;
+                }
+            }
+            return { value, label, count };
+        }).sort((a, b) => {
+            if (a.value === 'Unscheduled') return 1;
+            if (b.value === 'Unscheduled') return -1;
+            return a.value.localeCompare(b.value);
+        });
     }, [pickupEligibleBookings]);
 
     // Filter logic for pickers
@@ -144,7 +271,7 @@ export default function PickupRunsheetsCreate({
         return filteredPickers.slice(0, 30);
     }, [filteredPickers]);
 
-    // Filter logic for pickup bookings (search + area filter chips)
+    // Filter logic for pickup bookings (search + Pickup Area + Pickup Date)
     const filteredBookings = useMemo(() => {
         return pickupEligibleBookings.filter((booking) => {
             const matchesSearch =
@@ -153,12 +280,20 @@ export default function PickupRunsheetsCreate({
                 booking.sender.last_name.toLowerCase().includes(searchTerm.toLowerCase());
 
             if (!matchesSearch) return false;
-            if (selectedAreaFilter === 'all') return true;
 
-            const area = [booking.sender.suburb, booking.sender.state].filter(Boolean).join(', ') || 'Unspecified';
-            return area.toLowerCase() === selectedAreaFilter.toLowerCase();
+            if (selectedAreaFilter !== 'all') {
+                const area = getBookingPickupArea(booking);
+                if (area.toLowerCase() !== selectedAreaFilter.toLowerCase()) return false;
+            }
+
+            if (selectedDateFilter !== 'all') {
+                const dateStr = getBookingPickupDate(booking);
+                if (dateStr !== selectedDateFilter) return false;
+            }
+
+            return true;
         });
-    }, [pickupEligibleBookings, searchTerm, selectedAreaFilter]);
+    }, [pickupEligibleBookings, searchTerm, selectedAreaFilter, selectedDateFilter, pickupZones]);
 
     const handleSelectAll = () => {
         const filteredIds = filteredBookings.map(b => b.id);
@@ -178,16 +313,39 @@ export default function PickupRunsheetsCreate({
                 }
 
                 if (!data.area_description && firstBooking.sender) {
-                    const area = [firstBooking.sender.suburb, firstBooking.sender.state].filter(Boolean).join(', ');
-
-                    if (area) {
-                        newData.area_description = area;
+                    const matchedZone = findZoneForSender(firstBooking.sender);
+                    if (matchedZone) {
+                        newData.area_description = matchedZone;
                     }
                 }
             }
 
             setData(current => ({ ...current, ...newData }));
         }
+    };
+
+    const handleToggleBooking = (booking: Booking) => {
+        const ids = [...data.booking_ids];
+        const isSelecting = !ids.includes(booking.id);
+
+        const newData: any = {
+            booking_ids: isSelecting ? [...ids, booking.id] : ids.filter(id => id !== booking.id)
+        };
+
+        if (isSelecting && ids.length === 0) {
+            if (!data.area_description && booking.sender) {
+                const matchedZone = findZoneForSender(booking.sender);
+                if (matchedZone) {
+                    newData.area_description = matchedZone;
+                }
+            }
+
+            if (!data.scheduled_date && booking.preferred_date) {
+                newData.scheduled_date = booking.preferred_date.substring(0, 10);
+            }
+        }
+
+        setData(current => ({ ...current, ...newData }));
     };
 
     const isAllFilteredSelected = filteredBookings.length > 0 && filteredBookings.every(b => data.booking_ids.includes(b.id));
@@ -248,48 +406,56 @@ export default function PickupRunsheetsCreate({
             <Head title="Dispatch Pickup Run | Love Balikbayan" />
 
             <div className="flex flex-col h-screen overflow-hidden bg-brand-warm/10">
-                {/* Fixed Header */}
-                <div className="flex items-center justify-between px-8 py-6 bg-white border-b border-brand-sand/50 shadow-sm z-10">
-                    <div className="flex items-center gap-6">
+                {/* Compact Top Header Bar */}
+                <div className="flex items-center justify-between px-6 py-3 bg-white border-b border-slate-200/80 shadow-2xs z-10 shrink-0 font-sans">
+                    <div className="flex items-center gap-3.5">
                         <Link
                             href="/admin/runsheets"
-                            className="group flex items-center justify-center size-11 rounded-2xl bg-brand-warm/30 border border-brand-sand text-brand-rust transition-all hover:bg-brand-rust hover:text-white"
+                            className="group flex items-center justify-center size-8.5 rounded-lg border border-slate-200 bg-white text-slate-600 transition-all hover:border-brand-rust hover:text-brand-rust hover:bg-brand-rust/5 shadow-2xs cursor-pointer"
+                            title="Back to Runsheets"
                         >
-                            <ArrowLeft className="size-5 transition-transform group-hover:-translate-x-1" />
+                            <ArrowLeft className="size-4 transition-transform group-hover:-translate-x-0.5" />
                         </Link>
                         <div>
-                            <h1 className="font-serif text-2xl font-bold text-brand-text leading-tight">Create Pickup Dispatch</h1>
-                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mt-0.5">
-                                <span className="text-brand-rust">Operations</span> • Origin Collection Run
-                            </p>
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-brand-rust leading-none mb-1">
+                                Operations • Origin Collection Run
+                            </div>
+                            <h1 className="font-sans text-base font-bold text-slate-900 tracking-tight leading-none m-0">
+                                Create Pickup Dispatch
+                            </h1>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                        <div className="hidden xl:flex flex-col items-end mr-4">
-                            <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Selection Summary</span>
-                            <p className="text-sm font-black text-brand-text">
-                                {data.booking_ids.length} Bookings ({totalNeededBoxes} Boxes) {selectedSuburbsCount > 0 ? `• ${selectedSuburbsCount} ${selectedSuburbsCount === 1 ? 'Area' : 'Areas'}` : ''}
-                            </p>
-                            {!data.picker_id && (
-                                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mt-0.5">
-                                    ⚠️ Select a picker to confirm
+                    <div className="flex items-center gap-3">
+                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200/80 text-xs">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Summary:</span>
+                            <span className="font-bold text-slate-800 font-mono">
+                                {data.booking_ids.length} Bookings ({totalNeededBoxes} Boxes)
+                            </span>
+                            {selectedSuburbsCount > 0 && (
+                                <span className="text-[10px] font-medium text-slate-500">
+                                    • {selectedSuburbsCount} {selectedSuburbsCount === 1 ? 'Area' : 'Areas'}
                                 </span>
                             )}
-                            {data.picker_id && data.booking_ids.length === 0 && (
-                                <span className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mt-0.5">
-                                    ⚠️ Select at least 1 booking
+                            {!data.picker_id ? (
+                                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60 ml-1">
+                                    Select Picker
                                 </span>
-                            )}
+                            ) : data.booking_ids.length === 0 ? (
+                                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/60 ml-1">
+                                    Select Booking
+                                </span>
+                            ) : null}
                         </div>
+
                         <Button
                             form="pickup-dispatch-form"
                             type="submit"
                             disabled={isSubmitDisabled}
                             variant="success"
-                            className="flex items-center gap-3 px-8 h-12 rounded-2xl text-[11px] font-black uppercase tracking-[0.2em] transition-all active:scale-95 shadow-xl disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed disabled:shadow-none"
+                            className="flex items-center gap-2 px-4 h-9 rounded-lg text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed font-sans cursor-pointer"
                         >
-                            {processing ? <div className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="size-4" />}
+                            {processing ? <div className="size-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="size-3.5" />}
                             {processing ? 'Processing...' : 'Confirm Pickup Run'}
                         </Button>
                     </div>
@@ -298,27 +464,32 @@ export default function PickupRunsheetsCreate({
                 {/* Main Content Area - Split Layout */}
                 <div className="flex flex-1 overflow-hidden">
                     {/* Left Sidebar: Dispatch Configuration */}
-                    <div className="w-full md:w-100 bg-white border-r border-brand-sand/40 overflow-y-auto p-8 space-y-10 custom-scrollbar">
-                        <form id="pickup-dispatch-form" onSubmit={handleSubmit} className="space-y-10">
-                            {/* Date & Area Section */}
-                            <section className="space-y-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-8 rounded-lg bg-brand-warm flex items-center justify-center text-brand-rust">
-                                        <Calendar className="size-4" />
+                    <div className="w-full md:w-[420px] bg-slate-50/60 border-r border-slate-200/80 overflow-y-auto p-6 space-y-6 custom-scrollbar font-sans">
+                        <form id="pickup-dispatch-form" onSubmit={handleSubmit} className="space-y-5">
+                            {/* Card 1: Dispatch Settings */}
+                            <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+                                <div className="px-4 py-3 bg-slate-50/70 border-b border-slate-200/70 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <div className="size-6 rounded-md bg-brand-rust/10 flex items-center justify-center text-brand-rust">
+                                            <Calendar className="size-3.5" />
+                                        </div>
+                                        <h2 className="font-sans text-xs font-bold uppercase tracking-wider text-slate-800 m-0">
+                                            Dispatch Settings
+                                        </h2>
                                     </div>
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-brand-text">Dispatch Settings</h3>
+                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Schedule</span>
                                 </div>
 
-                                <div className="space-y-4">
-                                    <div className="space-y-2">
-                                        <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Collection Date</Label>
+                                <div className="p-4 space-y-4">
+                                    <div className="space-y-1.5">
+                                        <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider ml-0.5">Collection Date <span className="text-red-500">*</span></Label>
                                         <div className="relative group">
-                                            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-brand-rust/40 group-focus-within:text-brand-rust transition-colors" />
+                                            <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-slate-400 group-focus-within:text-brand-rust pointer-events-none transition-colors" />
                                             <Input
                                                 type="date"
                                                 required
                                                 min={new Date().toLocaleDateString('en-CA')}
-                                                className="h-12 rounded-xl border-brand-sand bg-brand-warm/10 pl-11 pr-4 font-bold focus:ring-brand-rust/20 focus:border-brand-rust focus:bg-white transition-all"
+                                                className="h-10 rounded-lg border-slate-200 bg-white pl-10 pr-3 font-sans text-xs font-semibold text-slate-800 focus:border-brand-rust focus:ring-1 focus:ring-brand-rust/20 transition-all cursor-pointer [color-scheme:light] [&::-webkit-calendar-picker-indicator]:opacity-0 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer"
                                                 value={data.scheduled_date}
                                                 onChange={(e) => setData('scheduled_date', e.target.value)}
                                             />
@@ -326,141 +497,212 @@ export default function PickupRunsheetsCreate({
                                         {errors.scheduled_date && <p className="text-[10px] text-red-500 font-bold ml-1">{errors.scheduled_date}</p>}
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Time Slot (Optional)</Label>
-                                        <select
-                                            title="Time Slot"
-                                            className="h-12 w-full rounded-xl border border-brand-sand bg-brand-warm/10 px-4 text-[11px] font-bold text-brand-text focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all appearance-none cursor-pointer"
-                                            value={data.timeslot}
-                                            onChange={(e) => setData('timeslot', e.target.value)}
-                                        >
-                                            <option value="">Anytime</option>
-                                            <option value="Morning (9AM - 12PM)">Morning (9AM - 12PM)</option>
-                                            <option value="Afternoon (1PM - 5PM)">Afternoon (1PM - 5PM)</option>
-                                            <option value="Evening (6PM - 9PM)">Evening (6PM - 9PM)</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Status</Label>
-                                        <select
-                                            title="Status"
-                                            className="h-12 w-full rounded-xl border border-brand-sand bg-brand-warm/10 px-4 text-[11px] font-bold text-brand-text focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all appearance-none cursor-pointer"
-                                            value={data.status}
-                                            onChange={(e) => setData('status', e.target.value)}
-                                        >
-                                            <option value="draft">Draft</option>
-                                            <option value="assigned">Assigned</option>
-                                            <option value="in_progress">In Progress</option>
-                                        </select>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Pickup Area / Region</Label>
+                                    <div className="space-y-1.5">
+                                        <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider ml-0.5">
+                                            Time Slot <span className="text-[10px] font-normal text-slate-400 lowercase">(optional)</span>
+                                        </Label>
                                         <div className="relative group">
-                                            <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-brand-rust/40 group-focus-within:text-brand-rust transition-colors" />
-                                            <Input
-                                                placeholder="e.g. Sydney North"
+                                            <select
+                                                title="Time Slot"
+                                                aria-label="Time Slot"
+                                                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 pr-9 font-sans text-xs font-semibold text-slate-800 focus:border-brand-rust focus:ring-1 focus:ring-brand-rust/20 transition-all appearance-none cursor-pointer"
+                                                value={data.timeslot}
+                                                onChange={(e) => setData('timeslot', e.target.value)}
+                                            >
+                                                <option value="">Anytime</option>
+                                                <option value="Morning (9AM - 12PM)">Morning (9AM - 12PM)</option>
+                                                <option value="Afternoon (1PM - 5PM)">Afternoon (1PM - 5PM)</option>
+                                                <option value="Evening (6PM - 9PM)">Evening (6PM - 9PM)</option>
+                                            </select>
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none group-focus-within:text-brand-rust transition-colors" />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider ml-0.5">Status</Label>
+                                        <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-slate-100 border border-slate-200/80">
+                                            {[
+                                                { id: 'draft', label: 'Draft' },
+                                                { id: 'assigned', label: 'Assigned' },
+                                                { id: 'in_progress', label: 'In Progress' },
+                                            ].map((s) => (
+                                                <button
+                                                    key={s.id}
+                                                    type="button"
+                                                    onClick={() => setData('status', s.id)}
+                                                    className={`py-1.5 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                                                        data.status === s.id
+                                                            ? 'bg-white shadow-xs font-bold text-brand-rust ring-1 ring-black/5'
+                                                            : 'text-slate-600 hover:text-slate-900'
+                                                    }`}
+                                                >
+                                                    {s.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider ml-0.5">
+                                                Pickup Area / Region <span className="text-red-500">*</span>
+                                            </Label>
+                                            <a
+                                                href="/admin/pickup-zones"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-[10px] font-semibold text-brand-rust hover:underline inline-flex items-center gap-1"
+                                                title="Manage pickup areas in Settings"
+                                            >
+                                                Settings <ExternalLink className="size-2.5" />
+                                            </a>
+                                        </div>
+                                        <div className="relative group">
+                                            <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 group-focus-within:text-brand-rust transition-colors pointer-events-none" />
+                                            <select
+                                                title="Pickup Area / Region"
+                                                aria-label="Pickup Area / Region"
                                                 required
-                                                className="h-12 rounded-xl border-brand-sand bg-brand-warm/10 pl-11 pr-4 font-bold focus:ring-brand-rust/20 focus:border-brand-rust focus:bg-white transition-all"
+                                                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-9 font-sans text-xs font-semibold text-slate-800 focus:border-brand-rust focus:ring-1 focus:ring-brand-rust/20 transition-all appearance-none cursor-pointer truncate"
                                                 value={data.area_description}
                                                 onChange={(e) => setData('area_description', e.target.value)}
-                                            />
+                                            >
+                                                <option value="" disabled>
+                                                    {pickupZones.length === 0 ? 'No pickup areas configured in Settings' : 'Select Pickup Area...'}
+                                                </option>
+                                                {pickupZones.map((zone) => (
+                                                    <option key={zone.id} value={zone.name}>
+                                                        {zone.name}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 size-4 text-slate-400 pointer-events-none group-focus-within:text-brand-rust transition-colors" />
                                         </div>
                                         {errors.area_description && <p className="text-[10px] text-red-500 font-bold ml-1">{errors.area_description}</p>}
                                     </div>
                                 </div>
-                            </section>
+                            </div>
 
-                            {/* Serial Number Allocation Section */}
-                            <section className="space-y-6">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-8 rounded-lg bg-brand-warm flex items-center justify-center text-brand-rust">
-                                        <Box className="size-4" />
-                                    </div>
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-brand-text">Serial Number Allocation</h3>
-                                </div>
-                                <div className="space-y-4">
-                                    <div className="p-4 rounded-xl border border-brand-sand/50 bg-white">
-                                        <div className="flex justify-between items-center mb-2">
-                                            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Total Selected Boxes</span>
-                                            <span className="text-sm font-black text-brand-text">{totalNeededBoxes}</span>
+                            {/* Card 2: Serial Number Allocation */}
+                            <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+                                <div className="px-4 py-3 bg-slate-50/70 border-b border-slate-200/70 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <div className="size-6 rounded-md bg-brand-rust/10 flex items-center justify-center text-brand-rust">
+                                            <Box className="size-3.5" />
                                         </div>
-                                        <p className="text-[10px] text-muted-foreground font-medium">
-                                            {totalNeededBoxes > 0
-                                                ? `You selected ${data.booking_ids.length} booking(s) requiring a total of ${totalNeededBoxes} serial numbers.`
-                                                : `No serial numbers will be allocated yet (select bookings).`}
-                                        </p>
+                                        <h2 className="font-sans text-xs font-bold uppercase tracking-wider text-slate-800 m-0">
+                                            Serial Number Allocation
+                                        </h2>
+                                    </div>
+                                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Inventory</span>
+                                </div>
+                                <div className="p-4 space-y-4">
+                                    <div className="p-3 rounded-lg bg-emerald-50/70 border border-emerald-200/70 flex items-center justify-between">
+                                        <div className="flex items-center gap-2.5">
+                                            <div className="size-7 rounded-md bg-emerald-100 flex items-center justify-center text-emerald-700">
+                                                <Box className="size-4" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-emerald-950 font-sans">
+                                                    {totalNeededBoxes} {totalNeededBoxes === 1 ? 'Box' : 'Boxes'} Selected
+                                                </p>
+                                                <p className="text-[10px] text-emerald-700 font-medium">
+                                                    {totalNeededBoxes > 0
+                                                        ? `${data.booking_ids.length} booking(s) require ${totalNeededBoxes} sequential serials`
+                                                        : 'Select bookings to allocate serial numbers'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-white text-emerald-800 border border-emerald-200 shadow-2xs">
+                                            {totalNeededBoxes} SN
+                                        </span>
                                     </div>
 
-                                    <div className="space-y-2">
-                                        <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest ml-1">Starting Serial Number</Label>
+                                    <div className="space-y-1.5">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider ml-0.5">
+                                                Starting Serial Number <span className="text-red-500">*</span>
+                                            </Label>
+                                            {recommendedStartingSerial && data.starting_serial_number !== recommendedStartingSerial && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setData('starting_serial_number', recommendedStartingSerial)}
+                                                    className="text-[10px] font-bold text-brand-rust hover:underline cursor-pointer"
+                                                >
+                                                    Use lowest ({recommendedStartingSerial})
+                                                </button>
+                                            )}
+                                        </div>
                                         <Input
-                                            placeholder="e.g. LBB-0001"
+                                            placeholder="e.g. SR-00008"
                                             required
-                                            className="h-12 rounded-xl border-brand-sand bg-brand-warm/10 px-4 font-bold focus:ring-brand-rust/20 focus:border-brand-rust focus:bg-white transition-all uppercase"
+                                            className="h-10 rounded-lg border-slate-200 bg-white px-3 font-mono text-xs font-bold tracking-wider text-slate-900 focus:border-brand-rust focus:ring-1 focus:ring-brand-rust/20 transition-all uppercase"
                                             value={data.starting_serial_number}
                                             onChange={(e) => setData('starting_serial_number', e.target.value.toUpperCase())}
                                         />
-                                        <p className="text-[10px] font-bold text-brand-rust/80 ml-1">
-                                            {recommendedStartingSerial ? `Lowest available: ${recommendedStartingSerial}` : 'No available serial numbers'}
+                                        <p className="text-[10px] font-medium text-slate-500">
+                                            {recommendedStartingSerial ? `Lowest available in inventory: ${recommendedStartingSerial}` : 'No available serial numbers'}
                                         </p>
                                         {errors.starting_serial_number && <p className="text-[10px] text-red-500 font-bold ml-1">{errors.starting_serial_number}</p>}
                                     </div>
                                 </div>
-                            </section>
+                            </div>
 
-                            {/* Picker Selection Section */}
-                            <section className="space-y-6 pb-20">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="size-8 rounded-lg bg-brand-warm flex items-center justify-center text-brand-rust">
-                                            <User className="size-4" />
+                            {/* Card 3: Assign Picker */}
+                            <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
+                                <div className="px-4 py-3 bg-slate-50/70 border-b border-slate-200/70 flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <div className="size-6 rounded-md bg-brand-rust/10 flex items-center justify-center text-brand-rust">
+                                            <User className="size-3.5" />
                                         </div>
-                                        <h3 className="text-xs font-black uppercase tracking-widest text-brand-text">Assign Picker</h3>
+                                        <h2 className="font-sans text-xs font-bold uppercase tracking-wider text-slate-800 m-0">
+                                            Assign Picker
+                                        </h2>
                                     </div>
-                                    <span className="text-[9px] font-bold text-muted-foreground uppercase bg-muted px-2 py-1 rounded-md">
+                                    <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200/60">
                                         {pickers.length} Available
                                     </span>
                                 </div>
 
-                                <div className="space-y-4">
+                                <div className="p-4 space-y-3">
                                     {selectedPicker ? (
                                         (() => {
                                             const activeCount = (selectedPicker as any).active_runsheet_count ?? 0;
                                             const initials = selectedPicker.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
 
                                             return (
-                                                <div className="p-4 rounded-2xl border-2 border-brand-rust bg-brand-rust/5 flex items-center gap-4 relative">
-                                                    <div className="size-12 rounded-xl bg-brand-rust text-white flex items-center justify-center text-xs font-black">
+                                                <div className="p-3 rounded-lg border border-brand-rust/30 bg-brand-rust/5 flex items-center gap-3 relative">
+                                                    <div className="size-10 rounded-lg bg-brand-rust text-white flex items-center justify-center text-xs font-bold">
                                                         {initials}
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="text-sm font-black text-brand-text truncate">{selectedPicker.name}</p>
-                                                        <div className="flex items-center gap-2 mt-1">
+                                                        <p className="text-xs font-bold text-slate-900 truncate font-sans">{selectedPicker.name}</p>
+                                                        <div className="flex items-center gap-2 mt-0.5">
                                                             <span className={`size-1.5 rounded-full ${activeCount === 0 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                                                            <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-                                                                {activeCount} active tasks
+                                                            <p className="text-[10px] font-medium text-slate-500">
+                                                                {activeCount} active {activeCount === 1 ? 'runsheet' : 'runsheets'}
                                                             </p>
                                                         </div>
                                                     </div>
-                                                    <div className="flex gap-2">
+                                                    <div className="flex items-center gap-1.5">
                                                         <Button
                                                             type="button"
                                                             variant="outline"
+                                                            size="sm"
                                                             onClick={() => setIsPickerModalOpen(true)}
-                                                            className="h-8 px-3 rounded-lg text-[10px] font-bold uppercase hover:bg-brand-rust/5 transition-colors border-brand-sand text-brand-rust"
+                                                            className="h-7 px-2.5 rounded-md text-[10px] font-semibold text-slate-700 hover:text-brand-rust hover:bg-white border-slate-200 shadow-2xs"
                                                         >
                                                             Change
                                                         </Button>
                                                         <Button
                                                             type="button"
                                                             variant="ghost"
+                                                            size="sm"
                                                             onClick={() => setData('picker_id', '')}
-                                                            className="size-8 p-0 text-red-500 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors"
+                                                            className="size-7 p-0 text-slate-400 hover:text-red-600 rounded-md hover:bg-red-50"
                                                             title="Remove assignment"
                                                         >
-                                                            <Trash2 className="size-4" />
+                                                            <Trash2 className="size-3.5" />
                                                         </Button>
                                                     </div>
                                                 </div>
@@ -470,233 +712,512 @@ export default function PickupRunsheetsCreate({
                                         <button
                                             type="button"
                                             onClick={() => setIsPickerModalOpen(true)}
-                                            className="w-full p-6 border-2 border-dashed border-brand-sand/50 rounded-2xl hover:border-brand-rust/50 hover:bg-brand-rust/5 transition-all text-center flex flex-col items-center justify-center gap-2 group"
+                                            className="w-full p-4 border-2 border-dashed border-slate-200 hover:border-brand-rust/50 rounded-lg hover:bg-brand-warm/5 transition-all text-center flex items-center justify-center gap-3 group cursor-pointer"
                                         >
-                                            <div className="size-10 rounded-full bg-brand-warm flex items-center justify-center text-brand-rust group-hover:scale-110 transition-transform">
-                                                <Plus className="size-5" />
+                                            <div className="size-8 rounded-md bg-slate-100 group-hover:bg-brand-rust/10 flex items-center justify-center text-slate-500 group-hover:text-brand-rust transition-colors">
+                                                <Plus className="size-4" />
                                             </div>
-                                            <span className="text-xs font-black uppercase tracking-wider text-brand-text">Select Picker</span>
-                                            <span className="text-[10px] text-muted-foreground font-medium">Click to search and assign a picker</span>
+                                            <div className="text-left">
+                                                <span className="text-xs font-bold text-slate-800 block font-sans">Choose Driver / Picker</span>
+                                                <span className="text-[10px] text-slate-400 block font-normal">Click to search and assign</span>
+                                            </div>
                                         </button>
                                     )}
-                                    <div className="flex justify-end pt-1">
+                                    <div className="flex justify-end pt-0.5">
                                         <Link
                                             href="/admin/users/create"
-                                            className="text-[10px] font-bold text-brand-rust hover:underline flex items-center gap-1 uppercase tracking-wider"
+                                            target="_blank"
+                                            className="text-[10px] font-semibold text-brand-rust hover:underline inline-flex items-center gap-1"
                                         >
-                                            <Plus className="size-3" />
-                                            Add New Picker
+                                            Create new picker <ExternalLink className="size-2.5" />
                                         </Link>
                                     </div>
+                                    {errors.picker_id && <p className="text-[10px] text-red-500 font-bold ml-1">{errors.picker_id}</p>}
                                 </div>
-                                {errors.picker_id && <p className="text-[10px] text-red-500 font-bold ml-1">{errors.picker_id}</p>}
+                            </div>
+                        </form>
 
-                                <Dialog open={isPickerModalOpen} onOpenChange={setIsPickerModalOpen}>
-                                    <DialogContent className="sm:max-w-lg">
-                                        <DialogHeader>
-                                            <DialogTitle className="flex items-center gap-2 text-base font-black uppercase tracking-widest text-brand-rust">
+                        <Dialog open={isPickerModalOpen} onOpenChange={setIsPickerModalOpen}>
+                            <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0 rounded-xl border border-slate-200/80 shadow-2xl">
+                                <div className="p-5 pb-4 border-b border-slate-100 bg-white">
+                                    <div className="flex items-start justify-between pr-8">
+                                        <div className="flex items-center gap-3">
+                                            <div className="size-8.5 rounded-lg bg-brand-rust/10 border border-brand-rust/20 flex items-center justify-center text-brand-rust shrink-0">
                                                 <User className="size-4" />
-                                                Select Picker
-                                            </DialogTitle>
-                                            <DialogDescription className="text-xs">
-                                                Select a picker to handle this origin collection runsheet.
-                                            </DialogDescription>
-                                        </DialogHeader>
-                                        <div className="space-y-4">
-                                            <div className="relative group">
-                                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-brand-rust/40 group-focus-within:text-brand-rust transition-colors" />
-                                                <Input
-                                                    placeholder="Search picker name..."
-                                                    className="h-11 rounded-xl border-brand-sand bg-brand-warm/10 pl-11 pr-4 font-bold text-xs focus:ring-brand-rust/20 focus:border-brand-rust focus:bg-white transition-all"
-                                                    value={assigneeSearchTerm}
-                                                    onChange={(e) => setAssigneeSearchTerm(e.target.value)}
-                                                />
                                             </div>
+                                            <div>
+                                                <DialogTitle className="text-sm font-bold text-slate-900 font-sans tracking-tight">
+                                                    Select Picker
+                                                </DialogTitle>
+                                                <DialogDescription className="text-xs text-slate-500 font-sans mt-0.5">
+                                                    Assign an authorized driver for this collection runsheet
+                                                </DialogDescription>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                            <div className="grid max-h-[350px] gap-3 overflow-y-auto pr-1 custom-scrollbar">
-                                                {displayedPickers.length > 0 ? (
-                                                    displayedPickers.map((u) => {
-                                                        const isSelected = String(data.picker_id) === String(u.id);
-                                                        const activeCount = (u as any).active_runsheet_count ?? 0;
-                                                        const initials = u.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+                                    {/* Search Input */}
+                                    <div className="relative mt-3.5">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-400 pointer-events-none" />
+                                        <Input
+                                            placeholder="Search by name, phone or email..."
+                                            className="h-9 rounded-lg border-slate-200 bg-slate-50/70 pl-8.5 pr-8 text-xs font-sans text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-brand-rust focus:ring-2 focus:ring-brand-rust/10 transition-all"
+                                            value={assigneeSearchTerm}
+                                            onChange={(e) => setAssigneeSearchTerm(e.target.value)}
+                                            autoFocus
+                                        />
+                                        {assigneeSearchTerm && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setAssigneeSearchTerm('')}
+                                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                                            >
+                                                <X className="size-3" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
 
-                                                        return (
-                                                            <div
-                                                                key={u.id}
-                                                                onClick={() => {
-                                                                    setData('picker_id', String(u.id));
-                                                                    setIsPickerModalOpen(false);
-                                                                }}
-                                                                className={`group relative p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-4 ${isSelected
-                                                                    ? 'border-brand-rust bg-brand-rust/5 ring-4 ring-brand-rust/5'
-                                                                    : 'border-brand-sand/50 bg-white hover:border-brand-rust/30 hover:bg-brand-rust/5'
-                                                                    }`}
-                                                            >
-                                                                <div className={`size-12 rounded-xl flex items-center justify-center text-xs font-black transition-all ${isSelected ? 'bg-brand-rust text-white' : 'bg-brand-warm/50 text-brand-rust'
-                                                                    }`}>
-                                                                    {initials}
-                                                                </div>
-                                                                <div className="flex-1 min-w-0">
-                                                                    <p className="text-sm font-black text-brand-text truncate">{u.name}</p>
-                                                                    <div className="flex items-center gap-2 mt-1">
-                                                                        <span className={`size-1.5 rounded-full ${activeCount === 0 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                                                                        <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-                                                                            {activeCount} active tasks
-                                                                        </p>
-                                                                        {u.picker?.mobile && (
-                                                                            <>
-                                                                                <span className="text-[9px] text-brand-sand mx-1">•</span>
-                                                                                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest truncate">📱 {u.picker.mobile}</p>
-                                                                            </>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                                <div className={`size-6 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-brand-rust border-brand-rust' : 'border-brand-sand bg-white'
-                                                                    }`}>
-                                                                    {isSelected && <Check className="size-3 text-white stroke-[4px]" />}
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })
-                                                ) : (
-                                                    <div className="p-8 text-center border-2 border-dashed border-brand-sand/30 rounded-2xl flex flex-col items-center gap-3">
-                                                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">No pickers found</p>
-                                                        <Link
-                                                            href="/admin/users/create"
-                                                            className="text-[10px] font-bold text-brand-rust uppercase tracking-widest hover:underline flex items-center gap-1"
-                                                        >
-                                                            <Plus className="size-3" />
-                                                            Add New Picker
-                                                        </Link>
+                                {/* List Body */}
+                                <div className="p-3 bg-slate-50/60 max-h-[340px] overflow-y-auto space-y-1.5 custom-scrollbar">
+                                    {displayedPickers.length > 0 ? (
+                                        displayedPickers.map((u) => {
+                                            const isSelected = String(data.picker_id) === String(u.id);
+                                            const activeCount = (u as any).active_runsheet_count ?? 0;
+                                            const initials = u.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+
+                                            return (
+                                                <div
+                                                    key={u.id}
+                                                    onClick={() => {
+                                                        setData('picker_id', String(u.id));
+                                                        setIsPickerModalOpen(false);
+                                                    }}
+                                                    className={`group relative p-2.5 rounded-lg border transition-all cursor-pointer flex items-center gap-3 ${isSelected
+                                                            ? 'border-brand-rust bg-brand-rust/[0.04] ring-1 ring-brand-rust/20 shadow-2xs'
+                                                            : 'border-slate-200/80 bg-white hover:border-brand-rust/40 hover:bg-slate-50 hover:shadow-2xs'
+                                                        }`}
+                                                >
+                                                    <div className={`size-8 rounded-md flex items-center justify-center text-xs font-bold font-sans transition-colors shrink-0 ${isSelected
+                                                            ? 'bg-brand-rust text-white shadow-2xs'
+                                                            : 'bg-slate-100 text-slate-700 border border-slate-200/80 group-hover:bg-brand-rust/10 group-hover:text-brand-rust'
+                                                        }`}>
+                                                        {initials}
                                                     </div>
-                                                )}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <p className={`text-xs font-semibold truncate font-sans transition-colors ${isSelected ? 'text-brand-rust' : 'text-slate-900 group-hover:text-brand-rust'}`}>
+                                                                {u.name}
+                                                            </p>
+                                                            {isSelected && (
+                                                                <span className="text-[10px] font-semibold text-brand-rust bg-brand-rust/10 px-1.5 py-0.2 rounded shrink-0">
+                                                                    Selected
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-2.5 mt-0.5">
+                                                            <span className={`inline-flex items-center gap-1 text-[10px] font-medium font-sans ${activeCount === 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                                                <span className={`size-1.5 rounded-full ${activeCount === 0 ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                                                                {activeCount === 0 ? '0 active tasks' : `${activeCount} active ${activeCount === 1 ? 'task' : 'tasks'}`}
+                                                            </span>
+                                                            {u.picker?.mobile && (
+                                                                <>
+                                                                    <span className="text-slate-300 text-xs">•</span>
+                                                                    <span className="inline-flex items-center gap-1 text-[10px] text-slate-500 font-mono">
+                                                                        <Phone className="size-2.5 text-slate-400" />
+                                                                        {u.picker.mobile}
+                                                                    </span>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className={`size-5 rounded-full border flex items-center justify-center transition-all shrink-0 ${isSelected
+                                                            ? 'bg-brand-rust border-brand-rust text-white shadow-2xs'
+                                                            : 'border-slate-300 bg-white group-hover:border-slate-400'
+                                                        }`}>
+                                                        {isSelected && <Check className="size-2.5 stroke-[3]" />}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })
+                                    ) : (
+                                        <div className="py-8 px-4 text-center border border-dashed border-slate-200 bg-white rounded-lg flex flex-col items-center justify-center gap-2">
+                                            <div className="size-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                                                <Search className="size-4" />
                                             </div>
-                                            {filteredPickers.length > 30 && (
-                                                <p className="text-[10px] text-muted-foreground text-center font-bold uppercase tracking-wider mt-2">
-                                                    Showing first 30 of {filteredPickers.length} pickers. Please search to refine.
-                                                </p>
+                                            <p className="text-xs font-semibold text-slate-700 font-sans">No matching pickers</p>
+                                            <p className="text-[11px] text-slate-400 font-sans max-w-xs">
+                                                Try searching with a different name or phone number.
+                                            </p>
+                                            {assigneeSearchTerm && (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => setAssigneeSearchTerm('')}
+                                                    className="mt-1 h-7 text-xs font-semibold text-slate-700"
+                                                >
+                                                    Clear search
+                                                </Button>
                                             )}
                                         </div>
-                                    </DialogContent>
-                                </Dialog>
-                            </section>
-                        </form>
+                                    )}
+                                </div>
+
+                                {/* Modal Footer */}
+                                <div className="px-4 py-2.5 border-t border-slate-100 bg-white flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-[11px] text-slate-400 font-sans">
+                                            Showing {displayedPickers.length} of {filteredPickers.length} {filteredPickers.length === 1 ? 'picker' : 'pickers'}
+                                        </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Link
+                                            href="/admin/users/create"
+                                            target="_blank"
+                                            className="text-[11px] font-semibold text-brand-rust hover:underline inline-flex items-center gap-1 font-sans"
+                                        >
+                                            <Plus className="size-3" />
+                                            Add new picker
+                                        </Link>
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => setIsPickerModalOpen(false)}
+                                            className="h-7 px-2.5 text-xs font-medium text-slate-600 hover:text-slate-900 font-sans"
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                </div>
+                            </DialogContent>
+                        </Dialog>
                     </div>
 
                     {/* Right Pane: Inventory / Booking Selection */}
                     <div className="flex-1 flex flex-col bg-brand-warm/10 p-8 overflow-hidden">
-                        {/* Area Filter Chips */}
-                        {Object.keys(areaCounts).length > 0 && (
-                            <div className="flex items-center gap-2 overflow-x-auto pb-3 custom-scrollbar mb-2">
-                                <span className="text-[10px] font-black uppercase tracking-widest text-brand-rust/80 shrink-0 flex items-center gap-1.5 bg-brand-warm/40 px-3 py-1.5 rounded-xl border border-brand-sand/50">
-                                    <MapPin className="size-3 text-brand-rust" /> Filter Area:
+                        {/* Pickup Area & Pickup Date Filters */}
+                        <div className="space-y-2 mb-3 bg-white/70 p-3 rounded-xl border border-brand-sand/40 shadow-2xs">
+                            {/* Filter 1: Pickup Area */}
+                            <div className="flex items-center gap-2 overflow-x-auto pb-0.5 custom-scrollbar">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-700 shrink-0 flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80 shadow-2xs font-sans">
+                                    <MapPin className="size-3 text-brand-rust" /> Pickup Area:
                                 </span>
                                 <button
                                     type="button"
                                     onClick={() => setSelectedAreaFilter('all')}
-                                    className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${selectedAreaFilter === 'all'
-                                            ? 'bg-brand-rust text-white shadow-md'
-                                            : 'bg-white border border-brand-sand/60 text-brand-text hover:bg-brand-warm/40'
-                                        }`}
+                                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap font-sans ${
+                                        selectedAreaFilter === 'all'
+                                            ? 'bg-brand-rust text-white shadow-xs'
+                                            : 'bg-white border border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                                    }`}
                                 >
-                                    All ({pickupEligibleBookings.length})
+                                    All Areas ({pickupEligibleBookings.length})
                                 </button>
-                                {Object.entries(areaCounts).map(([areaName, count]) => (
+                                {pickupAreaOptions.map((area) => (
                                     <button
-                                        key={areaName}
+                                        key={area.name}
                                         type="button"
-                                        onClick={() => setSelectedAreaFilter(areaName)}
-                                        className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all whitespace-nowrap ${selectedAreaFilter.toLowerCase() === areaName.toLowerCase()
-                                                ? 'bg-brand-rust text-white shadow-md'
-                                                : 'bg-white border border-brand-sand/60 text-brand-text hover:bg-brand-warm/40'
-                                            }`}
+                                        onClick={() => setSelectedAreaFilter(area.name)}
+                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap font-sans flex items-center gap-1.5 ${
+                                            selectedAreaFilter.toLowerCase() === area.name.toLowerCase()
+                                                ? 'bg-brand-rust text-white shadow-xs'
+                                                : 'bg-white border border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                                        }`}
                                     >
-                                        📍 {areaName} ({count})
+                                        <MapPin className={`size-3 shrink-0 ${
+                                            selectedAreaFilter.toLowerCase() === area.name.toLowerCase() ? 'text-white' : 'text-brand-rust'
+                                        }`} />
+                                        <span>{area.name}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                                            selectedAreaFilter.toLowerCase() === area.name.toLowerCase()
+                                                ? 'bg-white/20 text-white'
+                                                : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                            {area.count}
+                                        </span>
                                     </button>
                                 ))}
                             </div>
-                        )}
+
+                            {/* Filter 2: Pickup Date */}
+                            <div className="flex items-center gap-2 overflow-x-auto pb-0.5 custom-scrollbar">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-700 shrink-0 flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200/80 shadow-2xs font-sans">
+                                    <Calendar className="size-3 text-brand-rust" /> Pickup Date:
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectedDateFilter('all')}
+                                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap font-sans ${
+                                        selectedDateFilter === 'all'
+                                            ? 'bg-brand-rust text-white shadow-xs'
+                                            : 'bg-white border border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                                    }`}
+                                >
+                                    All Dates ({pickupEligibleBookings.length})
+                                </button>
+                                {pickupDateOptions.map((date) => (
+                                    <button
+                                        key={date.value}
+                                        type="button"
+                                        onClick={() => setSelectedDateFilter(date.value)}
+                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap font-sans flex items-center gap-1.5 ${
+                                            selectedDateFilter === date.value
+                                                ? 'bg-brand-rust text-white shadow-xs'
+                                                : 'bg-white border border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
+                                        }`}
+                                    >
+                                        <Calendar className={`size-3 shrink-0 ${
+                                            selectedDateFilter === date.value ? 'text-white' : 'text-brand-rust'
+                                        }`} />
+                                        <span>{date.label}</span>
+                                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                                            selectedDateFilter === date.value
+                                                ? 'bg-white/20 text-white'
+                                                : 'bg-slate-100 text-slate-500'
+                                        }`}>
+                                            {date.count}
+                                        </span>
+                                    </button>
+                                ))}
+                                {(selectedAreaFilter !== 'all' || selectedDateFilter !== 'all') && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setSelectedAreaFilter('all');
+                                            setSelectedDateFilter('all');
+                                        }}
+                                        className="text-[11px] text-brand-rust hover:underline font-semibold whitespace-nowrap ml-2 font-sans"
+                                    >
+                                        Reset Filters
+                                    </button>
+                                )}
+                            </div>
+                        </div>
 
                         {/* Search & Toolbar */}
-                        <div className="flex flex-col md:flex-row gap-4 mb-6 bg-white p-4 rounded-4xl border border-brand-sand/40 shadow-sm">
+                        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 mb-6 bg-white p-3 sm:p-3.5 rounded-xl border border-brand-sand/50 shadow-xs">
                             <div className="relative flex-1 group">
-                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-brand-rust/40 group-focus-within:text-brand-rust transition-colors" />
+                                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-brand-rust/40 group-focus-within:text-brand-rust transition-colors" />
                                 <Input
                                     ref={searchInputRef}
                                     placeholder="Search by Reference # or Sender Name... (Press '/' to search)"
-                                    className="h-12 rounded-[1.25rem] border-brand-sand/50 bg-brand-warm/5 pl-11 pr-4 font-bold text-xs focus:ring-brand-rust/10 focus:border-brand-rust transition-all"
+                                    className="h-10 rounded-lg border-brand-sand/50 bg-brand-warm/5 pl-10 pr-4 font-medium text-xs focus:ring-brand-rust/10 focus:border-brand-rust transition-all"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
                             </div>
-                            <button
-                                type="button"
-                                onClick={handleSelectAll}
-                                className={`flex items-center justify-center gap-3 px-8 h-12 rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest transition-all ${isAllFilteredSelected
-                                    ? 'bg-brand-rust text-white shadow-lg'
-                                    : 'bg-white border border-brand-sand text-brand-rust hover:border-brand-rust hover:bg-brand-rust/5'
-                                    }`}
-                            >
-                                {isAllFilteredSelected ? <CheckSquare className="size-4" /> : <Square className="size-4" />}
-                                {isAllFilteredSelected ? 'Deselect All' : 'Select All Result'}
-                            </button>
+
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {/* View Mode Switcher */}
+                                <div className="inline-flex rounded-lg bg-brand-warm/40 p-0.5 border border-brand-sand/50 shadow-2xs">
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode('table')}
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                                            viewMode === 'table'
+                                                ? 'bg-white text-brand-rust shadow-xs'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        <List className="size-3.5" />
+                                        <span>Table View</span>
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode('grid')}
+                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                                            viewMode === 'grid'
+                                                ? 'bg-white text-brand-rust shadow-xs'
+                                                : 'text-muted-foreground hover:text-foreground'
+                                        }`}
+                                    >
+                                        <LayoutGrid className="size-3.5" />
+                                        <span>Cards View</span>
+                                    </button>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={handleSelectAll}
+                                    className={`flex items-center justify-center gap-2 px-4 h-10 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${isAllFilteredSelected
+                                            ? 'bg-brand-rust text-white shadow-xs'
+                                            : 'bg-white border border-brand-sand text-brand-rust hover:border-brand-rust hover:bg-brand-rust/5'
+                                        }`}
+                                >
+                                    {isAllFilteredSelected ? <CheckSquare className="size-4" /> : <Square className="size-4" />}
+                                    <span>{isAllFilteredSelected ? 'Deselect All' : 'Select All'}</span>
+                                </button>
+                            </div>
                         </div>
 
-                        {/* Results Grid */}
+                        {/* Results Container */}
                         <div className="flex-1 overflow-y-auto custom-scrollbar pb-10">
-                            <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-6">
-                                {filteredBookings.length > 0 ? (
-                                    filteredBookings.map((booking) => {
+                            {filteredBookings.length === 0 ? (
+                                <div className="py-20 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-white/60 p-8 text-center">
+                                    <div className="size-12 rounded-xl bg-brand-warm/30 flex items-center justify-center text-brand-rust/60 mb-3">
+                                        <Search className="size-6" />
+                                    </div>
+                                    <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider font-sans">
+                                        {searchTerm || selectedAreaFilter !== 'all' || selectedDateFilter !== 'all'
+                                            ? 'No matching bookings found'
+                                            : 'No Eligible Bookings'}
+                                    </h3>
+                                    <p className="text-[11px] text-slate-500 font-sans mt-1 max-w-sm">
+                                        {searchTerm || selectedAreaFilter !== 'all' || selectedDateFilter !== 'all'
+                                            ? 'Try adjusting your search query, pickup area, or pickup date filters.'
+                                            : "We couldn't find any paid bookings ready for collection. Check the confirmation status of your pending orders."}
+                                    </p>
+                                    {(searchTerm || selectedAreaFilter !== 'all' || selectedDateFilter !== 'all') && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSearchTerm('');
+                                                setSelectedAreaFilter('all');
+                                                setSelectedDateFilter('all');
+                                            }}
+                                            className="mt-3.5 px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-semibold text-brand-rust hover:bg-slate-50 font-sans shadow-2xs"
+                                        >
+                                            Clear All Filters
+                                        </button>
+                                    )}
+                                </div>
+                            ) : viewMode === 'table' ? (
+                                <div className="card overflow-hidden shadow-xs border border-brand-sand/40 bg-white">
+                                    <div className="overflow-x-auto w-full">
+                                        <table className="w-full text-left border-collapse">
+                                            <thead>
+                                                <tr className="border-b border-border bg-brand-warm/15 text-xs font-semibold text-brand-text-mid">
+                                                    <th className="w-12 px-4 py-3.5 text-center">
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleSelectAll}
+                                                            className="inline-flex items-center justify-center text-brand-rust"
+                                                            title={isAllFilteredSelected ? 'Deselect All' : 'Select All'}
+                                                        >
+                                                            {isAllFilteredSelected ? (
+                                                                <CheckSquare className="size-4" />
+                                                            ) : (
+                                                                <Square className="size-4 text-muted-foreground" />
+                                                            )}
+                                                        </button>
+                                                    </th>
+                                                    <th className="px-4 py-3.5 font-semibold">Stop #</th>
+                                                    <th className="px-4 py-3.5 font-semibold">Booking Ref</th>
+                                                    <th className="px-4 py-3.5 font-semibold">Sender Name</th>
+                                                    <th className="px-4 py-3.5 font-semibold">Pickup Area</th>
+                                                    <th className="px-4 py-3.5 font-semibold text-center">Boxes</th>
+                                                    <th className="px-4 py-3.5 font-semibold">Status</th>
+                                                    <th className="px-4 py-3.5 font-semibold">Pickup Date</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border text-xs font-normal">
+                                                {filteredBookings.map((booking) => {
+                                                    const isSelected = data.booking_ids.includes(booking.id);
+                                                    const stopIndex = data.booking_ids.indexOf(booking.id);
+
+                                                    return (
+                                                        <tr
+                                                            key={booking.id}
+                                                            onClick={() => handleToggleBooking(booking)}
+                                                            className={`cursor-pointer transition-colors ${
+                                                                isSelected
+                                                                    ? 'bg-brand-rust/5 font-medium'
+                                                                    : 'hover:bg-brand-cream/20'
+                                                            }`}
+                                                        >
+                                                            <td className="px-4 py-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => handleToggleBooking(booking)}
+                                                                    className="inline-flex items-center justify-center text-brand-rust"
+                                                                >
+                                                                    {isSelected ? (
+                                                                        <CheckSquare className="size-4" />
+                                                                    ) : (
+                                                                        <Square className="size-4 text-muted-foreground" />
+                                                                    )}
+                                                                </button>
+                                                            </td>
+                                                            <td className="px-4 py-3.5">
+                                                                {isSelected ? (
+                                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-brand-rust text-white text-[10px] font-black uppercase tracking-wider">
+                                                                        Stop #{stopIndex + 1}
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-muted-foreground text-[11px]">—</span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3.5 font-mono font-bold text-brand-text">
+                                                                {booking.reference_number}
+                                                            </td>
+                                                            <td className="px-4 py-3.5">
+                                                                <div className="font-semibold text-brand-text">
+                                                                    {booking.sender.first_name} {booking.sender.last_name}
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-slate-700">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <MapPin className="size-3 text-brand-rust shrink-0" />
+                                                                    <span className="font-semibold text-xs text-slate-800 font-sans">{getBookingPickupArea(booking)}</span>
+                                                                </div>
+                                                                {[booking.sender.suburb, booking.sender.state].filter(Boolean).length > 0 && (
+                                                                    <div className="text-[10px] text-slate-400 mt-0.5 ml-4.5 font-sans">
+                                                                        {[booking.sender.suburb, booking.sender.state].filter(Boolean).join(', ')}
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-center">
+                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-brand-warm/60 border border-brand-sand/50 text-brand-rust font-bold text-[11px]">
+                                                                    {booking.boxes_without_serial_count} {booking.boxes_without_serial_count === 1 ? 'Box' : 'Boxes'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3.5">
+                                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                                    {booking.payment_status}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-3.5 text-brand-text-mid font-mono text-[11px]">
+                                                                {booking.preferred_date ? booking.preferred_date.substring(0, 10) : '—'}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3 gap-4">
+                                    {filteredBookings.map((booking) => {
                                         const isSelected = data.booking_ids.includes(booking.id);
 
                                         return (
                                             <div
                                                 key={booking.id}
-                                                onClick={() => {
-                                                    const ids = [...data.booking_ids];
-                                                    const isSelecting = !ids.includes(booking.id);
-
-                                                    const newData: any = {
-                                                        booking_ids: isSelecting ? [...ids, booking.id] : ids.filter(id => id !== booking.id)
-                                                    };
-
-                                                    if (isSelecting && ids.length === 0) {
-                                                        if (!data.area_description && booking.sender) {
-                                                            const area = [booking.sender.suburb, booking.sender.state].filter(Boolean).join(', ');
-
-                                                            if (area) {
-                                                                newData.area_description = area;
-                                                            }
-                                                        }
-
-                                                        if (!data.scheduled_date && booking.preferred_date) {
-                                                            newData.scheduled_date = booking.preferred_date.substring(0, 10);
-                                                        }
-                                                    }
-
-                                                    setData(current => ({ ...current, ...newData }));
-                                                }}
-                                                className={`group flex flex-col p-6 rounded-[2.5rem] border-2 transition-all cursor-pointer relative overflow-hidden ${isSelected
-                                                    ? 'border-brand-rust bg-white ring-8 ring-brand-rust/5'
-                                                    : 'border-brand-sand/30 bg-white/60 hover:bg-white hover:border-brand-rust/40'
+                                                onClick={() => handleToggleBooking(booking)}
+                                                className={`group flex flex-col p-5 rounded-xl border-2 transition-all cursor-pointer relative overflow-hidden ${isSelected
+                                                        ? 'border-brand-rust bg-white ring-4 ring-brand-rust/10'
+                                                        : 'border-brand-sand/30 bg-white/60 hover:bg-white hover:border-brand-rust/40'
                                                     }`}
                                             >
                                                 {/* Stop Sequence Badge */}
                                                 {isSelected && (
-                                                    <div className="absolute top-4 left-4 px-2.5 py-1 rounded-xl bg-brand-rust text-white text-[9px] font-black uppercase tracking-widest shadow-md flex items-center gap-1 z-10 animate-in fade-in zoom-in-95">
+                                                    <div className="absolute top-3 left-3 px-2 py-0.5 rounded-md bg-brand-rust text-white text-[9px] font-black uppercase tracking-widest shadow-xs flex items-center gap-1 z-10 animate-in fade-in zoom-in-95">
                                                         <span>Stop #{data.booking_ids.indexOf(booking.id) + 1}</span>
                                                     </div>
                                                 )}
 
                                                 {/* Selection Checkmark Badge */}
-                                                <div className={`absolute top-4 right-4 size-7 rounded-full border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-brand-rust border-brand-rust scale-110 shadow-lg shadow-brand-rust/30' : 'border-brand-sand/40 bg-white group-hover:border-brand-rust/40'
+                                                <div className={`absolute top-3 right-3 size-6 rounded-md border-2 flex items-center justify-center transition-all ${isSelected ? 'bg-brand-rust border-brand-rust text-white shadow-xs' : 'border-brand-sand/40 bg-white group-hover:border-brand-rust/40'
                                                     }`}>
-                                                    {isSelected && <Check className="size-4 text-white stroke-[4px]" />}
+                                                    {isSelected && <Check className="size-3.5 stroke-[3px]" />}
                                                 </div>
 
-                                                <div className="flex items-center gap-3 mb-6">
-                                                    <div className="p-3 rounded-2xl bg-brand-warm text-brand-rust">
-                                                        <Box className="size-5" />
+                                                <div className="flex items-center gap-3 mb-4">
+                                                    <div className="p-2.5 rounded-lg bg-brand-warm text-brand-rust">
+                                                        <Box className="size-4" />
                                                     </div>
                                                     <div>
                                                         <p className="text-sm font-black text-brand-text tracking-tighter uppercase font-mono">{booking.reference_number}</p>
@@ -709,12 +1230,31 @@ export default function PickupRunsheetsCreate({
                                                         <div className="flex items-center gap-2">
                                                             <span className="text-[9px] font-black text-brand-rust uppercase tracking-widest bg-brand-warm px-2 py-0.5 rounded">Sender</span>
                                                             <p className="text-xs font-black text-brand-text uppercase truncate">
-                                                                {booking.sender.first_name} {booking.sender.last_name}
+                                                                 {booking.sender.first_name} {booking.sender.last_name}
                                                             </p>
                                                         </div>
                                                     </div>
 
-                                                    <div className="pt-4 border-t border-brand-sand/40 flex justify-between items-center relative z-10">
+                                                    {/* Pickup Area & Pickup Date in Grid Card */}
+                                                    <div className="space-y-1 pt-1">
+                                                        <div className="flex items-center gap-1.5 text-slate-700">
+                                                            <MapPin className="size-3 text-brand-rust shrink-0" />
+                                                            <span className="font-semibold text-xs text-slate-800 font-sans">{getBookingPickupArea(booking)}</span>
+                                                            {[booking.sender.suburb, booking.sender.state].filter(Boolean).length > 0 && (
+                                                                <span className="text-[10px] text-slate-400 font-sans truncate">
+                                                                    ({[booking.sender.suburb, booking.sender.state].filter(Boolean).join(', ')})
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 text-slate-600">
+                                                            <Calendar className="size-3 text-brand-rust shrink-0" />
+                                                            <span className="text-[11px] font-medium text-slate-600 font-sans">
+                                                                {booking.preferred_date ? booking.preferred_date.substring(0, 10) : 'Unscheduled'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="pt-3 border-t border-brand-sand/40 flex justify-between items-center relative z-10">
                                                         <p className="text-[10px] font-black text-brand-text/60 uppercase tracking-tighter">
                                                             Ready for pickup
                                                         </p>
@@ -730,19 +1270,9 @@ export default function PickupRunsheetsCreate({
                                                 </div>
                                             </div>
                                         );
-                                    })
-                                ) : (
-                                    <div className="col-span-full py-32 flex flex-col items-center justify-center border-4 border-dashed border-brand-sand/50 rounded-[3rem] bg-white/40 backdrop-blur-sm">
-                                        <div className="size-24 rounded-3xl bg-brand-warm flex items-center justify-center text-brand-rust/40 mb-8 animate-pulse">
-                                            <Search className="size-10" />
-                                        </div>
-                                        <h3 className="text-sm font-black text-brand-text uppercase tracking-[0.3em]">No Eligible Bookings</h3>
-                                        <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-widest mt-3 text-center max-w-sm px-8">
-                                            We couldn't find any paid bookings ready for collection. Check the confirmation status of your pending orders.
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
+                                    })}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

@@ -9,6 +9,7 @@ import {
     BarChart3,
     ShieldCheck,
     Truck,
+    FlaskConical,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,21 +58,31 @@ const actions = [
         href: '/admin/data-integrity',
         icon: ShieldCheck,
     },
+    {
+        title: 'Developer Console',
+        href: '/developer/features',
+        icon: FlaskConical,
+    },
 ];
 
 export function GlobalQuickActions() {
     const { auth } = usePage<PageProps & { auth: Auth }>().props;
     const role = auth.user ? (auth.user as any).role || 'sender' : 'guest';
-    const isSuperAdmin = role === 'super_admin';
-    const isAdmin = role === 'super_admin' || role === 'admin';
+    const isDeveloper = !!auth?.can?.developerMode || role === 'developer';
+    const isSuperAdmin = role === 'super_admin' || isDeveloper;
+    const isAdmin = role === 'super_admin' || role === 'admin' || isDeveloper;
 
     if (!isAdmin) {
-return null;
-}
+        return null;
+    }
 
     const visibleActions = actions.filter(action => {
         if (action.title === 'System Health') {
             return isSuperAdmin;
+        }
+
+        if (action.title === 'Developer Console') {
+            return isDeveloper;
         }
 
         return true;
@@ -82,11 +93,14 @@ return null;
             <DropdownMenuTrigger asChild>
                 <Button
                     variant="ghost"
-                    size="icon"
-                    className="relative h-9 w-9 rounded-xl bg-brand-warm/10 text-brand-rust hover:bg-brand-rust hover:text-white transition-all duration-300"
+                    size="sm"
+                    className="relative h-8 px-2 sm:px-2.5 rounded-xl bg-brand-warm/10 text-brand-rust hover:bg-brand-rust hover:text-white transition-all duration-300 flex items-center gap-1.5 cursor-pointer"
+                    title="Quick Actions"
                 >
-                    <Zap className="size-5" />
-                    <span className="sr-only">Quick Actions</span>
+                    <Zap className="size-3.5 shrink-0" />
+                    <span className="hidden xl:inline font-medium text-xs">Quick Actions</span>
+                    <span className="hidden sm:inline xl:hidden font-medium text-xs">Actions</span>
+                    <span className="sr-only sm:hidden">Quick Actions</span>
                 </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 rounded-2xl border-brand-warm/20 p-2 shadow-xl shadow-brand-rust/5">

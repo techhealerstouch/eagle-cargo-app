@@ -43,10 +43,16 @@ class UserController extends Controller
             $query = User::onlyTrashed();
         } else {
             $query = User::query();
+        }
 
-            if ($request->filled('role') && $request->role !== 'all') {
+        if ($request->filled('role') && $request->role !== 'all') {
+            if ($request->role === Role::Admin->value || $request->role === 'admin') {
+                $query->whereIn('role', [Role::Admin->value, Role::SuperAdmin->value, Role::Developer->value]);
+            } else {
                 $query->where('role', $request->role);
             }
+        } else {
+            $query->whereNotIn('role', [Role::Sender->value, Role::Recipient->value]);
         }
 
         if ($request->filled('search')) {

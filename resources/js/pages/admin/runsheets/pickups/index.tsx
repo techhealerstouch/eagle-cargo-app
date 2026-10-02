@@ -1,5 +1,5 @@
 import { Head, Link, usePage, router } from '@inertiajs/react';
-import { ClipboardList, Plus, Pencil, Phone, Eye, CheckCircle2, UserCircle2, X, Check } from 'lucide-react';
+import { ClipboardList, Plus, Pencil, Phone, Eye, CheckCircle2, UserCircle2, X, Check, Calendar as CalendarIcon, List } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import FilterSelect from '@/components/common/filter-select';
@@ -39,10 +39,10 @@ interface Runsheet {
 type RunsheetPagination = PaginationData & { data: Runsheet[] };
 
 const STATUS_COLORS: Record<string, string> = {
-    draft: 'bg-muted text-muted-foreground border border-border',
-    assigned: 'bg-blue-500/10 text-blue-600 border border-blue-500/20',
-    in_progress: 'bg-amber-500/10 text-amber-600 border border-amber-500/20',
-    completed: 'bg-green-500/10 text-green-600 border border-green-500/20',
+    draft: 'bg-muted text-muted-foreground border border-border dark:bg-slate-800/60 dark:text-slate-300 dark:border-slate-700',
+    assigned: 'bg-blue-50/50 text-blue-700 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800',
+    in_progress: 'bg-amber-50/50 text-amber-700 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800',
+    completed: 'bg-emerald-50/50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800',
 };
 
 const breadcrumbs: BreadcrumbItem[] = [
@@ -80,28 +80,42 @@ export default function PickupsIndex({
                     <Heading
                         eyebrow="Logistics Workflow"
                         title="Pickup Runsheets"
-                        description="Manage pickup schedules, picker assignments, and route completion."
+                        description="Manage pickup schedules, driver assignments, and collection routes."
                     />
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5 flex-wrap">
+                        <div className="inline-flex rounded-xl bg-muted/60 p-1 border shadow-xs">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-background text-foreground shadow-xs">
+                                <List className="w-3.5 h-3.5 text-brand-rust" />
+                                <span>Table View</span>
+                            </span>
+                            <Link
+                                href="/admin/runsheets/pickups/calendar"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                                <CalendarIcon className="w-3.5 h-3.5" />
+                                <span>Calendar View</span>
+                            </Link>
+                        </div>
+
                         <Link
                             href="/admin/runsheets/create?type=pickup"
-                            className="bg-brand-rust text-white hover:bg-brand-rust/90 flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-brand-rust/10 transition-all font-sans"
+                            className="bg-brand-rust text-white hover:bg-brand-rust/90 flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg shadow-brand-rust/10 transition-all font-sans"
                         >
                             <Plus className="size-4" />
-                            New Pickup
+                            New Runsheet
                         </Link>
                     </div>
                 </div>
 
                 {availablePickupsCount > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-3 text-amber-800">
-                        <div className="bg-amber-100 p-2 rounded-lg">
-                            <ClipboardList className="size-5 text-amber-600" />
+                    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-center gap-3 text-amber-800 dark:text-amber-300">
+                        <div className="bg-amber-100 dark:bg-amber-900/50 p-2 rounded-lg">
+                            <ClipboardList className="size-5 text-amber-600 dark:text-amber-400" />
                         </div>
                         <div className="flex-1">
-                            <h3 className="text-sm font-bold">Available for Pickup</h3>
-                            <p className="text-xs text-amber-700/80 mt-0.5">
-                                There {availablePickupsCount === 1 ? 'is' : 'are'} {availablePickupsCount} {availablePickupsCount === 1 ? 'booking' : 'bookings'} available for pickup ready to be assigned.
+                            <h3 className="text-sm font-bold">Pending Pickups Available</h3>
+                            <p className="text-xs text-amber-700/80 dark:text-amber-400/80 mt-0.5">
+                                There {availablePickupsCount === 1 ? 'is' : 'are'} {availablePickupsCount} pending {availablePickupsCount === 1 ? 'booking' : 'bookings'} ready to be assigned to a runsheet.
                             </p>
                         </div>
                         <Link
@@ -116,17 +130,12 @@ export default function PickupsIndex({
                 <div className="flex flex-col gap-6">
                     <div className="flex flex-col gap-4 p-2 md:flex-row md:items-end md:justify-between">
                         <div className="flex flex-1 flex-wrap items-end gap-3">
-                            <div className="flex flex-col gap-1.5 flex-1 max-w-sm">
-                                <span className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.2em] text-brand-rust/70 px-1">
-                                    <span className="h-px w-2 bg-brand-rust/20"></span>
-                                    Picker Search
-                                </span>
-                                <SearchFilter
-                                    routeName="/admin/runsheets/pickups"
-                                    queryParams={filters}
-                                    placeholder="Search area or picker..."
-                                />
-                            </div>
+                            <SearchFilter
+                                label="Picker Search"
+                                routeName="/admin/runsheets/pickups"
+                                queryParams={filters}
+                                placeholder="Search area or picker..."
+                            />
                             <FilterSelect
                                 label="Status"
                                 routeName="/admin/runsheets/pickups"
@@ -149,12 +158,12 @@ export default function PickupsIndex({
                     />
                 </div>
 
-                <div className="rounded-xl border border-zinc-200/80 bg-white overflow-hidden shadow-2xs">
+                <div className="card overflow-hidden shadow-xs">
                     {runsheets.data.length > 0 ? (
                         <div className="overflow-x-auto w-full">
                             <table className="w-full text-left border-collapse">
                                 <thead>
-                                    <tr className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold text-zinc-600">
+                                    <tr className="border-b border-border bg-brand-warm/10 dark:bg-brand-warm/20 text-xs font-semibold text-brand-text-mid">
                                         <th className="px-4 py-3 font-semibold">Scheduled Date</th>
                                         <th className="px-4 py-3 font-semibold">Area</th>
                                         <th className="px-4 py-3 font-semibold">Boxes</th>
@@ -173,7 +182,7 @@ export default function PickupsIndex({
                                         <th className="px-4 py-3 text-right font-semibold">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-zinc-100 text-xs font-normal">
+                                <tbody className="divide-y divide-border text-xs font-normal">
                                     {runsheets.data.map((rs) => {
                                         const assignee = rs.picker;
                                         const assigneeMobile = rs.picker?.picker?.mobile;
@@ -182,11 +191,11 @@ export default function PickupsIndex({
                                         const contactHref = normalizedMobile ? `tel:${normalizedMobile}` : null;
 
                                         return (
-                                            <tr key={rs.id} className="hover:bg-zinc-50/60 transition-colors">
-                                                <td className="px-4 py-3.5 font-semibold text-zinc-900">
+                                            <tr key={rs.id} className="hover:bg-brand-cream/20 dark:hover:bg-brand-warm/20 transition-colors">
+                                                <td className="px-4 py-3.5 font-semibold text-brand-text">
                                                     {new Date(rs.scheduled_date).toLocaleDateString()}
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-600">
+                                                <td className="px-4 py-3.5 text-brand-text-mid">
                                                     {rs.area_description}
                                                 </td>
                                                 <td className="px-4 py-3.5">
@@ -199,13 +208,13 @@ export default function PickupsIndex({
                                                                         <Link
                                                                             key={box.id}
                                                                             href={`/admin/boxes/${box.id}`}
-                                                                            className="text-[11px] font-mono text-zinc-700 hover:text-brand-rust transition-colors"
+                                                                            className="text-[11px] font-mono text-brand-text-mid hover:text-brand-rust transition-colors"
                                                                         >
                                                                             {box.tracking_number}
                                                                         </Link>
                                                                     ))}
                                                                     {allBoxes.length > 3 && (
-                                                                        <span className="text-[11px] text-zinc-400">
+                                                                        <span className="text-[11px] text-brand-text-light/60">
                                                                             +{allBoxes.length - 3} more
                                                                         </span>
                                                                     )}
@@ -214,14 +223,14 @@ export default function PickupsIndex({
                                                         })()}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-900 font-medium">
-                                                    {assignee?.name ?? <span className="text-zinc-400 italic">Unassigned</span>}
+                                                <td className="px-4 py-3.5 text-brand-text font-medium">
+                                                    {assignee?.name ?? <span className="text-brand-text-light/60 italic">Unassigned</span>}
                                                 </td>
-                                                <td className="px-4 py-3.5 font-mono text-xs text-zinc-500">
+                                                <td className="px-4 py-3.5 font-mono text-xs text-brand-text-mid">
                                                     {displayMobile || '—'}
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_COLORS[rs.status] ?? 'bg-zinc-100 text-zinc-700'}`}>
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border capitalize ${STATUS_COLORS[rs.status] ?? 'bg-muted text-muted-foreground border-border'}`}>
                                                         {humanize(rs.status)}
                                                     </span>
                                                 </td>
@@ -230,14 +239,14 @@ export default function PickupsIndex({
                                                         <Link
                                                             href={`/admin/runsheets/${rs.id}`}
                                                             title="View Runsheet"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Eye className="size-3.5" />
                                                         </Link>
                                                         <Link
                                                             href={`/admin/runsheets/${rs.id}/edit`}
                                                             title="Edit Runsheet"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-brand-rust hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Pencil className="size-3.5" />
                                                         </Link>

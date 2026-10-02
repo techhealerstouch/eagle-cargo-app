@@ -9,9 +9,12 @@ use App\Enums\Role;
 use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
 use App\Enums\SerialNumberStatus;
+use App\Exports\BookingsExport;
 use App\Http\Controllers\Controller;
+use App\Services\DeveloperAccess;
 use App\Http\Requests\Admin\StoreAdminBookingRequest;
 use App\Http\Requests\Admin\UpdateAdminBookingRequest;
+use App\Imports\BookingsImport;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\Invoice;
@@ -21,23 +24,29 @@ use App\Models\Runsheet;
 use App\Models\Sender;
 use App\Models\SerialNumber;
 use App\Models\User;
+use App\Notifications\AccountCreatedByAdmin;
+use App\Notifications\BookingCreatedByAdmin;
 use App\Repositories\Contracts\BookingRepositoryInterface;
+use App\Services\AuditLogService;
+use App\Services\ReferenceDataService;
 use App\Services\RunsheetService;
 use App\Services\SettingsService;
-use App\Services\ReferenceDataService;
+use App\Services\TrackingStepService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
-use App\Notifications\AccountCreatedByAdmin;
+use Maatwebsite\Excel\Facades\Excel;
 
 class BookingController extends Controller
 {
-    protected BookingRepositoryInterface $bookings;
+    protected $bookings;
 
     private SettingsService $settingsService;
 
@@ -54,7 +63,7 @@ class BookingController extends Controller
         $query = Booking::with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone'])
             ->where('status', '!=', BookingStatus::Draft->value);
 
-        if ($request->boolean('trashed') && $request->user()?->role === Role::SuperAdmin) {
+        if ($request->boolean('trashed') && app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
             $query = Booking::onlyTrashed()->with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone']);
         }
 
@@ -189,7 +198,7 @@ class BookingController extends Controller
             'pickers' => $pickers,
             'couriers' => $couriers,
             'activeRunsheets' => $activeRunsheets,
-            'filters' => $request->only(['search', 'status', 'sort', 'direction', 'trashed', 'payment_status', 'declaration_form_status', 'customer_type']),
+            'filters' => $request->only(['search', 'status', 'payment_status', 'booking_type', 'declaration_form_status', 'customer_type', 'sort', 'direction', 'trashed']),
         ]);
     }
 
@@ -205,6 +214,34 @@ class BookingController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
+        $activePromotions = \App\Models\Promotion::where('is_active', true)
+            ->where(function ($query) {
+                $query->whereNull('valid_from')->orWhere('valid_from', '<=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('valid_to')->orWhere('valid_to', '>=', now());
+            })
+            ->orderBy('created_at', 'desc')
+            ->get([
+                'id',
+                'code',
+                'name',
+                'description',
+                'type',
+                'value',
+                'min_spend',
+                'max_discount',
+                'min_box_count',
+                'buy_quantity',
+                'free_quantity',
+                'valid_from',
+                'valid_to',
+                'max_uses',
+                'uses_count',
+                'max_uses_per_user',
+                'first_time_sender_only',
+            ]);
+
         return Inertia::render('admin/bookings/create', [
             'senders' => $senders,
             'areas' => $areas,
@@ -213,6 +250,7 @@ class BookingController extends Controller
             'boxPrices' => $boxPrices,
             'pickers' => $pickers,
             'pickupZones' => $referenceDataService->activePickupZones(),
+            'activePromotions' => $activePromotions,
         ]);
     }
 
@@ -224,21 +262,15 @@ class BookingController extends Controller
         try {
             $senderId = $validated['sender_id'] ?? null;
 
-            if (!empty($validated['is_new_sender'])) {
+            if (! empty($validated['is_new_sender'])) {
                 $password = Str::password(12);
 
                 // Create the User without firing events to prevent
                 // UserObserver from auto-creating a duplicate Sender
                 // with placeholder data — we create the real Sender below.
                 $user = User::withoutEvents(function () use ($validated, $password) {
-                    $prefix = 'SD';
-                    do {
-                        $customId = $prefix . '-' . strtoupper(Str::random(6));
-                    } while (User::where('custom_id', $customId)->exists());
-
                     return User::create([
-                        'custom_id' => $customId,
-                        'name' => $validated['sender_first_name'] . ' ' . $validated['sender_last_name'],
+                        'name' => $validated['sender_first_name'].' '.$validated['sender_last_name'],
                         'email' => $validated['sender_email'],
                         'password' => Hash::make($password),
                         'role' => Role::Sender,
@@ -278,20 +310,10 @@ class BookingController extends Controller
             }
 
             $bookingData = Arr::only($validated, [
-                'status',
-                'booking_type',
-                'preferred_date',
-                'pickup_zone_id',
-                'payment_status',
-                'payment_method',
-                'payment_reference',
-                'declaration_form_status',
-                'notes',
-                'admin_notes',
-                'empty_box_count',
-                'empty_box_fee',
+                'status', 'preferred_date', 'pickup_zone_id', 'booking_type',
+                'payment_status', 'payment_method', 'payment_reference', 'declaration_form_status', 'notes', 'admin_notes',
+                'empty_box_count', 'empty_box_fee',
             ]);
-            $bookingData['booking_type'] = $validated['booking_type'] ?? 'drop_off';
             $bookingData['sender_id'] = $senderId;
 
             $requestEmptyBox = filter_var($validated['request_empty_box'] ?? false, FILTER_VALIDATE_BOOLEAN);
@@ -321,7 +343,7 @@ class BookingController extends Controller
             if (! $recipientId) {
                 $recipient = Recipient::create([
                     'sender_id' => $senderId,
-                    'name' => trim(($firstBox['recipient_first_name'] ?? '') . ' ' . ($firstBox['recipient_last_name'] ?? '')),
+                    'name' => trim(($firstBox['recipient_first_name'] ?? '').' '.($firstBox['recipient_last_name'] ?? '')),
                     'first_name' => $firstBox['recipient_first_name'] ?? null,
                     'last_name' => $firstBox['recipient_last_name'] ?? null,
                     'email' => $firstBox['recipient_email'] ?? null,
@@ -351,11 +373,11 @@ class BookingController extends Controller
                     'recipient_id' => $recipientId,
                     'status' => $boxStatus,
                     'area_id' => $boxData['area_id'],
-                    'is_custom_size' => !empty($boxData['is_custom_size']),
-                    'is_door_to_door' => !empty($boxData['is_door_to_door']),
+                    'is_custom_size' => ! empty($boxData['is_custom_size']),
+                    'is_door_to_door' => ! empty($boxData['is_door_to_door']),
                 ];
 
-                if (!empty($boxData['is_custom_size'])) {
+                if (! empty($boxData['is_custom_size'])) {
                     $boxRecord['custom_length'] = $boxData['custom_length'] ?? null;
                     $boxRecord['custom_width'] = $boxData['custom_width'] ?? null;
                     $boxRecord['custom_height'] = $boxData['custom_height'] ?? null;
@@ -371,11 +393,48 @@ class BookingController extends Controller
                         $serialNumber->update([
                             'status' => SerialNumberStatus::Assigned->value,
                             'box_id' => $box->id,
-                            'assigned_by' => $validated['picker_id'] ?? Auth::id(),
+                            'assigned_by' => ! empty($validated['picker_id']) ? $validated['picker_id'] : Auth::id(),
                             'allocated_at' => now(),
                         ]);
                         $box->update(['serial_number' => $serialNumber->serial_number]);
                     }
+                }
+            }
+
+            // Reload boxes to get accurate price_charged calculated by BoxObserver
+            $booking->load('boxes');
+
+            if (!empty($validated['promo_code'])) {
+                $augmentedBoxes = collect($validated['boxes'])->map(function($boxData, $index) use ($booking) {
+                    $boxModel = $booking->boxes[$index] ?? null;
+                    if ($boxModel) {
+                        $boxData['price_charged'] = (float) $boxModel->price_charged;
+                    }
+                    return $boxData;
+                })->toArray();
+
+                $subtotal = $booking->boxes->sum('price_charged');
+
+                $promotionService = app(\App\Services\PromotionService::class);
+                $emptyBoxCount = (int) ($validated['empty_box_count'] ?? 0);
+                $emptyBoxFee = (float) ($validated['empty_box_fee'] ?? 10.00);
+
+                $result = $promotionService->validateAndCalculate(
+                    $validated['promo_code'],
+                    $senderId,
+                    $augmentedBoxes,
+                    $subtotal,
+                    $emptyBoxCount,
+                    $emptyBoxFee
+                );
+
+                if ($result['valid']) {
+                    $booking->update([
+                        'promotion_id' => $result['promotion']->id,
+                        'promo_code' => $validated['promo_code'],
+                        'discount_amount' => $result['discount_amount'],
+                    ]);
+                    $promotionService->recordRedemption($result['promotion'], $booking);
                 }
             }
 
@@ -404,31 +463,39 @@ class BookingController extends Controller
 
             // Send booking notification to the sender
             if ($booking->sender && $booking->sender->user) {
-                $booking->sender->user->notify(new \App\Notifications\BookingCreatedByAdmin($booking));
+                $booking->sender->user->notify(new BookingCreatedByAdmin($booking));
             }
 
             DB::commit();
         } catch (\Exception $e) {
             DB::rollBack();
-            return back()->withErrors(['status' => 'Failed to create booking: ' . $e->getMessage()])->withInput();
+
+            return back()->withErrors(['status' => 'Failed to create booking: '.$e->getMessage()])->withInput();
         }
 
-        return redirect()->route('admin.bookings.index')->with('success', 'Booking created successfully.');
+        return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', 'Booking created successfully.');
     }
 
     public function show(Booking $booking)
     {
-        if (!$booking->is_read) {
+        if (! $booking->is_read) {
             $booking->update(['is_read' => true]);
         }
-        if ($booking->payment_status === PaymentStatus::Pending->value && $booking->proof_of_payment && !$booking->is_payment_read) {
+        $isPendingPayment = $booking->payment_status === PaymentStatus::Pending || $booking->payment_status === PaymentStatus::Pending->value;
+        if ($isPendingPayment && ($booking->proof_of_payment || $booking->payment_reference) && ! $booking->is_payment_read) {
             $booking->update(['is_payment_read' => true]);
         }
 
-        $booking->load(['sender', 'boxes.recipient', 'boxes.boxType', 'invoice']);
+        $booking->load(['sender', 'boxes.recipient', 'boxes.boxType', 'invoice.payments']);
+
+        $pendingPayment = $booking->invoice?->payments
+            ->whereNull('confirmed_at')
+            ->whereNull('stripe_payment_intent_id')
+            ->first();
 
         return Inertia::render('admin/bookings/show', [
             'booking' => $booking->toHistoricalPayload(),
+            'pendingPayment' => $pendingPayment,
         ]);
     }
 
@@ -448,19 +515,9 @@ class BookingController extends Controller
     {
         $validated = $request->validated();
         $bookingData = Arr::only($validated, [
-            'sender_id',
-            'status',
-            'booking_type',
-            'preferred_date',
-            'pickup_zone_id',
-            'payment_status',
-            'payment_method',
-            'payment_reference',
-            'declaration_form_status',
-            'notes',
-            'admin_notes',
-            'empty_box_count',
-            'empty_box_fee',
+            'sender_id', 'status', 'preferred_date', 'pickup_zone_id', 'booking_type',
+            'payment_status', 'payment_method', 'payment_reference', 'declaration_form_status', 'notes', 'admin_notes',
+            'empty_box_count', 'empty_box_fee',
         ]);
 
         if ($request->hasFile('proof_of_payment')) {
@@ -473,15 +530,16 @@ class BookingController extends Controller
 
         try {
             $booking->bypassStatusValidation = true;
-            $oldEmptyBoxCount = $booking->empty_box_count;
-            $oldEmptyBoxFee = $booking->empty_box_fee;
-            
+            $oldEmptyBoxCount = (int) $booking->empty_box_count;
+            $oldEmptyBoxFee = (float) $booking->empty_box_fee;
+
             $booking->update($bookingData);
-            
-            if ($booking->empty_box_count != $oldEmptyBoxCount || $booking->empty_box_fee != $oldEmptyBoxFee) {
-                if ($booking->invoice) {
-                    $booking->invoice->recalculateAmount();
-                }
+
+            if ($booking->invoice && (
+                $oldEmptyBoxCount !== (int) $booking->empty_box_count ||
+                $oldEmptyBoxFee !== (float) $booking->empty_box_fee
+            )) {
+                $booking->invoice->recalculateAmount();
             }
         } catch (\RuntimeException $e) {
             return back()->withErrors(['status' => $e->getMessage()])->withInput();
@@ -493,7 +551,7 @@ class BookingController extends Controller
             $invoice = $booking->invoice()->first() ?: Invoice::generateForBooking($booking);
             if ($invoice && ! $invoice->payments()->exists()) {
                 $method = $booking->payment_method ?? 'bank_transfer';
-                $reference = !empty($booking->payment_reference) ? $booking->payment_reference : (in_array($method, ['cash', 'cash_on_pickup']) ? 'Cash Payment' : 'Manual Admin Entry');
+                $reference = ! empty($booking->payment_reference) ? $booking->payment_reference : (in_array($method, ['cash', 'cash_on_pickup']) ? 'Cash Payment' : 'Manual Admin Entry');
 
                 Payment::create([
                     'invoice_id' => $invoice->id,
@@ -531,33 +589,7 @@ class BookingController extends Controller
             }
         });
 
-        // Ensure child box statuses stay aligned with booking status
-        if ($booking->status === BookingStatus::Collected) {
-            $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
-            $booking->boxes()->where('status', BoxStatus::Pending)->get()->each(function ($box) use ($boxRepo) {
-                $boxRepo->updateStatus(
-                    box: $box,
-                    status: BoxStatus::Collected->value,
-                    notes: 'Collected as part of booking collection (Admin update)',
-                    courierId: Auth::id()
-                );
-            });
-        } elseif ($booking->status === BookingStatus::Delivered) {
-            $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
-            $booking->boxes()->whereNotIn('status', [BoxStatus::Delivered, BoxStatus::Cancelled])->get()->each(function ($box) use ($boxRepo) {
-                $boxRepo->updateStatus(
-                    box: $box,
-                    status: BoxStatus::Delivered->value,
-                    notes: 'Delivered as part of booking completion (Admin update)',
-                    courierId: Auth::id(),
-                    deliveryOverrideReason: 'Marked delivered via booking status update',
-                    bypassValidation: true
-                );
-            });
-        }
-
-        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.bookings.index') ?? session('admin_return_url') ?? route('admin.bookings.index');
-        return redirect($returnUrl)->with('success', 'Booking updated successfully.');
+        return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', 'Booking updated successfully.');
     }
 
     public function viewDeclaration(Booking $booking)
@@ -602,12 +634,12 @@ class BookingController extends Controller
         $disksToCheck = [
             config('filesystems.disks.google.clientId') ? 'google' : null,
             'local',
-            'public'
+            'public',
         ];
 
         $foundDisk = null;
         foreach (array_filter($disksToCheck) as $disk) {
-            if (\Illuminate\Support\Facades\Storage::disk($disk)->exists($path)) {
+            if (Storage::disk($disk)->exists($path)) {
                 $foundDisk = $disk;
                 break;
             }
@@ -617,8 +649,8 @@ class BookingController extends Controller
             abort(404, 'File does not exist in storage.');
         }
 
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $storage */
-        $storage = \Illuminate\Support\Facades\Storage::disk($foundDisk);
+        /** @var FilesystemAdapter $storage */
+        $storage = Storage::disk($foundDisk);
 
         return $storage->response($path);
     }
@@ -640,7 +672,7 @@ class BookingController extends Controller
             'admin_notes' => $validated['admin_notes'] ?? $booking->admin_notes,
         ]);
 
-        return redirect()->back()->with('success', 'Booking accepted successfully.');
+        return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', 'Booking accepted successfully.');
     }
 
     public function assignCourier(Booking $booking, Request $request)
@@ -669,7 +701,7 @@ class BookingController extends Controller
                 $validated['runsheet_id'] ?? null
             );
 
-            return redirect()->back()
+            return redirect($this->adminReturnUrl('admin.bookings.index'))
                 ->with('success', 'Booking assigned successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
@@ -698,7 +730,7 @@ class BookingController extends Controller
                 isset($validated['runsheet_id']) ? (int) $validated['runsheet_id'] : null
             );
 
-            return redirect()->back()
+            return redirect($this->adminReturnUrl('admin.bookings.index'))
                 ->with('success', 'Picker assigned successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
@@ -733,72 +765,83 @@ class BookingController extends Controller
             ]);
         }
 
-        return redirect()->back()->with('success', count($bookings) . ' bookings accepted successfully.');
+        return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', count($bookings).' bookings accepted successfully.');
     }
 
     public function bulkCancel(Request $request)
     {
         $validated = $request->validate([
             'ids' => 'required_without:select_all|array',
+            'ids.*' => 'integer|exists:bookings,id',
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'status' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'payment_status' => 'nullable|string',
+            'booking_type' => 'nullable|string|in:drop_off,home_pickup,other',
+            'trashed' => 'nullable|boolean',
         ]);
 
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $query = $this->applyFilters($query, $request);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
+        $bookings = $this->bulkBookingSelection($request, $validated);
+        $cancelled = 0;
+        $skipped = 0;
 
         foreach ($bookings as $booking) {
             try {
                 $booking->bypassStatusValidation = true;
                 $booking->update(['status' => BookingStatus::Cancelled]);
+                $cancelled++;
             } catch (\Exception $e) {
-                // Skip if transition is not allowed
+                $skipped++;
             }
         }
 
-        return redirect()->back()->with('success', 'Selected bookings cancelled where allowed.');
+        $message = "{$cancelled} bookings cancelled where allowed.";
+        if ($skipped > 0) {
+            $message .= " {$skipped} bookings skipped.";
+        }
+
+        return redirect($this->adminReturnUrl('admin.bookings.index'))
+            ->with('success', $message)
+            ->with('bulk_result', [
+                'requested' => $bookings->count(),
+                'updated' => $cancelled,
+                'skipped' => $skipped,
+                'reasons' => $skipped > 0 ? ['invalid_transition' => $skipped] : [],
+            ]);
     }
 
     public function bulkUpdateStatus(Request $request)
     {
         $validated = $request->validate([
             'ids' => 'required_without:select_all|array',
+            'ids.*' => 'integer|exists:bookings,id',
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'filter_status' => 'nullable|string',
+            'payment_status' => 'nullable|string',
+            'booking_type' => 'nullable|string|in:drop_off,home_pickup,other',
+            'trashed' => 'nullable|boolean',
             'status' => 'required|string',
         ]);
 
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $requestForFilters = $request->duplicate();
-            $requestForFilters->merge(['status' => $request->filter_status]);
-            $query = $this->applyFilters($query, $requestForFilters);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
+        $bookings = $this->bulkBookingSelection($request, $validated);
 
         $newStatus = BookingStatus::tryFrom($validated['status']);
-        if (!$newStatus) {
+        if (! $newStatus) {
             return redirect()->back()->with('error', 'Invalid status.');
         }
 
         $updatedCount = 0;
+        $skippedCount = 0;
         foreach ($bookings as $booking) {
             try {
                 if ($booking->status->canTransitionTo($newStatus)) {
                     $booking->status = $newStatus;
 
-                    if ($newStatus === BookingStatus::Confirmed && !$booking->confirmed_at) {
+                    if ($newStatus === BookingStatus::Confirmed && ! $booking->confirmed_at) {
                         $booking->confirmed_at = now();
-                    } elseif ($newStatus === BookingStatus::Shipped && !$booking->shipped_at) {
+                    } elseif ($newStatus === BookingStatus::Shipped && ! $booking->shipped_at) {
                         $booking->shipped_at = now();
                     }
 
@@ -806,35 +849,37 @@ class BookingController extends Controller
                     $updatedCount++;
                 }
             } catch (\Exception $e) {
-                // Skip
+                $skippedCount++;
             }
         }
 
-        return redirect()->back()->with('success', $updatedCount . ' bookings updated successfully.');
+        return redirect()->back()
+            ->with('success', $updatedCount.' bookings updated successfully.'.($skippedCount ? " {$skippedCount} bookings skipped." : ''))
+            ->with('bulk_result', [
+                'requested' => $bookings->count(),
+                'updated' => $updatedCount,
+                'skipped' => $skippedCount,
+                'reasons' => $skippedCount > 0 ? ['invalid_transition' => $skippedCount] : [],
+            ]);
     }
 
     public function bulkUpdatePaymentStatus(Request $request)
     {
         $validated = $request->validate([
             'ids' => 'required_without:select_all|array',
+            'ids.*' => 'integer|exists:bookings,id',
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'filter_status' => 'nullable|string',
+            'booking_type' => 'nullable|string|in:drop_off,home_pickup,other',
+            'trashed' => 'nullable|boolean',
             'payment_status' => 'required|string',
         ]);
 
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $requestForFilters = $request->duplicate();
-            $requestForFilters->merge(['status' => $request->filter_status]);
-            $query = $this->applyFilters($query, $requestForFilters);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
+        $bookings = $this->bulkBookingSelection($request, $validated);
 
         $newPaymentStatus = PaymentStatus::tryFrom($validated['payment_status']);
-        if (!$newPaymentStatus) {
+        if (! $newPaymentStatus) {
             return redirect()->back()->with('error', 'Invalid payment status.');
         }
 
@@ -864,78 +909,9 @@ class BookingController extends Controller
             $updatedCount++;
         }
 
-        return redirect()->back()->with('success', $updatedCount . ' bookings payment status updated.');
-    }
-
-    public function bulkUpdateEmptyBoxes(Request $request)
-    {
-        $validated = $request->validate([
-            'ids' => 'required_without:select_all|array',
-            'select_all' => 'nullable|boolean',
-            'search' => 'nullable|string',
-            'filter_status' => 'nullable|string',
-            'empty_box_count' => 'required|integer|min:0',
-            'empty_box_fee' => 'required|numeric|min:0',
-        ]);
-
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $requestForFilters = $request->duplicate();
-            $requestForFilters->merge(['status' => $request->filter_status]);
-            $query = $this->applyFilters($query, $requestForFilters);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
-
-        $updatedCount = 0;
-        foreach ($bookings as $booking) {
-            $oldEmptyBoxCount = $booking->empty_box_count;
-            $oldEmptyBoxFee = $booking->empty_box_fee;
-
-            $booking->empty_box_count = $validated['empty_box_count'];
-            $booking->empty_box_fee = $validated['empty_box_fee'];
-            $booking->save();
-            
-            if ($booking->empty_box_count != $oldEmptyBoxCount || $booking->empty_box_fee != $oldEmptyBoxFee) {
-                if ($booking->invoice) {
-                    $booking->invoice->recalculateAmount();
-                }
-            }
-            $updatedCount++;
-        }
-
-        return redirect()->back()->with('success', $updatedCount . ' bookings empty boxes updated.');
-    }
-
-    public function bulkUpdateBookingType(Request $request)
-    {
-        $validated = $request->validate([
-            'ids' => 'required_without:select_all|array',
-            'select_all' => 'nullable|boolean',
-            'search' => 'nullable|string',
-            'filter_status' => 'nullable|string',
-            'booking_type' => 'required|string|max:50',
-        ]);
-
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $requestForFilters = $request->duplicate();
-            $requestForFilters->merge(['status' => $request->filter_status]);
-            $query = $this->applyFilters($query, $requestForFilters);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
-
-        $updatedCount = 0;
-        foreach ($bookings as $booking) {
-            $booking->booking_type = $validated['booking_type'];
-            $booking->save();
-            $updatedCount++;
-        }
-
-        return redirect()->back()->with('success', $updatedCount . ' bookings type updated.');
+        return redirect()->back()
+            ->with('success', $updatedCount.' bookings payment status updated.')
+            ->with('bulk_result', ['requested' => $bookings->count(), 'updated' => $updatedCount, 'skipped' => 0, 'reasons' => []]);
     }
 
     public function bulkUpdateNotes(Request $request)
@@ -945,18 +921,11 @@ class BookingController extends Controller
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'filter_status' => 'nullable|string',
+            'trashed' => 'nullable|boolean',
             'admin_notes' => 'nullable|string',
         ]);
 
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $requestForFilters = $request->duplicate();
-            $requestForFilters->merge(['status' => $request->filter_status]);
-            $query = $this->applyFilters($query, $requestForFilters);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
+        $bookings = $this->bulkBookingSelection($request, $validated);
 
         $updatedCount = 0;
         foreach ($bookings as $booking) {
@@ -965,7 +934,7 @@ class BookingController extends Controller
             $updatedCount++;
         }
 
-        return redirect()->back()->with('success', $updatedCount . ' bookings internal notes updated.');
+        return redirect()->back()->with('success', $updatedCount.' bookings internal notes updated.');
     }
 
     public function bulkDestroySelected(Request $request)
@@ -975,15 +944,13 @@ class BookingController extends Controller
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'status' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'payment_status' => 'nullable|string',
+            'booking_type' => 'nullable|string|in:drop_off,home_pickup,other',
+            'trashed' => 'nullable|boolean',
         ]);
 
-        if ($request->boolean('select_all')) {
-            $query = Booking::query();
-            $query = $this->applyFilters($query, $request);
-            $bookings = $query->get();
-        } else {
-            $bookings = Booking::whereIn('id', $validated['ids'])->get();
-        }
+        $bookings = $this->bulkBookingSelection($request, $validated);
 
         $deleted = 0;
         $skipped = 0;
@@ -992,7 +959,7 @@ class BookingController extends Controller
             $status = $booking->status instanceof BookingStatus ? $booking->status->value : $booking->status;
 
             $canDelete = in_array($status, [BookingStatus::Pending->value, BookingStatus::Draft->value, BookingStatus::Cancelled->value], true);
-            if (Auth::user()?->role === Role::SuperAdmin) {
+            if (app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
                 $canDelete = true;
             }
 
@@ -1007,10 +974,19 @@ class BookingController extends Controller
         $message = "{$deleted} bookings archived successfully.";
         if ($skipped > 0) {
             $message .= " {$skipped} bookings skipped because they are not pending, draft, or cancelled.";
-            return redirect()->back()->with('warning', $message);
+
+            return redirect($this->adminReturnUrl('admin.bookings.index'))->with('warning', $message);
         }
 
-        return redirect()->back()->with('success', $message);
+        return redirect($this->adminReturnUrl('admin.bookings.index'))
+            ->with('success', $message)
+            ->with('bulk_result', [
+                'requested' => $bookings->count(),
+                'deleted' => $deleted,
+                'updated' => $deleted,
+                'skipped' => $skipped,
+                'reasons' => $skipped > 0 ? ['not_archivable' => $skipped] : [],
+            ]);
     }
 
     public function destroy(Booking $booking)
@@ -1018,7 +994,7 @@ class BookingController extends Controller
         $status = $booking->status instanceof BookingStatus ? $booking->status->value : $booking->status;
         $canDelete = in_array($status, [BookingStatus::Pending->value, BookingStatus::Draft->value, BookingStatus::Cancelled->value], true);
 
-        if (Auth::user()?->role === Role::SuperAdmin) {
+        if (app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
             $canDelete = true;
         }
 
@@ -1028,12 +1004,12 @@ class BookingController extends Controller
 
         $booking->delete();
 
-        return redirect()->back()->with('success', 'Booking archived successfully.');
+        return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', 'Booking archived successfully.');
     }
 
     public function restore($id)
     {
-        if (Auth::user()?->role !== Role::SuperAdmin) {
+        if (! app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
             abort(403, 'Unauthorized');
         }
 
@@ -1066,16 +1042,160 @@ class BookingController extends Controller
 
         try {
             if ($runsheet->type === RunsheetType::Delivery) {
-                $boxIds = $bookings->load('boxes')->flatMap(fn(Booking $booking) => $booking->boxes->pluck('id'))->all();
+                $boxIds = $bookings->load('boxes')->flatMap(fn (Booking $booking) => $booking->boxes->pluck('id'))->all();
                 $runsheetService->attachBoxes($runsheet, $boxIds);
             } else {
                 $runsheetService->attachBookings($runsheet, $bookingIds);
             }
 
-            return redirect()->back()->with('success', count($bookingIds) . ' bookings assigned to runsheet successfully.');
+            return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', count($bookingIds).' bookings assigned to runsheet successfully.');
         } catch (\InvalidArgumentException $e) {
             return back()->with('error', $e->getMessage());
         }
+    }
+
+    public function exportExcel(Request $request)
+    {
+        $query = Booking::with(['sender', 'boxes.recipient', 'boxes.boxType', 'runsheets.courier', 'runsheets.picker', 'invoice']);
+
+        if ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $query->whereIn('id', array_filter($ids));
+        } else {
+            $query = $this->applyFilters($query, $request);
+        }
+
+        $bookings = $query->get();
+
+        $sections = $request->input('sections', []);
+        if (is_string($sections)) {
+            $sections = explode(',', $sections);
+        }
+        $sections = array_filter((array) $sections);
+
+        $format = strtolower($request->input('format', 'xlsx'));
+        $extension = $format === 'csv' ? 'csv' : 'xlsx';
+        $filename = 'bookings_export_'.now()->format('Ymd_His').'.'.$extension;
+
+        app(AuditLogService::class)->logExportEvent($format, "Bookings list exported as {$extension}", [
+            'count' => $bookings->count(),
+            'sections' => $sections,
+            'start_date' => $request->start_date,
+            'end_date' => $request->end_date,
+            'status' => $request->status,
+        ]);
+
+        return Excel::download(new BookingsExport($bookings, false, $sections), $filename);
+    }
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new BookingsExport(null, true), 'bookings_import_template.xlsx');
+    }
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new BookingsImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
+    }
+
+    public function bulkUpdateEmptyBoxes(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'booking_type' => 'nullable|string|in:drop_off,home_pickup,other',
+            'payment_status' => 'nullable|string',
+            'trashed' => 'nullable|boolean',
+            'empty_box_count' => 'required|integer|min:0',
+            'empty_box_fee' => 'required|numeric|min:0',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Booking::query();
+            $requestForFilters = $request->duplicate();
+            $requestForFilters->merge(['status' => $request->filter_status]);
+            $query = $this->applyFilters($query, $requestForFilters);
+            $bookings = $query->get();
+        } else {
+            $bookings = Booking::whereIn('id', $validated['ids'])->get();
+        }
+
+        $updatedCount = 0;
+        foreach ($bookings as $booking) {
+            $booking->bypassStatusValidation = true;
+            $oldEmptyBoxCount = (int) $booking->empty_box_count;
+            $oldEmptyBoxFee = (float) $booking->empty_box_fee;
+
+            $booking->update([
+                'empty_box_count' => $validated['empty_box_count'],
+                'empty_box_fee' => $validated['empty_box_fee'],
+            ]);
+
+            if ($booking->invoice && (
+                $oldEmptyBoxCount !== (int) $booking->empty_box_count ||
+                $oldEmptyBoxFee !== (float) $booking->empty_box_fee
+            )) {
+                $booking->invoice->recalculateAmount();
+            }
+
+            $updatedCount++;
+        }
+
+        return redirect()->back()->with('success', $updatedCount.' bookings empty boxes updated successfully.');
+    }
+
+    public function bulkUpdateBookingType(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string',
+            'filter_status' => 'nullable|string',
+            'payment_status' => 'nullable|string',
+            'trashed' => 'nullable|boolean',
+            'booking_type' => 'required|string|in:drop_off,home_pickup,other',
+        ]);
+
+        if ($request->boolean('select_all')) {
+            $query = Booking::query();
+            $requestForFilters = $request->duplicate();
+            $requestForFilters->merge(['status' => $request->filter_status]);
+            $query = $this->applyFilters($query, $requestForFilters);
+            $bookings = $query->get();
+        } else {
+            $bookings = Booking::whereIn('id', $validated['ids'])->get();
+        }
+
+        $updatedCount = 0;
+        foreach ($bookings as $booking) {
+            $booking->bypassStatusValidation = true;
+            $booking->update(['booking_type' => $validated['booking_type']]);
+            $updatedCount++;
+        }
+
+        return redirect()->back()->with('success', $updatedCount.' bookings type updated successfully.');
     }
 
     private function applyFilters($query, Request $request)
@@ -1096,24 +1216,62 @@ class BookingController extends Controller
         }
 
         if ($request->filled('status') && $request->status !== 'all') {
-            $query->where('status', $request->status);
+            $statusVal = (string) $request->status;
+            $trackingStep = app(TrackingStepService::class)->getStep($statusVal);
+
+            if ($trackingStep) {
+                $systemStatus = $trackingStep['system_status'] ?? null;
+                $query->where(function ($q) use ($statusVal, $systemStatus) {
+                    $q->whereHas('boxes', function ($bq) use ($statusVal, $systemStatus) {
+                        $bq->where('tracking_step_key', $statusVal);
+                        if ($systemStatus) {
+                            $bq->orWhere('status', $systemStatus);
+                        }
+                    });
+                    if ($systemStatus) {
+                        $q->orWhere('status', $systemStatus);
+                    }
+                    $q->orWhere('status', $statusVal);
+                });
+            } else {
+                $query->where('status', $statusVal);
+            }
         }
 
         if ($request->filled('payment_status')) {
-            if ($request->payment_status === 'paid') {
-                $query->whereIn('payment_status', ['paid', 'cash_collected']);
-            } elseif ($request->payment_status === 'unpaid') {
-                $query->whereIn('payment_status', ['pending', 'cash_on_pickup']);
+            if ($request->payment_status === 'unpaid') {
+                $query->whereIn('payment_status', [
+                    PaymentStatus::Pending->value,
+                    PaymentStatus::CashOnPickup->value,
+                    PaymentStatus::BalancePending->value,
+                ]);
             } elseif ($request->payment_status === 'partial') {
-                $query->whereIn('payment_status', ['partially_paid', 'balance_pending']);
+                $query->whereIn('payment_status', [
+                    PaymentStatus::PartiallyPaid->value,
+                    PaymentStatus::BalancePending->value,
+                ]);
+            } elseif ($request->payment_status === 'paid') {
+                $query->whereIn('payment_status', [
+                    PaymentStatus::Paid->value,
+                    PaymentStatus::CashCollected->value,
+                ]);
             } else {
                 $query->where('payment_status', $request->payment_status);
             }
         }
 
+        if ($request->filled('booking_type')) {
+            $query->where('booking_type', $request->booking_type);
+        }
+
         if ($request->filled('declaration_form_status')) {
             if ($request->declaration_form_status === 'submitted') {
                 $query->whereIn('declaration_form_status', ['submitted_online', 'physical_copy_received']);
+            } elseif ($request->declaration_form_status === 'missing') {
+                $query->where(function ($q) {
+                    $q->where('declaration_form_status', 'missing')
+                        ->orWhereNull('declaration_form_status');
+                })->whereNull('declaration_form_path');
             } else {
                 $query->where('declaration_form_status', $request->declaration_form_status);
             }
@@ -1125,6 +1283,14 @@ class BookingController extends Controller
             } elseif ($request->customer_type === 'registered') {
                 $query->registered();
             }
+        }
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('created_at', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('created_at', '<=', $request->end_date);
         }
 
         $sortableColumns = [
@@ -1139,5 +1305,23 @@ class BookingController extends Controller
         $direction = in_array($request->direction, ['asc', 'desc']) ? $request->direction : 'desc';
 
         return $query->orderBy($sort, $direction)->orderBy('id', 'desc');
+    }
+
+    private function bulkBookingSelection(Request $request, array $validated)
+    {
+        $query = $request->boolean('trashed') && app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())
+            ? Booking::onlyTrashed()
+            : Booking::query()->where('status', '!=', BookingStatus::Draft->value);
+
+        if (! $request->boolean('select_all')) {
+            return $query->whereIn('id', $validated['ids'] ?? [])->get();
+        }
+
+        $filterRequest = $request->duplicate();
+        if ($request->filled('filter_status')) {
+            $filterRequest->merge(['status' => $request->input('filter_status')]);
+        }
+
+        return $this->applyFilters($query, $filterRequest)->get();
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Http\Requests\SaveDraftBookingRequest;
@@ -11,10 +12,12 @@ use App\Http\Requests\StoreBookingRequest;
 use App\Models\Booking;
 use App\Models\Sender;
 use App\Models\User;
+use App\Notifications\BankTransferDetails;
 use App\Notifications\PartialCancellationRequested;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Rules\SecureFile;
 use App\Services\PaymentService;
+use App\Services\GuestBookingAccessService;
 use App\Services\ReferenceDataService;
 use App\Services\SettingsService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -30,6 +33,7 @@ class BookingController extends Controller
     public function __construct(
         private BookingRepositoryInterface $bookings,
         private ReferenceDataService $referenceData,
+        private GuestBookingAccessService $guestAccess,
     ) {}
 
     public function create(Request $request)
@@ -84,17 +88,49 @@ class BookingController extends Controller
             }
         }
 
+        $activePromotions = \App\Models\Promotion::where('is_active', true)
+            ->where(function ($query) {
+                $query->whereNull('valid_from')->orWhere('valid_from', '<=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('valid_to')->orWhere('valid_to', '>=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('max_uses')->orWhereRaw('uses_count < max_uses');
+            })
+            ->orderBy('created_at', 'desc')
+            ->get([
+                'id',
+                'code',
+                'name',
+                'description',
+                'type',
+                'value',
+                'min_spend',
+                'max_discount',
+                'min_box_count',
+                'buy_quantity',
+                'free_quantity',
+                'valid_from',
+                'valid_to',
+                'first_time_sender_only',
+                'applicable_pickup_zones',
+                'applicable_box_types',
+            ]);
+
         return Inertia::render('sender/Book', [
             'areas' => $this->referenceData->activeAreas(),
             'provinces' => $this->referenceData->activeProvinces(),
             'boxTypes' => $this->referenceData->activeBoxTypes(),
             'boxPrices' => $this->referenceData->boxPrices(),
             'pickupZones' => $this->referenceData->activePickupZones(),
+            'suburbs' => $this->referenceData->activeSuburbs(),
             'savedRecipients' => $recipients,
             'cloneSource' => $cloneSource,
             'editingBooking' => null,
             'draftBooking' => $draftBooking,
             'sender' => $user ? $user->sender?->load('pickupZone') : null,
+            'activePromotions' => $activePromotions,
         ]);
     }
 
@@ -110,19 +146,22 @@ class BookingController extends Controller
         }
 
         if (! $sender) {
-            $sender = Sender::create([
-                'user_id' => $user->id,
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
-                'email' => $validated['email'],
-                'mobile' => $validated['mobile'],
-                'address' => $validated['address'],
-                'suburb' => $validated['suburb'] ?? null,
-                'state' => $validated['state'] ?? null,
-                'postcode' => $validated['postcode'] ?? null,
-                'latitude' => $validated['latitude'] ?? null,
-                'longitude' => $validated['longitude'] ?? null,
-            ]);
+            $sender = Sender::updateOrCreate(
+                ['email' => $validated['email']],
+                [
+                    'user_id' => $user->id,
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'mobile' => $validated['mobile'],
+                    'secondary_mobile' => $validated['secondary_mobile'] ?? null,
+                    'address' => $validated['address'],
+                    'suburb' => $validated['suburb'] ?? null,
+                    'state' => $validated['state'] ?? null,
+                    'postcode' => $validated['postcode'] ?? null,
+                    'latitude' => $validated['latitude'] ?? null,
+                    'longitude' => $validated['longitude'] ?? null,
+                ]
+            );
         }
 
         $draft = $sender->bookings()
@@ -133,6 +172,13 @@ class BookingController extends Controller
         $booking = $draft
             ? $this->bookings->submitDraft($draft, $validated)
             : $this->bookings->createBooking($validated, $sender);
+
+        if ($validated['payment_method'] === 'bank_transfer') {
+            $notifiable = $booking->sender?->user ?? $booking->sender;
+            if ($notifiable) {
+                $notifiable->notify(new BankTransferDetails($booking));
+            }
+        }
 
         return $this->redirectAfterBookingSubmission($booking, $validated['payment_method']);
     }
@@ -152,19 +198,22 @@ class BookingController extends Controller
         }
 
         if (! $sender) {
-            $sender = Sender::create([
-                'user_id' => $user->id,
-                'first_name' => $validated['first_name'],
-                'last_name' => $validated['last_name'],
-                'email' => $validated['email'],
-                'mobile' => $validated['mobile'],
-                'address' => $validated['address'],
-                'suburb' => $validated['suburb'] ?? null,
-                'state' => $validated['state'] ?? null,
-                'postcode' => $validated['postcode'] ?? null,
-                'latitude' => $validated['latitude'] ?? null,
-                'longitude' => $validated['longitude'] ?? null,
-            ]);
+            $sender = Sender::updateOrCreate(
+                ['email' => $validated['email']],
+                [
+                    'user_id' => $user->id,
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'mobile' => $validated['mobile'],
+                    'secondary_mobile' => $validated['secondary_mobile'] ?? null,
+                    'address' => $validated['address'],
+                    'suburb' => $validated['suburb'] ?? null,
+                    'state' => $validated['state'] ?? null,
+                    'postcode' => $validated['postcode'] ?? null,
+                    'latitude' => $validated['latitude'] ?? null,
+                    'longitude' => $validated['longitude'] ?? null,
+                ]
+            );
         }
 
         // Reuse a booking created by an earlier initialization attempt, including
@@ -213,16 +262,16 @@ class BookingController extends Controller
             }
         }
 
-        $invoiceSettings = $settingsService->getInvoiceSettings();
         $response = [
             'booking' => $booking->load('boxes.recipient', 'boxes.boxType', 'sender'),
-            'bankDetails' => [
-                'bank_name' => $invoiceSettings['bankName'] ?? '',
-                'bsb' => $invoiceSettings['bankBsb'] ?? '',
-                'account_number' => $invoiceSettings['bankAccount'] ?? '',
-                'company_name' => $invoiceSettings['companyName'] ?? 'Love Balikbayan Cargo',
-            ],
         ];
+
+        if ($validated['payment_method'] === 'bank_transfer') {
+            $notifiable = $booking->sender?->user ?? $booking->sender;
+            if ($notifiable) {
+                $notifiable->notify(new BankTransferDetails($booking));
+            }
+        }
 
         // If Stripe is selected, prepare the intent
         if ($validated['payment_method'] === 'stripe') {
@@ -232,7 +281,7 @@ class BookingController extends Controller
                 $response['stripeKey'] = config('services.stripe.key');
             } catch (\Exception $e) {
                 return response()->json([
-                    'error' => 'Could not initialize Stripe: ' . $e->getMessage(),
+                    'error' => 'Could not initialize Stripe: '.$e->getMessage(),
                     'booking_id' => $booking->id,
                 ], 500);
             }
@@ -263,7 +312,7 @@ class BookingController extends Controller
         $pdf = Pdf::loadView('admin.invoices.pdf', compact('invoice', 'invoiceSettings', 'senderSnapshot', 'bookingSnapshot', 'lineItemsSnapshot', 'adminTeamSnapshot'))
             ->setPaper('a4', 'portrait');
 
-        return $pdf->stream($invoice->invoice_number . '.pdf');
+        return $pdf->stream($invoice->invoice_number.'.pdf');
     }
 
     public function pay(Booking $booking, SettingsService $settingsService)
@@ -281,14 +330,11 @@ class BookingController extends Controller
         $booking->load('boxes');
         $totalAmount = $booking->boxes->sum('price_charged');
         if ($totalAmount <= 0) {
-            return redirect()->route('sender.bookings')->with(
-                'error',
-                'Cannot proceed to payment: booking total amount is $0. ' .
-                    'Please contact support to check price configuration for your boxes.'
+            return redirect()->route('sender.bookings')->with('error',
+                'Cannot proceed to payment: booking total amount is $0. '.
+                'Please contact support to check price configuration for your boxes.'
             );
         }
-
-        $invoiceSettings = $settingsService->getInvoiceSettings();
 
         return Inertia::render('payment/PaymentConsole', [
             'booking' => $booking->load('boxes.recipient', 'boxes.boxType'),
@@ -296,16 +342,38 @@ class BookingController extends Controller
             'role' => 'sender',
             'endpoint' => null,
             'backUrl' => '/bookings',
-            'bankDetails' => [
-                'bank_name' => $invoiceSettings['bankName'],
-                'bsb' => $invoiceSettings['bankBsb'],
-                'account_number' => $invoiceSettings['bankAccount'],
-                'company_name' => $invoiceSettings['companyName'],
-            ],
         ]);
     }
 
-    public function uploadProofOfPayment(Request $request, Booking $booking)
+    public function guestPay(Request $request, Booking $booking, SettingsService $settingsService)
+    {
+        $this->guestAccess->authorize($request, $booking, GuestBookingAccessService::PAYMENT);
+
+        if (! $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::PAYMENT)) {
+            abort(403, 'Email verification is required before payment.');
+        }
+
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return redirect($this->guestAccess->confirmationUrl($booking))
+                ->with('success', 'This booking has already been paid.');
+        }
+
+        $booking->load('boxes');
+        if ($booking->boxes->sum('price_charged') <= 0) {
+            return redirect($this->guestAccess->confirmationUrl($booking))
+                ->with('error', 'Cannot proceed to payment because the booking total is $0. Please contact support.');
+        }
+
+        return Inertia::render('payment/PaymentConsole', [
+            'booking' => $booking->load('sender', 'boxes.recipient', 'boxes.boxType')->makeHidden('guest_token'),
+            'stripeKey' => config('services.stripe.key'),
+            'role' => 'guest',
+            'guestAccessQuery' => '?'.$request->getQueryString(),
+            'backUrl' => $this->guestAccess->confirmationUrl($booking),
+        ]);
+    }
+
+    public function uploadProofOfPayment(Request $request, Booking $booking, PaymentService $paymentService)
     {
         $user = Auth::user();
 
@@ -318,42 +386,125 @@ class BookingController extends Controller
             return redirect()->back()->with('info', 'This booking has already been paid. No proof of payment is needed.');
         }
 
-        // Run file validation first to catch invalid file types early
+        // Run file and reference validation
         $request->validate([
             'proof_of_payment' => [
-                'required',
+                $booking->proof_of_payment || $request->filled('payment_reference') ? 'nullable' : 'required',
                 'file',
                 'mimes:jpeg,png,jpg,pdf',
                 'max:5120', // 5MB max
                 new SecureFile,
             ],
+            'payment_reference' => ['nullable', 'string', 'max:100'],
         ]);
+
+        $updateData = [];
 
         if ($request->hasFile('proof_of_payment')) {
             if ($booking->proof_of_payment) {
-                Log::info('Proof of payment file overwritten/updated. booking_id=' . $booking->id . ' old_file_path=' . $booking->proof_of_payment . ' user_id=' . $user->getAuthIdentifier() . ' ip=' . request()->ip());
+                Log::info('Proof of payment file overwritten/updated. booking_id='.$booking->id.' old_file_path='.$booking->proof_of_payment.' user_id='.$user->getAuthIdentifier().' ip='.request()->ip());
                 Storage::disk('public')->delete($booking->proof_of_payment);
             }
 
             $path = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
-            $booking->update(['proof_of_payment' => $path]);
+            if (! $path) {
+                Log::error('Failed to store proof of payment file. booking_id='.$booking->id.' user_id='.$user->getAuthIdentifier());
 
-            Log::info('Proof of payment file uploaded successfully. booking_id=' . $booking->id . ' new_file_path=' . $path . ' user_id=' . $user->getAuthIdentifier() . ' ip=' . request()->ip());
+                return redirect()->back()->with('error', 'Failed to save proof of payment file to server storage. Please check permissions and try again.');
+            }
 
-            return redirect()->back()->with('success', 'Proof of payment uploaded successfully. Our team will review it shortly.');
+            $updateData['proof_of_payment'] = $path;
+
+            Log::info('Proof of payment file uploaded successfully. booking_id='.$booking->id.' new_file_path='.$path.' user_id='.$user->getAuthIdentifier().' ip='.request()->ip());
         }
 
-        return redirect()->back()->with('error', 'Failed to upload proof of payment.');
+        if ($request->has('payment_reference')) {
+            $ref = trim((string) $request->input('payment_reference'));
+            $updateData['payment_reference'] = $ref !== '' ? $ref : null;
+        }
+
+        if (! empty($updateData)) {
+            $updateData['is_payment_read'] = false;
+            $booking->update($updateData);
+
+            // Initialize or update unconfirmed payment record requiring admin confirmation
+            $paymentService->initializeOfflinePayment($booking, [
+                'reference_number' => $updateData['payment_reference'] ?? $booking->payment_reference,
+                'payment_method' => $booking->payment_method ?? 'bank_transfer',
+            ]);
+
+            return redirect()->back()->with('success', 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.');
+        }
+
+        return redirect()->back()->with('error', 'Please provide a proof file or transaction reference number.');
+    }
+
+    public function guestUploadProofOfPayment(Request $request, Booking $booking, PaymentService $paymentService)
+    {
+        $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::PAYMENT);
+
+        // Guard: Prevent proof upload on already-paid bookings
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return redirect()->back()->with('info', 'This booking has already been paid. No proof of payment is needed.');
+        }
+
+        // Run file and reference validation
+        $request->validate([
+            'proof_of_payment' => [
+                $booking->proof_of_payment || $request->filled('payment_reference') ? 'nullable' : 'required',
+                'file',
+                'mimes:jpeg,png,jpg,pdf',
+                'max:5120', // 5MB max
+                new SecureFile,
+            ],
+            'payment_reference' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $updateData = [];
+
+        if ($request->hasFile('proof_of_payment')) {
+            if ($booking->proof_of_payment) {
+                Log::info('Guest proof of payment file overwritten. booking_id='.$booking->id.' old_file_path='.$booking->proof_of_payment.' ip='.request()->ip());
+                Storage::disk('public')->delete($booking->proof_of_payment);
+            }
+
+            $path = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
+            if (! $path) {
+                Log::error('Failed to store guest proof of payment file. booking_id='.$booking->id);
+
+                return redirect()->back()->with('error', 'Failed to save proof of payment file to server storage. Please check permissions and try again.');
+            }
+
+            $updateData['proof_of_payment'] = $path;
+            Log::info('Guest proof of payment file uploaded successfully. booking_id='.$booking->id.' new_file_path='.$path.' ip='.request()->ip());
+        }
+
+        if ($request->has('payment_reference')) {
+            $ref = trim((string) $request->input('payment_reference'));
+            $updateData['payment_reference'] = $ref !== '' ? $ref : null;
+        }
+
+        if (! empty($updateData)) {
+            $updateData['is_payment_read'] = false;
+            $booking->update($updateData);
+
+            $paymentService->initializeOfflinePayment($booking, [
+                'reference_number' => $updateData['payment_reference'] ?? $booking->payment_reference,
+                'payment_method' => $booking->payment_method ?? 'bank_transfer',
+            ]);
+
+            return redirect()->back()->with('success', 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.');
+        }
+
+        return redirect()->back()->with('error', 'Please provide a proof file or transaction reference number.');
     }
 
     public function edit(Booking $booking)
     {
         // Check Ownership & Status — allow editing Pending and Draft bookings
         $user = Auth::user();
-        if (
-            ! $user->sender || $booking->sender_id !== $user->sender->id
-            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])
-        ) {
+        if (! $user->sender || $booking->sender_id !== $user->sender->id
+            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
             return redirect()->route('sender.bookings')->with('error', 'Booking cannot be edited at this stage or you do not have permission.');
         }
 
@@ -363,6 +514,36 @@ class BookingController extends Controller
             ->select('id', 'sender_id', 'area_id', 'name', 'first_name', 'last_name', 'email', 'phone_number', 'address', 'city', 'province', 'zip_code', 'landmarks', 'latitude', 'longitude')
             ->latest()
             ->get();
+
+        $activePromotions = \App\Models\Promotion::where('is_active', true)
+            ->where(function ($query) {
+                $query->whereNull('valid_from')->orWhere('valid_from', '<=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('valid_to')->orWhere('valid_to', '>=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('max_uses')->orWhereRaw('uses_count < max_uses');
+            })
+            ->orderBy('created_at', 'desc')
+            ->get([
+                'id',
+                'code',
+                'name',
+                'description',
+                'type',
+                'value',
+                'min_spend',
+                'max_discount',
+                'min_box_count',
+                'buy_quantity',
+                'free_quantity',
+                'valid_from',
+                'valid_to',
+                'first_time_sender_only',
+                'applicable_pickup_zones',
+                'applicable_box_types',
+            ]);
 
         return Inertia::render('sender/Book', [
             'areas' => $this->referenceData->activeAreas(),
@@ -374,16 +555,15 @@ class BookingController extends Controller
             'editingBooking' => $booking->load(['sender', 'boxes.recipient']),
             'draftBooking' => null,
             'sender' => $user->sender?->load('pickupZone'),
+            'activePromotions' => $activePromotions,
         ]);
     }
 
     public function update(StoreBookingRequest $request, Booking $booking)
     {
         $user = Auth::user();
-        if (
-            ! $user->sender || $booking->sender_id !== $user->sender->id
-            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])
-        ) {
+        if (! $user->sender || $booking->sender_id !== $user->sender->id
+            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
             abort(403, 'Unauthorized amendment attempt.');
         }
 
@@ -425,7 +605,7 @@ class BookingController extends Controller
             $booking->boxes()->where('status', BoxStatus::Pending->value)->update(['status' => BoxStatus::Cancelled->value]);
             $booking->update([
                 'attention_required' => true,
-                'admin_notes' => trim($booking->admin_notes . "\n\nPartial Cancellation Requested by Sender."),
+                'admin_notes' => trim($booking->admin_notes."\n\nPartial Cancellation Requested by Sender."),
             ]);
 
             $admins = User::whereIn('role', [Role::Admin, Role::SuperAdmin])->get();
@@ -470,16 +650,20 @@ class BookingController extends Controller
         }
 
         if (! $sender) {
-            $sender = Sender::create([
-                'user_id' => $user->id,
-                'first_name' => $validated['first_name'] ?? $user->name,
-                'last_name' => $validated['last_name'] ?? '',
-                'email' => $validated['email'] ?? $user->email,
-                'mobile' => $validated['mobile'] ?? '',
-                'address' => $validated['address'] ?? '',
-                'latitude' => $validated['latitude'] ?? null,
-                'longitude' => $validated['longitude'] ?? null,
-            ]);
+            $senderEmail = $validated['email'] ?? $user->email;
+            $sender = Sender::updateOrCreate(
+                ['email' => $senderEmail],
+                [
+                    'user_id' => $user->id,
+                    'first_name' => $validated['first_name'] ?? $user->name,
+                    'last_name' => $validated['last_name'] ?? '',
+                    'mobile' => $validated['mobile'] ?? '',
+                    'secondary_mobile' => $validated['secondary_mobile'] ?? null,
+                    'address' => $validated['address'] ?? '',
+                    'latitude' => $validated['latitude'] ?? null,
+                    'longitude' => $validated['longitude'] ?? null,
+                ]
+            );
         }
 
         // Find existing draft to update. If a stale autosave arrives after the
@@ -531,6 +715,13 @@ class BookingController extends Controller
         $validated = $request->validated();
         $booking = $this->bookings->submitDraft($booking, $validated);
 
+        if ($validated['payment_method'] === 'bank_transfer') {
+            $notifiable = $booking->sender?->user ?? $booking->sender;
+            if ($notifiable) {
+                $notifiable->notify(new BankTransferDetails($booking));
+            }
+        }
+
         return $this->redirectAfterBookingSubmission($booking, $validated['payment_method']);
     }
 
@@ -544,6 +735,42 @@ class BookingController extends Controller
         $pdf = Pdf::loadView('declaration-blank', compact('declarationSettings', 'boxCount'))->setPaper('a4', 'portrait');
 
         return $pdf->download('declaration-form-blank.pdf');
+    }
+
+    /**
+     * Request bank transfer details email and update payment method.
+     */
+    public function requestBankTransferDetails(Request $request, Booking $booking)
+    {
+        $user = Auth::user();
+
+        if ($user) {
+            if (! $user->sender || $booking->sender_id !== $user->sender->id) {
+                abort(403, 'Unauthorized.');
+            }
+        } else {
+            $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::PAYMENT);
+        }
+
+        if ($booking->payment_status === PaymentStatus::Paid) {
+            return response()->json([
+                'error' => 'This booking has already been paid.',
+            ], 422);
+        }
+
+        if ($booking->payment_method !== 'bank_transfer') {
+            $booking->update(['payment_method' => 'bank_transfer']);
+        }
+
+        $notifiable = $booking->sender?->user ?? $booking->sender;
+        if ($notifiable) {
+            $notifiable->notify(new BankTransferDetails($booking));
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => __('messages.notifications.bank_transfer_details.sent_toast'),
+        ]);
     }
 
     private function redirectAfterBookingSubmission(Booking $booking, string $paymentMethod)
@@ -564,10 +791,12 @@ class BookingController extends Controller
 
     private function hasUnpaidCancellationFees(?Sender $sender): bool
     {
-        if (! $sender) return false;
+        if (! $sender) {
+            return false;
+        }
 
         return $sender->bookings()->whereHas('invoice', function ($q) {
-            $q->where('status', \App\Enums\InvoiceStatus::Unpaid)
+            $q->where('status', InvoiceStatus::Unpaid)
                 ->where('is_cancellation_fee', true);
         })->exists();
     }

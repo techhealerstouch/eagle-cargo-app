@@ -10,6 +10,9 @@ import {
     X,
     Ruler,
     CheckCircle,
+    Check,
+    ChevronRight,
+    RotateCcw,
     AlertTriangle,
     ShieldCheck,
     FileText,
@@ -23,9 +26,14 @@ import {
     Sparkles,
     UserCheck,
     UserPlus,
-    Receipt
+    Receipt,
+    Ticket,
+    Tag,
+    Loader2,
+    Clock,
+    Users
 } from 'lucide-react';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import Select from 'react-select';
 import { toast } from 'sonner';
 import Heading from '@/components/common/heading';
@@ -42,56 +50,106 @@ import { validatePhone } from '@/lib/countries';
 import { cn } from '@/lib/utils';
 import type { BreadcrumbItem } from '@/types';
 
-function StepIndicator({ step }: { step: number }) {
+function StepIndicator({
+    step,
+    onStepClick,
+    step1Summary,
+    step2Summary,
+}: {
+    step: number;
+    onStepClick?: (step: number) => void;
+    step1Summary?: string;
+    step2Summary?: string;
+}) {
     const steps = [
-        { id: 1, label: 'Sender & Pickup', icon: User },
-        { id: 2, label: 'Boxes & Destinations', icon: Package },
-        { id: 3, label: 'Review & Admin Options', icon: ShieldCheck }
+        { id: 1, label: 'Sender & Pickup', shortLabel: 'Sender', icon: User, summary: step1Summary },
+        { id: 2, label: 'Boxes & Destinations', shortLabel: 'Cargo', icon: Package, summary: step2Summary },
+        { id: 3, label: 'Review & Admin Options', shortLabel: 'Review', icon: ShieldCheck }
     ];
 
     return (
-        <div className="grid grid-cols-3 gap-3 md:gap-4 mb-6">
-            {steps.map((item) => {
-                const isActive = step === item.id;
-                const isPast = step > item.id;
-                const IconComponent = item.icon;
+        <nav aria-label="Booking steps" className="w-full">
+            <ol className="flex items-center gap-1.5 sm:gap-2">
+                {steps.map((item, idx) => {
+                    const isActive = step === item.id;
+                    const isDone = step > item.id;
+                    const isClickable = Boolean(isDone && onStepClick);
 
-                return (
-                    <div
-                        key={item.id}
-                        className={`relative overflow-hidden rounded-2xl border p-3.5 md:p-4 transition-all duration-300 ${
-                            isActive
-                                ? 'border-brand-rust bg-brand-warm/10 shadow-md ring-2 ring-brand-rust/20'
-                                : isPast
-                                    ? 'border-brand-rust/40 bg-white dark:bg-zinc-900 shadow-sm'
-                                    : 'border-zinc-200 bg-zinc-50/80 dark:border-zinc-800 dark:bg-zinc-900/40 opacity-60'
-                        }`}
-                    >
-                        <div className="flex items-center gap-3">
-                            <div
-                                className={`flex h-9 w-9 md:h-10 md:w-10 shrink-0 items-center justify-center rounded-xl font-bold text-xs md:text-sm transition-all duration-300 ${
-                                    isPast
-                                        ? 'bg-brand-rust text-white shadow-sm'
-                                        : isActive
-                                            ? 'bg-brand-rust text-white shadow-md'
-                                            : 'bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
-                                }`}
+                    return (
+                        <li key={item.id} className="flex-1 min-w-0 flex items-center">
+                            <button
+                                type="button"
+                                disabled={!isClickable}
+                                onClick={() => {
+                                    if (isClickable && onStepClick) {
+                                        onStepClick(item.id);
+                                    }
+                                }}
+                                className={cn(
+                                    "w-full flex items-center justify-between gap-2 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl text-left transition-all select-none",
+                                    isActive && "bg-white dark:bg-zinc-800 shadow-xs border border-zinc-200/90 dark:border-zinc-700 ring-1 ring-brand-rust/20",
+                                    isClickable && "hover:bg-white/90 dark:hover:bg-zinc-800/90 cursor-pointer group hover:border-zinc-300 dark:hover:border-zinc-700 border border-transparent",
+                                    !isActive && !isDone && "opacity-60 cursor-default border border-transparent"
+                                )}
+                                title={isClickable ? `Click to jump back to Step ${item.id}: ${item.label}` : undefined}
                             >
-                                {isPast ? <CheckCircle className="size-4 md:size-5" /> : <IconComponent className="size-4 md:size-5" />}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <p className="text-[10px] md:text-[11px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                                    Step {item.id}
-                                </p>
-                                <p className="text-xs md:text-sm font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                                    {item.label}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <span
+                                        className={cn(
+                                            "flex size-6 shrink-0 items-center justify-center rounded-lg text-xs font-bold transition-transform",
+                                            isActive && "bg-brand-rust text-white shadow-2xs",
+                                            isDone && "bg-emerald-600 text-white group-hover:scale-105",
+                                            !isActive && !isDone && "bg-zinc-200 dark:bg-zinc-700/80 text-zinc-600 dark:text-zinc-400"
+                                        )}
+                                    >
+                                        {isDone ? <Check className="size-3.5 stroke-[2.5]" /> : item.id}
+                                    </span>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                            <p
+                                                className={cn(
+                                                    "text-xs font-bold truncate leading-tight",
+                                                    isActive && "text-zinc-900 dark:text-zinc-100",
+                                                    isDone && "text-zinc-700 dark:text-zinc-300 group-hover:text-brand-rust dark:group-hover:text-brand-warm",
+                                                    !isActive && !isDone && "text-zinc-400 dark:text-zinc-500"
+                                                )}
+                                            >
+                                                <span className="md:hidden">{item.shortLabel}</span>
+                                                <span className="hidden md:inline">{item.label}</span>
+                                            </p>
+                                            {isDone && (
+                                                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hidden xl:inline">
+                                                    ✓ Done
+                                                </span>
+                                            )}
+                                        </div>
+                                        {isDone && item.summary && (
+                                            <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-400 truncate hidden lg:block leading-tight mt-0.5">
+                                                {item.summary}
+                                            </p>
+                                        )}
+                                        {isActive && (
+                                            <p className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 truncate hidden sm:block leading-tight mt-0.5">
+                                                In progress
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {isClickable && (
+                                    <span className="text-[10px] font-semibold text-zinc-400 group-hover:text-brand-rust dark:group-hover:text-brand-warm hidden xl:inline shrink-0">
+                                        Edit
+                                    </span>
+                                )}
+                            </button>
+                            {idx < steps.length - 1 && (
+                                <ChevronRight className="size-4 text-zinc-300 dark:text-zinc-600 shrink-0 mx-0.5 select-none hidden sm:block" />
+                            )}
+                        </li>
+                    );
+                })}
+            </ol>
+        </nav>
     );
 }
 
@@ -141,6 +199,7 @@ interface Sender {
     last_name: string;
     email: string;
     mobile: string;
+    secondary_mobile?: string | null;
     address: string;
     suburb: string;
     state: string;
@@ -155,6 +214,7 @@ export default function BookingsCreate({
     boxPrices,
     pickers,
     pickupZones = [],
+    activePromotions = [],
 }: {
     senders: Sender[];
     areas: any[];
@@ -163,8 +223,14 @@ export default function BookingsCreate({
     boxPrices: any[];
     pickers: any[];
     pickupZones?: any[];
+    activePromotions?: any[];
 }) {
     const [currentStep, setCurrentStep] = useState(1);
+    const [promoCodeInput, setPromoCodeInput] = useState('');
+    const [validatingPromo, setValidatingPromo] = useState(false);
+    const [promoError, setPromoError] = useState('');
+    const [promoSuccessMessage, setPromoSuccessMessage] = useState('');
+    const [discountAmount, setDiscountAmount] = useState(0);
 
     const { data, setData, post, processing, errors, clearErrors, setError } = useForm({
         is_new_sender: false,
@@ -178,9 +244,9 @@ export default function BookingsCreate({
         sender_suburb: '',
         sender_state: '',
         sender_postcode: '',
-        booking_type: 'drop_off',
         pickup_zone_id: '',
         status: 'pending',
+        booking_type: 'home_pickup',
         picker_id: '',
         preferred_date: '',
         payment_status: 'pending',
@@ -194,6 +260,7 @@ export default function BookingsCreate({
         request_empty_box: false,
         empty_box_count: 1,
         empty_box_fee: 10,
+        promo_code: '',
         boxes: [
             {
                 recipient_first_name: '',
@@ -232,7 +299,8 @@ export default function BookingsCreate({
     const senderOptions = useMemo(() => {
         return senders.map(c => ({
             value: c.id,
-            label: `${c.first_name} ${c.last_name} (${c.email})`
+            label: `${c.first_name} ${c.last_name} (${c.email})`,
+            sender: c
         }));
     }, [senders]);
 
@@ -337,11 +405,6 @@ export default function BookingsCreate({
             } else {
                 if (!data.sender_id) { setError('sender_id', 'Please select an existing sender.'); isValid = false; }
             }
-
-            if (data.status === 'collected' && !data.picker_id) {
-                setError('picker_id', 'Picker is required when booking status is Collected.');
-                isValid = false;
-            }
         }
 
         if (stepNumber === 2) {
@@ -352,10 +415,6 @@ export default function BookingsCreate({
             else {
                 const phoneErr = validatePhone(master.recipient_phone, 'Recipient mobile number', 'PH');
                 if (phoneErr) { setError('boxes.0.recipient_phone', phoneErr); isValid = false; }
-            }
-            if (master.recipient_secondary_phone?.trim()) {
-                const secPhoneErr = validatePhone(master.recipient_secondary_phone, 'Recipient secondary phone', 'PH');
-                if (secPhoneErr) { setError('boxes.0.recipient_secondary_phone', secPhoneErr); isValid = false; }
             }
             if (!master.recipient_address?.trim()) { setError('boxes.0.recipient_address', 'Recipient full address is required.'); isValid = false; }
             if (!master.recipient_city?.trim()) { setError('boxes.0.recipient_city', 'Recipient city is required.'); isValid = false; }
@@ -372,6 +431,11 @@ export default function BookingsCreate({
                     if (!box.box_type_id) { setError(`boxes.${i}.box_type_id`, 'Box Type is required.'); isValid = false; }
                 }
             });
+
+            if (data.request_empty_box && (!data.empty_box_count || data.empty_box_count < 1)) {
+                setError('empty_box_count', 'Empty box count must be at least 1.');
+                isValid = false;
+            }
         }
 
         if (!isValid) {
@@ -497,6 +561,7 @@ export default function BookingsCreate({
                 sender_last_name: selected.last_name,
                 sender_email: selected.email,
                 sender_mobile: selected.mobile,
+                sender_secondary_mobile: selected.secondary_mobile || '',
                 sender_address: selected.address,
                 sender_suburb: selected.suburb || '',
                 sender_state: selected.state || '',
@@ -580,8 +645,167 @@ export default function BookingsCreate({
     const boxesSubtotal = boxesBaseSubtotal + doorToDoorTotal;
     const emptyBoxTotal = data.request_empty_box ? (data.empty_box_count || 1) * (data.empty_box_fee || 10) : 0;
     const baseSubtotal = boxesSubtotal + emptyBoxTotal;
-    const afterpaySurcharge = data.payment_method === 'afterpay' ? Math.round(baseSubtotal * 0.063 * 100) / 100 : 0;
-    const totalEstimate = baseSubtotal + afterpaySurcharge;
+    const afterpaySurcharge = data.payment_method === 'afterpay' ? Math.round(Math.max(0, baseSubtotal - discountAmount) * 0.063 * 100) / 100 : 0;
+    const totalEstimate = Math.max(0, baseSubtotal - discountAmount) + afterpaySurcharge;
+
+    const getPromoBadge = (promo: any) => {
+        switch (promo.type) {
+            case 'percentage_discount':
+                return `${Number(promo.value)}% OFF`;
+            case 'fixed_discount':
+                return `$${Number(promo.value).toFixed(0)} OFF`;
+            case 'per_box_discount':
+                return `$${Number(promo.value).toFixed(0)}/Box OFF`;
+            case 'waive_empty_box_fee':
+                return 'FREE BOX FEE';
+            case 'buy_x_get_y_free':
+                return `BUY ${promo.buy_quantity} GET ${promo.free_quantity} FREE`;
+            default:
+                return 'PROMO';
+        }
+    };
+
+    const getPromoLifespan = (promo: any) => {
+        if (!promo.valid_to) {
+            if (promo.valid_from) {
+                return `Since ${format(new Date(promo.valid_from), 'MMM d, yyyy')} • Ongoing`;
+            }
+            return 'Ongoing • No expiry';
+        }
+
+        try {
+            const endDate = new Date(promo.valid_to);
+            const now = new Date();
+            const diffTime = endDate.getTime() - now.getTime();
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+            if (diffDays < 0) {
+                return 'Expired';
+            }
+            if (diffDays === 0) {
+                return 'Ends today';
+            }
+            if (diffDays === 1) {
+                return 'Ends tomorrow';
+            }
+            if (diffDays <= 30) {
+                return `${diffDays} days left (ends ${format(endDate, 'MMM d')})`;
+            }
+            return `Valid until ${format(endDate, 'MMM d, yyyy')}`;
+        } catch (e) {
+            return 'Active';
+        }
+    };
+
+    const getPromoUsageStats = (promo: any) => {
+        const uses = Number(promo.uses_count || 0);
+        if (promo.max_uses) {
+            const max = Number(promo.max_uses);
+            const remaining = Math.max(0, max - uses);
+            return `${uses}/${max} redeemed (${remaining} left)`;
+        }
+        return `${uses} redeemed • Unlimited`;
+    };
+
+    const handleApplyPromo = async (codeToUse?: string) => {
+        const targetCode = (codeToUse !== undefined ? codeToUse : promoCodeInput).trim().toUpperCase();
+        if (!targetCode) {
+            setData('promo_code', '');
+            setDiscountAmount(0);
+            setPromoError('');
+            setPromoSuccessMessage('');
+            setPromoCodeInput('');
+            return;
+        }
+
+        setPromoCodeInput(targetCode);
+        setValidatingPromo(true);
+        setPromoError('');
+        setPromoSuccessMessage('');
+
+        try {
+            const masterRecipient = data.boxes[0] || {};
+            const normalizedBoxes = data.boxes.map(box => ({
+                ...box,
+                recipient_first_name: masterRecipient.recipient_first_name,
+                recipient_last_name: masterRecipient.recipient_last_name,
+                recipient_email: masterRecipient.recipient_email,
+                recipient_address: masterRecipient.recipient_address,
+                recipient_city: masterRecipient.recipient_city,
+                recipient_province: masterRecipient.recipient_province,
+                recipient_zip_code: masterRecipient.recipient_zip_code,
+                recipient_phone: masterRecipient.recipient_phone,
+                recipient_secondary_phone: masterRecipient.recipient_secondary_phone,
+                recipient_landmarks: masterRecipient.recipient_landmarks,
+            }));
+
+            const getXsrfToken = () => {
+                const match = document.cookie.match(new RegExp('(^|;\\s*)(XSRF-TOKEN)=([^;]*)'));
+                return match ? decodeURIComponent(match[3]) : '';
+            };
+
+            const response = await fetch('/api/promotions/validate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-XSRF-TOKEN': getXsrfToken(),
+                },
+                body: JSON.stringify({
+                    code: targetCode,
+                    promo_code: targetCode,
+                    sender_id: data.sender_id || null,
+                    boxes: normalizedBoxes.map((box: any) => ({
+                        ...box,
+                        price: getBoxPrice(box)
+                    })),
+                    subtotal: baseSubtotal,
+                    empty_box_count: data.request_empty_box ? data.empty_box_count : 0,
+                    empty_box_fee: data.empty_box_fee,
+                }),
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.valid) {
+                if (data.promo_code !== targetCode) {
+                    setData('promo_code', targetCode);
+                }
+                setDiscountAmount(result.discount_amount);
+                setPromoSuccessMessage(`Promo applied! Saved $${result.discount_amount.toFixed(2)}`);
+            } else {
+                setData('promo_code', '');
+                setDiscountAmount(0);
+                setPromoError(result.message || 'Invalid promo code');
+            }
+        } catch (error) {
+            console.error('Error validating promo code:', error);
+            setData('promo_code', '');
+            setDiscountAmount(0);
+            setPromoError('Failed to validate promo code. Please try again.');
+        } finally {
+            setValidatingPromo(false);
+        }
+    };
+
+    // Auto-revalidate/calculate discount if promo_code is restored from auto-save or if items change
+    useEffect(() => {
+        if (data.promo_code) {
+            setPromoCodeInput(data.promo_code);
+            handleApplyPromo(data.promo_code);
+        } else if (discountAmount > 0) {
+            setDiscountAmount(0);
+            setPromoSuccessMessage('');
+        }
+    }, [data.promo_code, baseSubtotal]);
+
+    const handleRemovePromo = () => {
+        setData('promo_code', '');
+        setPromoCodeInput('');
+        setDiscountAmount(0);
+        setPromoError('');
+        setPromoSuccessMessage('');
+    };
 
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -603,7 +827,7 @@ export default function BookingsCreate({
             recipient_province: masterRecipient.recipient_province,
             recipient_zip_code: masterRecipient.recipient_zip_code,
             recipient_phone: masterRecipient.recipient_phone,
-            recipient_secondary_phone: masterRecipient.recipient_secondary_phone || '',
+            recipient_secondary_phone: masterRecipient.recipient_secondary_phone,
             recipient_landmarks: masterRecipient.recipient_landmarks,
         }));
 
@@ -613,7 +837,7 @@ export default function BookingsCreate({
             forceFormData: true,
             onSuccess: () => clearSavedData(),
             onError: (errs) => {
-                const hasSenderErrors = Object.keys(errs).some(k => k.startsWith('sender_') || k === 'is_new_sender' || k === 'picker_id' || k === 'preferred_date' || k === 'status');
+                const hasSenderErrors = Object.keys(errs).some(k => k.startsWith('sender_') || k === 'is_new_sender' || k === 'picker_id' || k === 'preferred_date' || k === 'status' || k === 'booking_type' || k === 'pickup_zone_id');
                 const hasBoxErrors = Object.keys(errs).some(k => k.startsWith('boxes') || k.startsWith('empty_box') || k === 'request_empty_box');
 
                 if (hasSenderErrors) {
@@ -627,33 +851,114 @@ export default function BookingsCreate({
         });
     };
 
+    const step1Summary = useMemo(() => {
+        if (data.is_new_sender) {
+            const name = `${data.sender_first_name} ${data.sender_last_name}`.trim();
+            return name ? `${name}${data.preferred_date ? ` • ${data.preferred_date}` : ''}` : 'New Customer';
+        }
+        if (data.sender_id) {
+            const found = senders?.find((s: any) => s.id?.toString() === data.sender_id?.toString());
+            if (found) {
+                return `${found.first_name} ${found.last_name}${data.preferred_date ? ` • ${data.preferred_date}` : ''}`;
+            }
+            return 'Selected Sender';
+        }
+        return undefined;
+    }, [data.is_new_sender, data.sender_first_name, data.sender_last_name, data.sender_id, data.preferred_date, senders]);
+
+    const step2Summary = useMemo(() => {
+        const count = data.boxes.length;
+        const dest = data.boxes[0]?.recipient_city || data.boxes[0]?.recipient_province;
+        if (dest) {
+            return `${count} ${count === 1 ? 'Box' : 'Boxes'} • ${dest}`;
+        }
+        return `${count} ${count === 1 ? 'Box' : 'Boxes'}`;
+    }, [data.boxes]);
+
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Create Booking - Admin" />
 
             <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
-                {/* Header Title with Live Summary Badge */}
-                <div className="flex flex-wrap items-center justify-between gap-4 bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-zinc-200/80 dark:border-zinc-800 shadow-sm">
-                    <div className="flex items-center gap-4">
-                        <Link href="/admin/bookings" className="flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 transition-colors">
-                            <ArrowLeft className="size-5" />
-                        </Link>
-                        <div>
-                            <Heading title="Create Admin Booking" description="Direct manual order creation with single-recipient & add-on management" />
+                {/* Unified Hero Header & Steps Card (Option B) */}
+                <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
+                    {/* Top Row: Title, Description & Action Badges */}
+                    <div className="p-5 sm:p-6 pb-4 sm:pb-5">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                            {/* Left: Back Button & Title */}
+                            <div className="flex items-center gap-3.5">
+                                <Link
+                                    href="/admin/bookings"
+                                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors shadow-2xs"
+                                    title="Back to bookings"
+                                >
+                                    <ArrowLeft className="size-4" />
+                                </Link>
+                                <div>
+                                    <div className="flex items-center gap-2.5 flex-wrap">
+                                        <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                                            Create Admin Booking
+                                        </h1>
+                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-brand-warm/30 dark:bg-brand-rust/30 text-brand-rust dark:text-brand-warm text-[10px] font-extrabold uppercase tracking-wide border border-brand-rust/15">
+                                            Manual Order
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                        Direct manual order creation with single-recipient & add-on management
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Right: Autosave Status, Reset Form & Live Order Summary */}
+                            <div className="flex items-center gap-2.5 self-start lg:self-center flex-wrap">
+                                <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    <span>Auto-saving</span>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (confirm('Reset this booking form and clear all inputs?')) {
+                                            clearSavedData();
+                                            window.location.reload();
+                                        }
+                                    }}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700 transition-colors cursor-pointer"
+                                    title="Reset form"
+                                >
+                                    <RotateCcw className="size-3.5" /> <span>Reset</span>
+                                </button>
+
+                                <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/80 shadow-2xs">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-700 text-brand-rust dark:text-brand-warm shrink-0">
+                                        <Package className="size-4 text-brand-secondary" />
+                                    </div>
+                                    <div className="text-right leading-tight">
+                                        <p className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                                            Current Order Summary
+                                        </p>
+                                        <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">
+                                            <span>{data.boxes.length} {data.boxes.length === 1 ? 'Box' : 'Boxes'}</span>
+                                            <span className="mx-1.5 text-zinc-300 dark:text-zinc-700">•</span>
+                                            <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">${totalEstimate.toFixed(2)}</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-zinc-50 dark:bg-zinc-800/80 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-700/80">
-                        <div className="text-right">
-                            <p className="text-[10px] font-extrabold uppercase tracking-wider text-zinc-400">Current Order Summary</p>
-                            <p className="text-sm font-black text-zinc-900 dark:text-zinc-100">
-                                {data.boxes.length} {data.boxes.length === 1 ? 'Box' : 'Boxes'} • <span className="text-brand-rust">${totalEstimate.toFixed(2)}</span>
-                            </p>
-                        </div>
+                    {/* Integrated Step Indicator Ribbon */}
+                    <div className="border-t border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/50 dark:bg-zinc-900/60 p-2 sm:px-4 sm:py-2.5">
+                        <StepIndicator
+                            step={currentStep}
+                            onStepClick={(s) => setCurrentStep(s)}
+                            step1Summary={step1Summary}
+                            step2Summary={step2Summary}
+                        />
                     </div>
                 </div>
-
-                <StepIndicator step={currentStep} />
 
                 {/* Form Container */}
                 <div className="rounded-2xl border border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm overflow-hidden">
@@ -729,13 +1034,15 @@ export default function BookingsCreate({
                                             <Field label="Last Name" required error={errors.sender_last_name}>
                                                 <Input className={baseInputClass} value={data.sender_last_name} onChange={e => setData('sender_last_name', e.target.value)} />
                                             </Field>
-                                            <Field label="Email Address" required error={errors.sender_email}>
-                                                <Input className={baseInputClass} type="email" value={data.sender_email} onChange={e => setData('sender_email', e.target.value)} />
-                                            </Field>
-                                            <Field label="Contact Phone" required error={errors.sender_mobile}>
+                                            <div className="md:col-span-2">
+                                                <Field label="Email Address" required error={errors.sender_email}>
+                                                    <Input className={baseInputClass} type="email" value={data.sender_email} onChange={e => setData('sender_email', e.target.value)} />
+                                                </Field>
+                                            </div>
+                                            <Field label="Primary Contact Phone" required error={errors.sender_mobile}>
                                                 <PhoneInput value={data.sender_mobile} onChange={val => setData('sender_mobile', val)} defaultCountryCode="AU" />
                                             </Field>
-                                            <Field label="Secondary Phone (Optional)" error={errors.sender_secondary_mobile}>
+                                            <Field label="Secondary Phone Number" hint="Optional" error={errors.sender_secondary_mobile}>
                                                 <PhoneInput value={data.sender_secondary_mobile} onChange={val => setData('sender_secondary_mobile', val)} defaultCountryCode="AU" />
                                             </Field>
                                             <div className="md:col-span-2">
@@ -744,64 +1051,6 @@ export default function BookingsCreate({
                                                 </Field>
                                             </div>
                                         </div>
-                                    )}
-                                </div>
-
-                                {/* Booking Type */}
-                                <div className="space-y-4 pt-6 border-t border-zinc-200 dark:border-zinc-800">
-                                    <SectionCardHeader
-                                        icon={Truck}
-                                        title="Booking & Collection Type"
-                                        subtitle="Select whether this order is a Drop-Off at warehouse/branch or a Home Pick-Up"
-                                    />
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                        {[
-                                            {
-                                                id: 'drop_off',
-                                                title: 'Drop-Off',
-                                                desc: 'Sender drops off box at branch/warehouse',
-                                                icon: BoxIcon,
-                                            },
-                                            {
-                                                id: 'home_pickup',
-                                                title: 'Home Pick-Up',
-                                                desc: 'Courier/Picker collects at sender address',
-                                                icon: Truck,
-                                            },
-                                            {
-                                                id: 'other',
-                                                title: 'Other',
-                                                desc: 'Custom / Other collection arrangement',
-                                                icon: Sparkles,
-                                            },
-                                        ].map((t) => {
-                                            const isSelected = data.booking_type === t.id;
-                                            const IconComp = t.icon;
-                                            return (
-                                                <button
-                                                    key={t.id}
-                                                    type="button"
-                                                    onClick={() => setData('booking_type', t.id)}
-                                                    className={`flex flex-col items-start p-4 rounded-xl border text-left transition-all ${
-                                                        isSelected
-                                                            ? 'border-brand-rust bg-brand-warm/15 dark:bg-brand-rust/20 ring-2 ring-brand-rust/30 shadow-sm'
-                                                            : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 hover:border-zinc-300 dark:hover:border-zinc-700'
-                                                    }`}
-                                                >
-                                                    <div className="flex items-center justify-between w-full mb-2">
-                                                        <div className={`p-2 rounded-lg ${isSelected ? 'bg-brand-rust text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'}`}>
-                                                            <IconComp className="size-4" />
-                                                        </div>
-                                                        {isSelected && <CheckCircle className="size-4 text-brand-rust" />}
-                                                    </div>
-                                                    <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-tight">{t.title}</p>
-                                                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 leading-snug">{t.desc}</p>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                    {errors.booking_type && (
-                                        <p className="text-xs font-semibold text-red-600 mt-1">{errors.booking_type}</p>
                                     )}
                                 </div>
 
@@ -847,10 +1096,17 @@ export default function BookingsCreate({
                                                 <option value="cancelled">Cancelled</option>
                                             </select>
                                         </Field>
+                                        <Field label="Collection Method" required error={errors.booking_type}>
+                                            <select className={baseInputClass} value={data.booking_type} onChange={e => setData('booking_type', e.target.value)}>
+                                                <option value="home_pickup">Home Pickup</option>
+                                                <option value="drop_off">Drop Off (Warehouse)</option>
+                                                <option value="other">Other</option>
+                                            </select>
+                                        </Field>
                                         {data.status === 'collected' && (
-                                            <Field label="Picker Name" required error={errors.picker_id} hint="Assign a picker for reference and serial auto-assignment.">
+                                            <Field label="Picker Name" error={errors.picker_id} hint="Assign a picker for reference and serial auto-assignment.">
                                                 <select className={baseInputClass} value={data.picker_id} onChange={e => setData('picker_id', e.target.value)}>
-                                                    <option value="">Select a picker...</option>
+                                                    <option value="">Select a picker (Optional)...</option>
                                                     {pickers.map((p: any) => (
                                                         <option key={p.id} value={p.id}>{p.name}</option>
                                                     ))}
@@ -913,13 +1169,15 @@ export default function BookingsCreate({
                                         <Field label="Last Name" required error={errors['boxes.0.recipient_last_name']}>
                                             <Input className={baseInputClass} value={data.boxes[0]?.recipient_last_name || ''} onChange={e => updatePrimaryRecipient('recipient_last_name', e.target.value)} />
                                         </Field>
-                                        <Field label="Email Address" error={errors['boxes.0.recipient_email']}>
-                                            <Input className={baseInputClass} type="email" value={data.boxes[0]?.recipient_email || ''} onChange={e => updatePrimaryRecipient('recipient_email', e.target.value)} />
-                                        </Field>
-                                        <Field label="Mobile Number" required error={errors['boxes.0.recipient_phone']}>
+                                        <div className="md:col-span-2">
+                                            <Field label="Email Address" error={errors['boxes.0.recipient_email']}>
+                                                <Input className={baseInputClass} type="email" value={data.boxes[0]?.recipient_email || ''} onChange={e => updatePrimaryRecipient('recipient_email', e.target.value)} />
+                                            </Field>
+                                        </div>
+                                        <Field label="Primary Mobile Number" required error={errors['boxes.0.recipient_phone']}>
                                             <PhoneInput value={data.boxes[0]?.recipient_phone || ''} onChange={val => updatePrimaryRecipient('recipient_phone', val)} defaultCountryCode="PH" />
                                         </Field>
-                                        <Field label="Secondary Phone (Optional)" error={errors['boxes.0.recipient_secondary_phone']}>
+                                        <Field label="Secondary Contact Number" hint="Optional" error={errors['boxes.0.recipient_secondary_phone']}>
                                             <PhoneInput value={data.boxes[0]?.recipient_secondary_phone || ''} onChange={val => updatePrimaryRecipient('recipient_secondary_phone', val)} defaultCountryCode="PH" />
                                         </Field>
                                         <div className="md:col-span-2">
@@ -1171,44 +1429,34 @@ export default function BookingsCreate({
                                 </div>
 
                                 {/* Empty Box Delivery Request */}
-                                <div className="rounded-2xl border border-amber-200/80 bg-amber-50/40 dark:bg-amber-950/20 dark:border-amber-900/50 p-6 space-y-4 shadow-sm">
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="rounded-2xl border border-amber-200/80 bg-amber-50/40 dark:bg-amber-950/20 p-6 space-y-4 shadow-sm">
+                                    <div className="flex flex-wrap items-center justify-between gap-4">
                                         <div className="flex items-center gap-3">
-                                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300">
+                                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-900/60 text-amber-600 dark:text-amber-400 shadow-sm font-black text-sm">
                                                 <Truck className="size-5" />
                                             </div>
                                             <div>
-                                                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">Empty Box Delivery Service</h3>
-                                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Deliver empty boxes to sender before scheduled collection</p>
+                                                <p className="text-[11px] font-extrabold uppercase tracking-wider text-amber-700 dark:text-amber-400">Add-On Service</p>
+                                                <h4 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Empty Box Delivery Service</h4>
                                             </div>
                                         </div>
-                                        <span className="inline-flex items-center rounded-full bg-amber-100/80 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider border border-amber-200/60 dark:border-amber-800/60">
-                                            $10.00 each
-                                        </span>
-                                    </div>
-
-                                    <div className="flex items-start gap-3 p-3.5 rounded-xl border border-amber-200/60 bg-white/70 dark:bg-zinc-900/60 dark:border-amber-900/40">
-                                        <Checkbox
-                                            id="request-empty-box"
-                                            checked={data.request_empty_box}
-                                            onCheckedChange={(checked) => setData('request_empty_box', !!checked)}
-                                            className="mt-0.5"
-                                        />
-                                        <div className="space-y-0.5 flex-1">
-                                            <label htmlFor="request-empty-box" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer block">
-                                                Sender requests empty box delivery
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="request-empty-box"
+                                                checked={data.request_empty_box}
+                                                onCheckedChange={(checked) => setData('request_empty_box', !!checked)}
+                                            />
+                                            <label htmlFor="request-empty-box" className="text-xs font-bold text-zinc-900 dark:text-zinc-100 cursor-pointer">
+                                                Request Delivery <span className="text-amber-600 dark:text-amber-400 font-extrabold">($10.00 each)</span>
                                             </label>
-                                            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 leading-tight">
-                                                Courier will drop off empty boxes to the sender's address prior to collection date.
-                                            </p>
                                         </div>
                                     </div>
 
                                     {data.request_empty_box && (
-                                        <div className="flex items-center justify-between gap-4 pt-3 border-t border-amber-200/60 dark:border-amber-900/40">
+                                        <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-amber-200/60 dark:border-amber-900/40">
                                             <div>
-                                                <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Empty Box Quantity</p>
-                                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Specify number of empty boxes to be delivered</p>
+                                                <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Quantity of Empty Boxes</p>
+                                                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">Boxes delivered to sender address prior to scheduled collection</p>
                                             </div>
                                             <div className="flex items-center gap-2">
                                                 <button
@@ -1223,7 +1471,7 @@ export default function BookingsCreate({
                                                     onClick={() => setData('empty_box_count', data.empty_box_count + 1)}
                                                     className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-bold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
                                                 >+</button>
-                                                <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400 ml-1">(+${(data.empty_box_count * 10).toFixed(2)})</span>
+                                                <span className="text-xs font-extrabold text-amber-700 dark:text-amber-400 ml-2">(+${(data.empty_box_count * 10).toFixed(2)})</span>
                                             </div>
                                         </div>
                                     )}
@@ -1281,6 +1529,227 @@ export default function BookingsCreate({
                                                 <Input type="file" className={baseInputClass + " py-2.5"} onChange={e => setData('declaration_form', e.target.files?.[0] || null)} />
                                             </Field>
                                         </div>
+
+                                        <SectionCardHeader icon={Ticket} title="Promotions & Vouchers" subtitle="Apply voucher codes or select from active campaigns" />
+                                        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 p-5 space-y-4 shadow-sm">
+                                            {/* Manual Code Input Bar */}
+                                            <div>
+                                                <label className="block text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400 mb-2">
+                                                    Voucher Code
+                                                </label>
+                                                <div className="flex gap-2">
+                                                    <div className="relative flex-1">
+                                                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-400">
+                                                            <Tag className="size-4" />
+                                                        </div>
+                                                        <Input
+                                                            type="text"
+                                                            value={promoCodeInput}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value.toUpperCase();
+                                                                setPromoCodeInput(val);
+                                                                if (data.promo_code && val !== data.promo_code) {
+                                                                    setData('promo_code', '');
+                                                                    setDiscountAmount(0);
+                                                                    setPromoSuccessMessage('');
+                                                                }
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') {
+                                                                    e.preventDefault();
+                                                                    handleApplyPromo();
+                                                                }
+                                                            }}
+                                                            placeholder="Enter promo code (e.g. SAVE10)"
+                                                            className="pl-10 h-11 uppercase font-bold tracking-wider placeholder:normal-case placeholder:font-normal bg-white dark:bg-zinc-900"
+                                                            disabled={validatingPromo}
+                                                        />
+                                                    </div>
+                                                    <Button
+                                                        type="button"
+                                                        onClick={() => handleApplyPromo()}
+                                                        disabled={!promoCodeInput.trim() || validatingPromo}
+                                                        className="h-11 px-5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition-all disabled:opacity-50 shrink-0"
+                                                    >
+                                                        {validatingPromo ? (
+                                                            <span className="flex items-center gap-1.5">
+                                                                <Loader2 className="size-4 animate-spin" />
+                                                                Applying...
+                                                            </span>
+                                                        ) : (
+                                                            'Apply'
+                                                        )}
+                                                    </Button>
+                                                </div>
+                                            </div>
+
+                                            {/* Active / Applied Voucher Banner */}
+                                            {data.promo_code && discountAmount > 0 && (
+                                                <div className="flex items-center justify-between rounded-xl bg-emerald-50 dark:bg-emerald-950/30 p-3.5 border border-emerald-200 dark:border-emerald-900/50">
+                                                    <div className="flex items-center gap-2.5">
+                                                        <div className="size-8 rounded-lg bg-emerald-500 text-white flex items-center justify-center font-black">
+                                                            <CheckCircle className="size-4" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-mono font-black text-xs px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
+                                                                    {data.promo_code}
+                                                                </span>
+                                                                <span className="text-xs font-bold text-emerald-900 dark:text-emerald-100">
+                                                                    -${discountAmount.toFixed(2)} OFF
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                                                                {promoSuccessMessage}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleRemovePromo}
+                                                        className="text-xs font-bold text-red-600 hover:text-red-700 dark:text-red-400 p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                                                        title="Remove voucher"
+                                                    >
+                                                        <X className="size-4" />
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {/* Error Message */}
+                                            {promoError && (
+                                                <div className="flex items-start gap-2.5 rounded-xl bg-red-50 dark:bg-red-950/30 p-3.5 border border-red-200 dark:border-red-900/50">
+                                                    <AlertTriangle className="size-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+                                                    <p className="text-xs font-medium text-red-900 dark:text-red-200">{promoError}</p>
+                                                </div>
+                                            )}
+
+                                            {/* Shopee-style Available Vouchers Cards */}
+                                            {activePromotions && activePromotions.length > 0 && (
+                                                <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800 space-y-2.5">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                                                            <Sparkles className="size-3.5 text-amber-500" />
+                                                            Available Vouchers ({activePromotions.length})
+                                                        </span>
+                                                        <span className="text-[11px] text-zinc-400">1-Click Apply</span>
+                                                    </div>
+
+                                                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                                                        {activePromotions.map((promo: any) => {
+                                                            const isApplied = Boolean(data.promo_code && data.promo_code === promo.code && discountAmount > 0);
+                                                            return (
+                                                                <div
+                                                                    key={promo.id || promo.code}
+                                                                    className={cn(
+                                                                        "relative flex items-center justify-between p-3 rounded-xl border transition-all",
+                                                                        isApplied
+                                                                            ? "bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-300 dark:border-emerald-800 shadow-sm"
+                                                                            : "bg-white dark:bg-zinc-900/70 border-zinc-200 dark:border-zinc-800 hover:border-amber-400 dark:hover:border-amber-500 hover:shadow-sm"
+                                                                    )}
+                                                                >
+                                                                    {/* Left: Badge / Discount Tag */}
+                                                                    <div className="flex items-center gap-3 min-w-0">
+                                                                        <div className={cn(
+                                                                            "flex flex-col items-center justify-center px-2.5 py-2 rounded-lg font-black text-center shrink-0 min-w-[76px]",
+                                                                            isApplied
+                                                                                ? "bg-emerald-600 text-white"
+                                                                                : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-800"
+                                                                        )}>
+                                                                            <span className="text-xs uppercase tracking-tight">{getPromoBadge(promo)}</span>
+                                                                        </div>
+
+                                                                        <div className="min-w-0">
+                                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                                <span className="font-mono font-extrabold text-xs text-zinc-900 dark:text-zinc-100 tracking-wide">
+                                                                                    {promo.code}
+                                                                                </span>
+                                                                                {promo.name && (
+                                                                                    <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate max-w-[150px]">
+                                                                                        • {promo.name}
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                            
+                                                                            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 flex-wrap">
+                                                                                {promo.min_spend > 0 && (
+                                                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-[10px] font-medium">
+                                                                                        Min. ${Number(promo.min_spend).toFixed(0)}
+                                                                                    </span>
+                                                                                )}
+                                                                                {promo.min_box_count > 1 && (
+                                                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-[10px] font-medium">
+                                                                                        Min. {promo.min_box_count} Boxes
+                                                                                    </span>
+                                                                                )}
+                                                                                {promo.max_discount && (
+                                                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-[10px] font-medium">
+                                                                                        Max -${Number(promo.max_discount).toFixed(0)}
+                                                                                    </span>
+                                                                                )}
+                                                                                {promo.first_time_sender_only && (
+                                                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-300 text-[10px] font-medium">
+                                                                                        1st Order
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+
+                                                                            {/* Strategy & Lifespan Meta */}
+                                                                            <div className="flex items-center gap-1.5 text-[10px] mt-1.5 flex-wrap">
+                                                                                <span className={cn(
+                                                                                    "inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold",
+                                                                                    promo.valid_to
+                                                                                        ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-900/40"
+                                                                                        : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                                                                                )}>
+                                                                                    <Clock className="size-3 shrink-0" />
+                                                                                    {getPromoLifespan(promo)}
+                                                                                </span>
+
+                                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-semibold bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-200/60 dark:border-indigo-900/40">
+                                                                                    <Users className="size-3 shrink-0" />
+                                                                                    {getPromoUsageStats(promo)}
+                                                                                </span>
+
+                                                                                {promo.max_uses_per_user && (
+                                                                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[10px]">
+                                                                                        {promo.max_uses_per_user}x / sender
+                                                                                    </span>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {/* Right: 1-click Action Button */}
+                                                                    <div className="shrink-0 ml-3">
+                                                                        {isApplied ? (
+                                                                            <Button
+                                                                                type="button"
+                                                                                size="sm"
+                                                                                variant="outline"
+                                                                                onClick={handleRemovePromo}
+                                                                                className="h-8 px-3 text-xs font-bold text-red-600 border-red-200 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+                                                                            >
+                                                                                Remove
+                                                                            </Button>
+                                                                        ) : (
+                                                                            <Button
+                                                                                type="button"
+                                                                                size="sm"
+                                                                                onClick={() => handleApplyPromo(promo.code)}
+                                                                                disabled={validatingPromo}
+                                                                                className="h-8 px-3.5 text-xs font-bold rounded-lg bg-amber-600 hover:bg-amber-700 text-white shadow-sm transition-all"
+                                                                            >
+                                                                                Use
+                                                                            </Button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
 
                                     <div className="space-y-8">
@@ -1325,6 +1794,15 @@ export default function BookingsCreate({
                                                             Empty Box Delivery ({data.empty_box_count} @ $10.00)
                                                         </span>
                                                         <span className="font-semibold text-amber-700 dark:text-amber-400">+${(data.empty_box_count * 10).toFixed(2)}</span>
+                                                    </div>
+                                                )}
+                                                {discountAmount > 0 && (
+                                                    <div className="flex justify-between items-center text-zinc-700 dark:text-zinc-300 mt-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                                                        <span className="flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-400">
+                                                            <Sparkles className="size-3.5" />
+                                                            Promo Discount ({data.promo_code})
+                                                        </span>
+                                                        <span className="font-black text-emerald-700 dark:text-emerald-400">-${discountAmount.toFixed(2)}</span>
                                                     </div>
                                                 )}
                                                 {data.payment_method === 'afterpay' && (

@@ -12,6 +12,9 @@ import {
     MapPin,
     Truck,
     Inbox,
+    Plus,
+    FileText,
+    CreditCard,
 } from 'lucide-react';
 import React from 'react';
 import { QuickActions } from '@/components/admin/quick-actions';
@@ -34,6 +37,9 @@ interface DashboardStats {
     pendingCollections: number;
     batchesInTransit: number;
     totalSenders: number;
+    missingDeclarations?: number;
+    outstandingPayments?: number;
+    outstandingBalance?: string | null;
 }
 
 interface RecentBooking {
@@ -92,7 +98,13 @@ function AdminDashboard() {
                     description="Your central command for monitoring box logistics and terminal activity."
                 />
 
-                <div className="flex gap-4">
+                <div className="flex flex-wrap items-center gap-3">
+                    <Link
+                        href="/admin/bookings/create"
+                        className="btn-primary flex items-center gap-2 shadow-md"
+                    >
+                        <Plus className="size-4" /> New Booking
+                    </Link>
                     <Link
                         href="/admin/bookings"
                         className="btn-outline flex items-center gap-2"
@@ -101,15 +113,15 @@ function AdminDashboard() {
                     </Link>
                     <Link
                         href="/track"
-                        className="btn-primary flex items-center gap-2 shadow-md"
+                        className="btn-outline flex items-center gap-2"
                     >
                         <Package className="size-4" /> Track a Box
                     </Link>
                 </div>
             </div>
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {/* Quick Stats - Compact 6-card row */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
                 <StatCard
                     title="Active Boxes"
                     value={stats.activeBoxes.toLocaleString()}
@@ -119,9 +131,9 @@ function AdminDashboard() {
                     href="/admin/boxes"
                 />
                 <StatCard
-                    title="Pending Collections"
+                    title="Pending Pickups"
                     value={stats.pendingCollections.toLocaleString()}
-                    trend="Needs runsheet assignment"
+                    trend="Needs runsheet"
                     icon={Clock}
                     trendUp={false}
                     href="/admin/bookings?status=pending"
@@ -137,10 +149,32 @@ function AdminDashboard() {
                 <StatCard
                     title="Total Senders"
                     value={stats.totalSenders.toLocaleString()}
-                    trend="Registered senders"
+                    trend="Registered"
                     icon={Users}
                     trendUp={stats.totalSenders > 0}
                     href="/admin/senders"
+                />
+                <StatCard
+                    title="Missing Declarations"
+                    value={(stats.missingDeclarations ?? 0).toLocaleString()}
+                    trend={(stats.missingDeclarations ?? 0) > 0 ? 'Forms required' : 'All submitted'}
+                    icon={FileText}
+                    trendUp={(stats.missingDeclarations ?? 0) === 0}
+                    href="/admin/bookings?declaration_form_status=missing"
+                />
+                <StatCard
+                    title="Outstanding Payments"
+                    value={(stats.outstandingPayments ?? 0).toLocaleString()}
+                    trend={
+                        stats.outstandingBalance
+                            ? `${stats.outstandingBalance} due`
+                            : (stats.outstandingPayments ?? 0) > 0
+                              ? 'Awaiting payment'
+                              : 'All settled'
+                    }
+                    icon={CreditCard}
+                    trendUp={(stats.outstandingPayments ?? 0) === 0}
+                    href="/admin/bookings?payment_status=unpaid"
                 />
             </div>
 
@@ -369,51 +403,42 @@ function StatCard({
     trend,
     icon: Icon,
     trendUp,
-    alert = false,
     href,
 }: any) {
     const cardContent = (
-        <>
-            {/* Background decoration */}
-            <div
-                className={`absolute -top-8 -right-8 h-24 w-24 rounded-full ${alert ? 'bg-brand-primary/5 dark:bg-brand-primary/10' : 'bg-brand-warm/10 dark:bg-brand-warm/20'} z-0 transition-transform duration-500 group-hover:scale-110`}
-            ></div>
-
-            <div className="relative z-10 mb-3 flex items-start justify-between">
-                <div
-                    className={`rounded-xl p-2 transition-transform duration-300 group-hover:scale-110 ${alert ? 'bg-brand-primary/10 text-brand-primary' : 'bg-brand-rust/10 text-brand-rust'}`}
-                >
-                    <Icon className="size-4" />
-                </div>
-            </div>
-            <div className="relative z-10">
-                <h3 className="mb-1 text-xs font-medium text-brand-text-mid transition-colors group-hover:text-brand-rust">
+        <div className="relative z-10 flex flex-col justify-between h-full">
+            {/* Top row: Title and Icon */}
+            <div className="flex items-center justify-between gap-1.5 mb-1">
+                <h3 className="text-xs font-semibold text-brand-text-mid transition-colors group-hover:text-brand-rust truncate">
                     {title}
                 </h3>
-                <p className="mb-1 text-2xl font-bold tracking-tight text-brand-text">
-                    {value}
-                </p>
-                <div className="flex items-center gap-2">
-                    {trendUp ? (
-                        <TrendingUp
-                            className={`size-3.5 ${alert ? 'text-brand-primary' : 'text-emerald-500'}`}
-                        />
-                    ) : (
-                        <TrendingUp
-                            className={`size-3.5 scale-x-[-1] rotate-180 ${alert ? 'text-brand-primary' : 'text-brand-text-mid'}`}
-                        />
-                    )}
-                    <span
-                        className={`text-xs font-semibold ${alert ? 'text-brand-primary' : 'text-brand-text-mid'}`}
-                    >
-                        {trend}
-                    </span>
+                <div className="rounded-lg p-1.5 shrink-0 bg-brand-rust/10 text-brand-rust transition-transform duration-200 group-hover:scale-105">
+                    <Icon className="size-3.5" />
                 </div>
             </div>
-        </>
+
+            {/* Middle: Value */}
+            <div className="mb-1">
+                <p className="text-xl font-bold tracking-tight text-brand-text truncate">
+                    {value}
+                </p>
+            </div>
+
+            {/* Bottom row: Trend / Subtext */}
+            <div className="flex items-center gap-1.5 text-[11px] font-medium text-brand-text-mid truncate">
+                <TrendingUp
+                    className={`size-3 shrink-0 ${
+                        trendUp ? 'text-emerald-500' : 'text-brand-text-mid scale-x-[-1] rotate-180'
+                    }`}
+                />
+                <span className="truncate text-brand-text-mid">
+                    {trend}
+                </span>
+            </div>
+        </div>
     );
 
-    const classes = `card relative w-full overflow-hidden p-4 group cursor-pointer transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:border-brand-rust/30 ${alert ? 'border-brand-primary/50' : 'border-border'}`;
+    const classes = 'card relative w-full overflow-hidden p-3.5 border-border group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-brand-rust/40';
 
     if (href) {
         return (

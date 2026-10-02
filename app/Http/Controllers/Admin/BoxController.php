@@ -2,6 +2,14 @@
 
 namespace App\Http\Controllers\Admin;
 
+use Maatwebsite\Excel\Facades\Excel;
+
+use App\Services\AuditLogService;
+
+use App\Imports\BoxesImport;
+
+use App\Exports\BoxesExport;
+
 use App\Enums\BatchStatus;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
@@ -577,7 +585,15 @@ class BoxController extends Controller
 
         if ($request->filled('payment_status')) {
             $query->whereHas('booking', function ($bq) use ($request) {
-                $bq->where('payment_status', $request->payment_status);
+                if ($request->payment_status === 'paid') {
+                    $bq->whereIn('payment_status', ['paid', 'cash_collected']);
+                } elseif ($request->payment_status === 'unpaid') {
+                    $bq->whereIn('payment_status', ['pending', 'cash_on_pickup']);
+                } elseif ($request->payment_status === 'partial') {
+                    $bq->whereIn('payment_status', ['partially_paid', 'balance_pending']);
+                } else {
+                    $bq->where('payment_status', $request->payment_status);
+                }
             });
         }
 
@@ -632,4 +648,61 @@ class BoxController extends Controller
 
         return $matchingStep ? (int) $matchingStep['order'] : null;
     }
+
+
+
+    public function exportExcel(Request $request)
+    {
+        $query = Box::with(['booking.sender', 'recipient', 'boxType', 'batch']);
+
+        if ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $query->whereIn('id', array_filter($ids));
+        } else {
+            $query = $this->applyFilters($query, $request);
+        }
+
+        $boxes = $query->get();
+
+        app(AuditLogService::class)->logExportEvent('excel', 'Boxes list exported as Excel (.xlsx)', [
+            'count' => $boxes->count(),
+        ]);
+
+        return Excel::download(new BoxesExport($boxes), 'boxes_export_'.now()->format('Ymd_His').'.xlsx');
+    }
+
+
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new BoxesExport(null, true), 'boxes_import_template.xlsx');
+    }
+
+
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new BoxesImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
+    }
+
 }

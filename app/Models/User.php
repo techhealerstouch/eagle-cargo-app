@@ -15,11 +15,12 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Notifications\Notification;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Sanctum\HasApiTokens;
+use App\Concerns\LogsActivity;
 use Illuminate\Support\Str;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
-    use HasApiTokens, HasFactory, Notifiable, SoftDeletes, TwoFactorAuthenticatable;
+    use HasApiTokens, HasFactory, LogsActivity, Notifiable, SoftDeletes, TwoFactorAuthenticatable;
 
     protected $fillable = [
         'custom_id',
@@ -42,6 +43,36 @@ class User extends Authenticatable implements MustVerifyEmail
         'remember_token',
     ];
 
+        public static function generateCustomId($role = null): string
+    {
+        $prefix = 'LBA';
+
+        $roleEnum = $role instanceof Role
+            ? $role
+            : (is_string($role) ? Role::tryFrom($role) : null);
+
+        if ($roleEnum) {
+            $prefix = match ($roleEnum) {
+                Role::Developer => 'DV',
+                Role::SuperAdmin => 'SA',
+                Role::Admin => 'AD',
+                Role::Courier => 'CR',
+                Role::Picker => 'PK',
+                Role::Warehouse => 'WH',
+                Role::Sender => 'SD',
+                Role::Recipient => 'RC',
+                default => 'LBA',
+            };
+        }
+
+        do {
+            $customId = $prefix.'-'.strtoupper(Str::random(6));
+            $exists = static::where('custom_id', $customId)->exists();
+        } while ($exists);
+
+        return $customId;
+    }
+
     protected static function booted(): void
     {
         static::creating(function (User $user) {
@@ -54,6 +85,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
                 if ($roleEnum) {
                     $prefix = match ($roleEnum) {
+                        Role::Developer => 'DV',
                         Role::SuperAdmin => 'SA',
                         Role::Admin => 'AD',
                         Role::Courier => 'CR',
@@ -91,7 +123,8 @@ class User extends Authenticatable implements MustVerifyEmail
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',
-            'role' => Role::class, // Adjust depending on if Role Enum is castable directly
+            'role' => Role::class,
+            'is_held' => 'boolean', // Adjust depending on if Role Enum is castable directly
             'commission_type' => CommissionType::class,
             'commission_rates' => 'array',
             'ewallet_details' => 'array',

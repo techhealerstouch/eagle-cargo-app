@@ -30,7 +30,29 @@ enum TrackingPhase: string
      */
     public function label(): string
     {
-        return __('statuses.tracking_phase.'.$this->value);
+        $key = 'statuses.tracking_phase.'.$this->value;
+        $trans = __($key);
+        if ($trans !== $key) {
+            return $trans;
+        }
+
+        return match ($this) {
+            self::PICKED_UP => 'Picked Up',
+            self::RECEIVED_BY_WAREHOUSE => 'Received by Warehouse',
+            self::ARRIVED_AT_WAREHOUSE => 'Arrived at Warehouse',
+            self::PROCESSING => 'Processing',
+            self::LOADING_CONTAINER => 'Loading in Container',
+            self::DEPARTED_FROM_ORIGIN => 'Departed from Origin Port',
+            self::IN_TRANSIT_SEA => 'In Transit (Sea)',
+            self::ARRIVED_MANILA_PORT => 'Arrived at Manila Port',
+            self::CUSTOMS_CLEARANCE => 'Under Customs Clearance',
+            self::RELEASED_BY_BOC => 'Released by BOC',
+            self::RECEIVED_MANILA_WAREHOUSE => 'Received at Manila Warehouse',
+            self::SORTING => 'Sorting',
+            self::DISPATCHED_TO_LOCAL_HUB => 'Dispatched to Local Hub',
+            self::OUT_FOR_DELIVERY => 'Out for Delivery',
+            self::DELIVERED => 'Delivered',
+        };
     }
 
     /**

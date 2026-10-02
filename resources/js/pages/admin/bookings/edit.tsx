@@ -5,6 +5,7 @@ import {
     Package,
     User,
     MapPin,
+    Calendar,
     ShieldCheck,
     Info,
     FileCheck,
@@ -15,11 +16,11 @@ import {
     X,
     Truck,
     Sparkles,
-    ClipboardList,
-    AlertTriangle,
-    Printer,
     ExternalLink,
+    Eye,
+    FileUp,
     Banknote,
+    AlertCircle,
     CheckCircle2,
 } from 'lucide-react';
 import Heading from '@/components/common/heading';
@@ -48,6 +49,7 @@ interface Booking {
     payment_method: string | null;
     declaration_form_status: string;
     declaration_form_path?: string | null;
+    declaration_data?: any | null;
     notes: string;
     admin_notes: string;
     reference_number: string;
@@ -69,58 +71,6 @@ const BOOKING_TYPE_CONFIG: Record<string, { label: string; badgeClass: string }>
     other: {
         label: 'Other',
         badgeClass: 'bg-purple-50 text-purple-700 border-purple-200/80',
-    },
-};
-
-const DECLARATION_STATUS_CONFIG: Record<
-    string,
-    {
-        label: string;
-        badgeClass: string;
-        icon: React.ComponentType<{ className?: string }>;
-        panelBg: string;
-        panelBorder: string;
-        panelTitle: string;
-        panelDescription: string;
-        panelTitleColor: string;
-        panelDescColor: string;
-    }
-> = {
-    missing: {
-        label: 'Missing / Awaiting',
-        badgeClass: 'bg-amber-100 text-amber-800 border-amber-200',
-        icon: AlertTriangle,
-        panelBg: 'bg-amber-50/80',
-        panelBorder: 'border-amber-200',
-        panelTitle: 'Declaration Form Required',
-        panelDescription:
-            'The sender has not submitted a digital customs declaration yet. A completed customs declaration is mandatory for customs clearance and container loading in the Philippines.',
-        panelTitleColor: 'text-amber-900',
-        panelDescColor: 'text-amber-800/90',
-    },
-    submitted_online: {
-        label: 'Submitted Online',
-        badgeClass: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-        icon: FileCheck,
-        panelBg: 'bg-indigo-50/80',
-        panelBorder: 'border-indigo-200',
-        panelTitle: 'Digital Declaration Available',
-        panelDescription:
-            'The sender completed and submitted their customs declaration online. You can view, review, and print the generated digital declaration document below.',
-        panelTitleColor: 'text-indigo-950',
-        panelDescColor: 'text-indigo-800/90',
-    },
-    physical_copy_received: {
-        label: 'Physical Copy Received',
-        badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-        icon: CheckCircle2,
-        panelBg: 'bg-emerald-50/80',
-        panelBorder: 'border-emerald-200',
-        panelTitle: 'Physical Copy Verified',
-        panelDescription:
-            'A physical paper copy of the customs declaration has been received and verified by warehouse or collection staff.',
-        panelTitleColor: 'text-emerald-950',
-        panelDescColor: 'text-emerald-800/90',
     },
 };
 
@@ -146,9 +96,9 @@ export default function BookingsEdit({
         }
     }
 
-    const { return_url } = usePage<any>().props;
+    const { auth, tracking_steps, admin_return_url } = usePage<any>().props;
 
-    const { data, setData, post, processing, errors, transform } = useForm({
+    const { data, setData, post, processing, errors } = useForm({
         _method: 'put',
         sender_id: booking.sender_id.toString(),
         pickup_zone_id: booking.pickup_zone_id ? booking.pickup_zone_id.toString() : '',
@@ -165,23 +115,19 @@ export default function BookingsEdit({
         declaration_form: null as File | null,
         notes: booking.notes || '',
         admin_notes: booking.admin_notes || '',
-        empty_box_count: booking.empty_box_count ?? 0,
-        empty_box_fee: booking.empty_box_fee ?? 10.00,
+        empty_box_count: booking.empty_box_count || 0,
+        empty_box_fee: booking.empty_box_fee || 0,
     });
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
-        { title: 'Bookings', href: return_url || '/admin/bookings' },
+        { title: 'Bookings', href: admin_return_url || '/admin/bookings' },
         { title: booking.reference_number, href: `/admin/bookings/${booking.id}` },
         { title: 'Edit', href: '#' },
     ];
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        transform((data) => ({
-            ...data,
-            ...(return_url ? { return_to: return_url } : {}),
-        }));
         post(`/admin/bookings/${booking.id}`, {
             forceFormData: true,
         });
@@ -193,15 +139,10 @@ export default function BookingsEdit({
         badgeClass: 'bg-zinc-50 text-zinc-700 border-zinc-200/80',
     };
 
-    const currentDeclarationConfig =
-        DECLARATION_STATUS_CONFIG[data.declaration_form_status] ||
-        DECLARATION_STATUS_CONFIG.missing;
-    const DeclarationStatusIcon = currentDeclarationConfig.icon;
-
     const isCashPayment = ['cash', 'cash_on_pickup'].includes(data.payment_method || '');
     const isOnlinePayment = ['stripe', 'afterpay', 'square'].includes(data.payment_method || '');
-    const isPaid = data.payment_status === 'paid';
-    const isTransitioningToPaid = isPaid && booking.payment_status !== 'paid';
+    const wasPaid = String(booking.payment_status).toLowerCase() === 'paid';
+    const isTransitioningToPaid = !wasPaid && String(data.payment_status).toLowerCase() === 'paid';
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -211,7 +152,7 @@ export default function BookingsEdit({
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-border pb-6">
                     <div className="flex items-center gap-4">
                         <Link
-                            href={return_url || `/admin/bookings/${booking.id}`}
+                            href={admin_return_url || `/admin/bookings/${booking.id}`}
                             className="mt-1 rounded-lg p-2.5 bg-card border border-border text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground shadow-xs"
                             title="Return to Booking"
                         >
@@ -221,7 +162,7 @@ export default function BookingsEdit({
                             <Heading
                                 eyebrow="Admin Booking"
                                 title="Edit Booking"
-                                description="Update booking details, collection type, payment verification, and customs declaration."
+                                description="Update booking details, collection type, and status."
                             />
                             <div className="flex flex-wrap items-center gap-2 mt-3">
                                 <span className="rounded-md bg-muted px-3 py-1 font-mono text-xs font-semibold text-foreground border border-border flex items-center gap-1.5">
@@ -256,17 +197,16 @@ export default function BookingsEdit({
                 <div className="card border border-border shadow-xs rounded-xl bg-white overflow-hidden">
                     <div className="bg-muted/30 px-6 py-4 border-b border-border flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            <div className="h-5 w-1 bg-brand-rust rounded-full"></div>
+                            <div className="h-5 w-1 bg-zinc-900 dark:bg-zinc-100 rounded-full"></div>
                             <h2 className="text-base font-semibold text-foreground">Booking Details</h2>
                         </div>
                         <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-md border border-border shadow-2xs">
-                            <ShieldCheck className="size-3.5 text-brand-rust" />
+                            <ShieldCheck className="size-3.5 text-zinc-700" />
                             <span className="text-[11px] font-medium text-muted-foreground">Admin Edit</span>
                         </div>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-8">
-                        {/* General Details 2-Column Grid */}
+                    <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
                         <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                             {/* Sender */}
                             <div className="space-y-2">
@@ -404,7 +344,7 @@ export default function BookingsEdit({
                             {/* Recipient */}
                             <div className="space-y-2">
                                 <Label htmlFor="recipient_name" className="text-xs font-medium text-foreground">
-                                    Recipient Name <span className="text-red-500">*</span>
+                                    Recipient Name
                                 </Label>
                                 <Input
                                     id="recipient_name"
@@ -443,17 +383,19 @@ export default function BookingsEdit({
                             </div>
 
                             {/* Preferred Date */}
-                            <div className="space-y-2">
+                            <div className="space-y-2 md:col-span-2">
                                 <Label htmlFor="preferred_date" className="text-xs font-medium text-foreground">
                                     Preferred Pickup Date
                                 </Label>
-                                <Input
-                                    id="preferred_date"
-                                    type="date"
-                                    className="h-10 rounded-lg border-input bg-white px-3 font-medium text-sm focus:ring-1 focus:ring-ring transition-all"
-                                    value={data.preferred_date}
-                                    onChange={(e) => setData('preferred_date', e.target.value)}
-                                />
+                                <div className="relative max-w-md">
+                                    <Input
+                                        id="preferred_date"
+                                        type="date"
+                                        className="h-10 rounded-lg border-input bg-white px-3 font-medium text-sm focus:ring-1 focus:ring-ring transition-all"
+                                        value={data.preferred_date}
+                                        onChange={(e) => setData('preferred_date', e.target.value)}
+                                    />
+                                </div>
                                 {errors.preferred_date && (
                                     <p className="text-xs text-red-500">
                                         {errors.preferred_date}
@@ -462,46 +404,43 @@ export default function BookingsEdit({
                             </div>
                         </div>
 
-                        {/* Dedicated Card 1: Payment Verification (Positioned above Customs Declaration) */}
-                        <div className="rounded-xl p-6 border shadow-2xs relative overflow-hidden transition-all duration-300 space-y-5 bg-emerald-50/40 border-emerald-200/80">
-                            <div className="flex items-center justify-between border-b pb-4 border-emerald-200/70">
+                        {/* Payment Verification Section */}
+                        <div className="rounded-lg bg-emerald-50/50 p-5 border border-emerald-200 shadow-2xs relative overflow-hidden transition-all duration-300">
+                            <div className="flex items-center justify-between border-b border-emerald-200/70 pb-4 mb-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="size-8 rounded-md text-white flex items-center justify-center shadow-2xs shrink-0 bg-emerald-600">
+                                    <div className="size-8 rounded-md bg-emerald-600 text-white flex items-center justify-center shadow-2xs shrink-0">
                                         <FileCheck className="size-4" />
                                     </div>
                                     <div>
                                         <h3 className="text-sm font-semibold text-emerald-950">
-                                            Payment Details & Verification
+                                            Payment Verification
                                         </h3>
-                                        <p className="text-xs mt-0.5 text-emerald-800/80">
-                                            Provide payment details and upload proof of payment. Marking as Paid will verify payment.
+                                        <p className="text-xs text-emerald-800/80 mt-0.5">
+                                            Marking booking as Paid will verify payment and reflect directly in the Payments table.
                                         </p>
                                     </div>
                                 </div>
-                                {isPaid && (
-                                    <span className="text-[11px] font-medium bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded border border-emerald-200">
-                                        Mandatory
-                                    </span>
-                                )}
+                                <span className="text-[11px] font-medium bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded border border-emerald-200">
+                                    Mandatory
+                                </span>
                             </div>
 
                             <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                                {/* Payment Method */}
                                 <div className="space-y-2">
-                                    <Label htmlFor="payment_method_verify" className="text-xs font-medium text-emerald-950">
-                                        Payment Method {isPaid && <span className="text-red-500">*</span>}
+                                    <Label htmlFor="payment_method" className="text-xs font-medium text-emerald-950">
+                                        Payment Method <span className="text-red-500">*</span>
                                     </Label>
                                     <div className="relative">
                                         <CreditCard className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-700/60" />
                                         <select
-                                            id="payment_method_verify"
-                                            title="Payment Method Verification"
-                                            className="flex h-10 w-full rounded-lg border bg-white pl-10 pr-4 text-sm font-medium text-zinc-900 focus:ring-1 transition-all cursor-pointer border-emerald-200 focus:ring-emerald-500 focus:border-emerald-500"
+                                            id="payment_method"
+                                            aria-label="Payment Method"
+                                            className="flex h-10 w-full rounded-lg border border-emerald-200 bg-white pl-10 pr-4 text-sm font-medium text-zinc-900 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 transition-all cursor-pointer"
                                             value={data.payment_method}
                                             onChange={(e) => setData('payment_method', e.target.value)}
                                         >
-                                            <option value="bank_transfer">Bank Transfer</option>
                                             <option value="cash">Cash</option>
+                                            <option value="bank_transfer">Bank Transfer</option>
                                             <option value="pay_id">Pay ID</option>
                                             <option value="stripe">Stripe</option>
                                             <option value="afterpay">Afterpay (+6.3%)</option>
@@ -515,20 +454,19 @@ export default function BookingsEdit({
                                     )}
                                 </div>
 
-                                {/* Reference / Transaction Number */}
                                 <div className="space-y-2">
-                                    <Label htmlFor="payment_reference" className="text-xs font-medium flex items-center gap-1 text-emerald-950">
-                                        Reference / Transaction No. {isTransitioningToPaid && !isCashPayment ? <span className="text-red-500">*</span> : <span className="text-xs font-normal text-emerald-700/80">(optional)</span>}
+                                    <Label htmlFor="payment_reference" className="text-xs font-medium text-emerald-950 flex items-center gap-1">
+                                        Reference / Transaction No. {isCashPayment ? <span className="text-xs text-emerald-700/80 font-normal">(optional for cash)</span> : (isTransitioningToPaid ? <span className="text-red-500">*</span> : <span className="text-xs text-emerald-700/80 font-normal">(optional)</span>)}
                                     </Label>
                                     <div className="relative">
                                         <Banknote className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-emerald-700/60" />
                                         <Input
                                             id="payment_reference"
                                             type="text"
-                                            className="h-10 rounded-lg bg-white pl-10 pr-3 text-sm font-medium text-zinc-900 focus:ring-1 transition-all font-mono border-emerald-200 focus:ring-emerald-500 focus:border-emerald-500"
+                                            className="h-10 rounded-lg border-emerald-200 bg-white pl-10 pr-3 text-sm font-medium text-zinc-900 focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 transition-all font-mono"
                                             value={data.payment_reference}
                                             onChange={(e) => setData('payment_reference', e.target.value)}
-                                            placeholder={isCashPayment ? "Optional note or receipt # for cash" : "e.g. TRN-9827346 or Bank Receipt #"}
+                                            placeholder={isCashPayment ? "CASH" : "e.g. TRN-9827346 or Bank Receipt #"}
                                         />
                                     </div>
                                     {errors.payment_reference && (
@@ -536,43 +474,31 @@ export default function BookingsEdit({
                                     )}
                                 </div>
 
-                                {/* Proof of Payment Dropzone */}
                                 <div className="space-y-2 md:col-span-2">
-                                    <div className="flex items-center justify-between">
-                                        <Label htmlFor="proof_of_payment" className="text-xs font-medium text-emerald-950">
-                                            Proof of Payment (Image or PDF){' '}
-                                            {booking.proof_of_payment ? (
-                                                <span className="text-xs font-normal text-emerald-700/80">(file on file — upload to replace)</span>
-                                            ) : isCashPayment ? (
-                                                <span className="text-xs font-normal text-emerald-700/80">(optional for cash)</span>
-                                            ) : isOnlinePayment ? (
-                                                <span className="text-xs font-normal text-emerald-700/80">(optional for online)</span>
-                                            ) : isTransitioningToPaid ? (
-                                                <span className="text-red-500">*</span>
-                                            ) : (
-                                                <span className="text-xs text-emerald-700/80 font-normal">(optional)</span>
-                                            )}
-                                        </Label>
-                                        {booking.proof_of_payment && (
-                                            <a
-                                                href={`/storage/${booking.proof_of_payment}`}
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="inline-flex items-center gap-1 text-[11px] font-medium hover:underline text-emerald-700 hover:text-emerald-900"
-                                            >
-                                                <ExternalLink className="size-3" />
-                                                View Current Proof
-                                            </a>
+                                    <Label htmlFor="proof_of_payment" className="text-xs font-medium text-emerald-950 flex items-center gap-1">
+                                        Proof of Payment (Image or PDF){' '}
+                                        {isCashPayment || isOnlinePayment ? (
+                                            <span className="text-xs text-emerald-700/80 font-normal">(optional)</span>
+                                        ) : booking.proof_of_payment ? (
+                                            <span className="text-xs text-emerald-700/80 font-normal">(file already on file - upload to replace)</span>
+                                        ) : isTransitioningToPaid ? (
+                                            <span className="text-red-500">*</span>
+                                        ) : (
+                                            <span className="text-xs text-emerald-700/80 font-normal">(optional)</span>
                                         )}
-                                    </div>
-                                    <div className="relative border border-dashed rounded-lg p-4 bg-white/90 hover:bg-white transition-all text-center group cursor-pointer border-emerald-300">
-                                        <Upload className="size-6 mx-auto mb-1.5 transition-colors text-emerald-500 group-hover:text-emerald-700" />
+                                    </Label>
+                                    <div className="relative border border-dashed border-emerald-300 rounded-lg p-4 bg-white/90 hover:bg-white transition-all text-center group cursor-pointer">
+                                        <Upload className="size-6 text-emerald-500 mx-auto mb-1.5 group-hover:text-emerald-700 transition-colors" />
                                         <div className="text-xs font-medium text-zinc-900 mb-0.5">
-                                            {data.proof_of_payment
-                                                ? data.proof_of_payment.name
-                                                : booking.proof_of_payment
-                                                ? 'An existing proof is attached. Click to upload replacement.'
-                                                : 'Click to select or drag proof of payment document'}
+                                            {data.proof_of_payment ? (
+                                                data.proof_of_payment.name
+                                            ) : booking.proof_of_payment ? (
+                                                'An existing proof is attached. Click to upload replacement.'
+                                            ) : (isCashPayment || isOnlinePayment) ? (
+                                                'Optional: click to select or drag receipt document'
+                                            ) : (
+                                                'Click to select or drag proof of payment document'
+                                            )}
                                         </div>
                                         <p className="text-[11px] text-muted-foreground">Supports JPG, PNG, or PDF (Max 5MB)</p>
                                         <input
@@ -584,7 +510,7 @@ export default function BookingsEdit({
                                             title="Upload proof of payment"
                                         />
                                         {data.proof_of_payment && (
-                                            <div className="mt-2.5 flex items-center justify-center gap-2 text-xs font-medium py-1 px-2.5 rounded border w-fit mx-auto text-emerald-800 bg-emerald-50 border-emerald-200">
+                                            <div className="mt-2.5 flex items-center justify-center gap-2 text-xs font-medium text-emerald-800 bg-emerald-50 py-1 px-2.5 rounded border border-emerald-200 w-fit mx-auto">
                                                 <FileText className="size-3.5 shrink-0" />
                                                 <span className="truncate max-w-xs">{data.proof_of_payment.name}</span>
                                                 <button
@@ -593,11 +519,26 @@ export default function BookingsEdit({
                                                         e.stopPropagation();
                                                         setData('proof_of_payment', null);
                                                     }}
-                                                    className="ml-1.5 transition-colors text-emerald-600 hover:text-red-600"
+                                                    className="ml-1.5 text-emerald-600 hover:text-red-600 transition-colors"
                                                     title="Remove file"
                                                 >
                                                     <X className="size-3.5" />
                                                 </button>
+                                            </div>
+                                        )}
+                                        {booking.proof_of_payment && !data.proof_of_payment && (
+                                            <div className="mt-2 flex items-center justify-center">
+                                                <a
+                                                    href={`/uploads/${booking.proof_of_payment}`}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-emerald-800 bg-emerald-100/70 hover:bg-emerald-100 rounded-md border border-emerald-200 transition-colors"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    <FileText className="size-3 text-emerald-700" />
+                                                    View Existing Attached Proof
+                                                    <ExternalLink className="size-2.5 text-emerald-600" />
+                                                </a>
                                             </div>
                                         )}
                                     </div>
@@ -608,157 +549,242 @@ export default function BookingsEdit({
                             </div>
                         </div>
 
-                        {/* Dedicated Card 2: Customs Declaration (Dedicated Blue Card) */}
-                        <div className="rounded-xl bg-blue-50/40 p-6 border border-blue-200/80 shadow-2xs relative overflow-hidden transition-all duration-300 space-y-5">
-                            {/* Header with Dynamic Badge */}
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-blue-200/70 gap-3">
+                        {/* Customs Declaration Form Section */}
+                        <div className="rounded-lg bg-blue-50/40 p-5 border border-blue-200/80 shadow-2xs relative overflow-hidden transition-all duration-300">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-blue-200/70 pb-4 mb-4 gap-3">
                                 <div className="flex items-center gap-3">
                                     <div className="size-8 rounded-md bg-blue-600 text-white flex items-center justify-center shadow-2xs shrink-0">
-                                        <ClipboardList className="size-4" />
+                                        <FileUp className="size-4" />
                                     </div>
                                     <div>
                                         <h3 className="text-sm font-semibold text-blue-950">
                                             Customs Declaration
                                         </h3>
                                         <p className="text-xs text-blue-800/80 mt-0.5">
-                                            Track, print, and upload the sender's customs declaration documentation.
+                                            Manage declaration status and upload scanned or digital declaration forms.
                                         </p>
                                     </div>
                                 </div>
-                                <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded border flex items-center gap-1.5 w-fit ${currentDeclarationConfig.badgeClass}`}>
-                                    <DeclarationStatusIcon className="size-3" />
-                                    {currentDeclarationConfig.label}
+                                <span className={`text-[11px] font-medium px-2.5 py-0.5 rounded border w-fit ${
+                                    data.declaration_form_status === 'submitted_online'
+                                        ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
+                                        : data.declaration_form_status === 'physical_copy_received'
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                                        : 'bg-amber-100 text-amber-800 border-amber-200'
+                                }`}>
+                                    {data.declaration_form_status === 'submitted_online'
+                                        ? 'Submitted Online'
+                                        : data.declaration_form_status === 'physical_copy_received'
+                                        ? 'Physical Copy Received'
+                                        : 'Missing / Awaiting'}
                                 </span>
                             </div>
 
-                            {/* Status Selector */}
-                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 items-start">
-                                <div className="space-y-2">
-                                    <Label htmlFor="declaration_form_status" className="text-xs font-medium text-blue-950">
-                                        Declaration Form Status <span className="text-red-500">*</span>
-                                    </Label>
-                                    <select
-                                        id="declaration_form_status"
-                                        aria-label="Declaration Form Status"
-                                        className="flex h-10 w-full rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-zinc-900 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all cursor-pointer"
-                                        value={data.declaration_form_status}
-                                        onChange={(e) => setData('declaration_form_status', e.target.value)}
-                                    >
-                                        <option value="missing">Missing / Awaiting</option>
-                                        <option value="submitted_online">Submitted Online</option>
-                                        <option value="physical_copy_received">Physical Copy Received</option>
-                                    </select>
-                                    {errors.declaration_form_status && (
-                                        <p className="text-xs text-red-500">{errors.declaration_form_status}</p>
-                                    )}
-                                </div>
+                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                {/* Declaration Status */}
+                                <div className="space-y-3">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="declaration_form_status" className="text-xs font-medium text-blue-950">
+                                            Declaration Status <span className="text-red-500">*</span>
+                                        </Label>
+                                        <select
+                                            id="declaration_form_status"
+                                            aria-label="Declaration Status"
+                                            className="flex h-10 w-full rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-zinc-900 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-all cursor-pointer"
+                                            value={data.declaration_form_status}
+                                            onChange={(e) => setData('declaration_form_status', e.target.value)}
+                                        >
+                                            <option value="missing">Missing / Awaiting Submission</option>
+                                            <option value="submitted_online">Submitted Online</option>
+                                            <option value="physical_copy_received">Physical Copy Received</option>
+                                        </select>
+                                        {errors.declaration_form_status && (
+                                            <p className="text-xs text-red-600">{errors.declaration_form_status}</p>
+                                        )}
+                                    </div>
 
-                                {/* Quick Action Buttons */}
-                                <div className="space-y-2">
-                                    <Label className="text-xs font-medium text-blue-950">
-                                        Declaration Actions
-                                    </Label>
-                                    <div className="flex flex-wrap items-center gap-2">
+                                    {/* Status Information Box */}
+                                    {data.declaration_form_status === 'missing' ? (
+                                        <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-900 space-y-1">
+                                            <div className="flex items-center gap-1.5 font-semibold text-amber-800">
+                                                <AlertCircle className="size-4 shrink-0 text-amber-600" />
+                                                <span>Missing Declaration Form</span>
+                                            </div>
+                                            <p className="text-[11px] text-amber-700 leading-relaxed">
+                                                No customs declaration has been submitted yet. A completed form is required before container loading.
+                                            </p>
+                                        </div>
+                                    ) : data.declaration_form_status === 'submitted_online' ? (
+                                        <div className="rounded-lg border border-indigo-200 bg-indigo-50/80 p-3 text-xs text-indigo-950 space-y-1">
+                                            <div className="flex items-center gap-1.5 font-semibold text-indigo-800">
+                                                <CheckCircle2 className="size-4 shrink-0 text-indigo-600" />
+                                                <span>Digital Form Submitted Online</span>
+                                            </div>
+                                            <p className="text-[11px] text-indigo-800/80 leading-relaxed">
+                                                The sender has submitted the digital customs declaration form online and it is ready for review.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 p-3 text-xs text-emerald-950 space-y-1">
+                                            <div className="flex items-center gap-1.5 font-semibold text-emerald-800">
+                                                <CheckCircle2 className="size-4 shrink-0 text-emerald-600" />
+                                                <span>Physical Copy Received</span>
+                                            </div>
+                                            <p className="text-[11px] text-emerald-800/80 leading-relaxed">
+                                                A physical paper copy of the customs declaration was received and verified.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Existing Declaration Actions */}
+                                    <div className="pt-1 flex flex-wrap gap-2">
                                         <a
                                             href={`/admin/bookings/${booking.id}/declaration`}
                                             target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-300 bg-white text-xs font-medium text-blue-900 hover:bg-blue-50 shadow-2xs transition-all"
+                                            rel="noreferrer"
+                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-zinc-200 hover:bg-zinc-50 text-zinc-700 text-xs font-medium rounded-lg shadow-2xs transition-colors"
                                         >
-                                            <Printer className="size-3.5 text-blue-700" />
+                                            <Eye className="size-3.5 text-zinc-500" />
                                             View / Print Digital Form
+                                            <ExternalLink className="size-3 text-zinc-400" />
                                         </a>
-
                                         {booking.declaration_form_path && (
                                             <a
                                                 href={`/admin/bookings/${booking.id}/declaration-file`}
                                                 target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-blue-300 bg-white text-xs font-medium text-blue-900 hover:bg-blue-50 shadow-2xs transition-all"
+                                                rel="noreferrer"
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 hover:bg-blue-50 text-blue-700 text-xs font-medium rounded-lg shadow-2xs transition-colors"
                                             >
-                                                <ExternalLink className="size-3.5 text-blue-700" />
+                                                <FileText className="size-3.5 text-blue-600" />
                                                 View Attached File
+                                                <ExternalLink className="size-3 text-blue-400" />
                                             </a>
                                         )}
                                     </div>
                                 </div>
-                            </div>
 
-                            {/* Dynamic Informational Status Panel */}
-                            <div className={`p-4 rounded-lg border flex items-start gap-3 transition-all duration-200 ${currentDeclarationConfig.panelBg} ${currentDeclarationConfig.panelBorder}`}>
-                                <DeclarationStatusIcon className={`size-5 mt-0.5 shrink-0 ${currentDeclarationConfig.panelTitleColor}`} />
-                                <div className="space-y-1">
-                                    <h4 className={`text-xs font-semibold ${currentDeclarationConfig.panelTitleColor}`}>
-                                        {currentDeclarationConfig.panelTitle}
-                                    </h4>
-                                    <p className={`text-xs leading-relaxed ${currentDeclarationConfig.panelDescColor}`}>
-                                        {currentDeclarationConfig.panelDescription}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Upload Area for Scanned Declaration Documents */}
-                            <div className="space-y-2 pt-2 border-t border-blue-200/50">
-                                <div className="flex items-center justify-between">
+                                {/* Declaration Upload */}
+                                <div className="space-y-2">
                                     <Label htmlFor="declaration_form" className="text-xs font-medium text-blue-950">
-                                        Upload Scanned Document{' '}
-                                        {booking.declaration_form_path ? (
-                                            <span className="text-xs text-blue-800/80 font-normal">(file on file — upload to replace)</span>
-                                        ) : (
-                                            <span className="text-xs text-blue-800/80 font-normal">(optional — upload on sender's behalf)</span>
-                                        )}
+                                        Upload Declaration Document (Image or PDF)
                                     </Label>
-                                    {booking.declaration_form_path && (
-                                        <a
-                                            href={`/admin/bookings/${booking.id}/declaration-file`}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:text-blue-900 hover:underline"
-                                        >
-                                            <ExternalLink className="size-3" />
-                                            View Scanned File
-                                        </a>
-                                    )}
-                                </div>
-                                <div className="relative border border-dashed border-blue-300 rounded-lg p-4 bg-white/90 hover:bg-white transition-all text-center group cursor-pointer">
-                                    <Upload className="size-6 text-blue-500 mx-auto mb-1.5 group-hover:text-blue-700 transition-colors" />
-                                    <div className="text-xs font-medium text-zinc-900 mb-0.5">
-                                        {data.declaration_form
-                                            ? data.declaration_form.name
-                                            : booking.declaration_form_path
-                                            ? 'An existing form is attached. Click to upload replacement.'
-                                            : 'Click to select or drag declaration form document'}
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground">Supports JPG, PNG, or PDF (Max 10MB)</p>
-                                    <input
-                                        id="declaration_form"
-                                        type="file"
-                                        accept="image/*,.pdf"
-                                        onChange={(e) => setData('declaration_form', e.target.files ? e.target.files[0] : null)}
-                                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                        title="Upload declaration form"
-                                    />
-                                    {data.declaration_form && (
-                                        <div className="mt-2.5 flex items-center justify-center gap-2 text-xs font-medium text-blue-800 bg-blue-50 py-1 px-2.5 rounded border border-blue-200 w-fit mx-auto">
-                                            <FileText className="size-3.5 shrink-0" />
-                                            <span className="truncate max-w-xs">{data.declaration_form.name}</span>
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setData('declaration_form', null);
-                                                }}
-                                                className="ml-1.5 text-blue-600 hover:text-red-600 transition-colors"
-                                                title="Remove file"
-                                            >
-                                                <X className="size-3.5" />
-                                            </button>
+                                    <div className="relative border border-dashed border-blue-300 rounded-lg p-4 bg-white/90 hover:bg-white transition-all text-center group cursor-pointer min-h-[110px] flex flex-col justify-center items-center">
+                                        <Upload className="size-6 text-blue-500 mx-auto mb-1.5 group-hover:text-blue-700 transition-colors" />
+                                        <div className="text-xs font-medium text-zinc-900 mb-0.5">
+                                            {data.declaration_form ? (
+                                                data.declaration_form.name
+                                            ) : booking.declaration_form_path ? (
+                                                'An existing declaration document is attached. Click to upload replacement.'
+                                            ) : (
+                                                'Click to select or drag declaration form document'
+                                            )}
                                         </div>
+                                        <p className="text-[11px] text-muted-foreground">Supports JPG, PNG, or PDF (Max 10MB)</p>
+                                        <input
+                                            id="declaration_form"
+                                            type="file"
+                                            accept="image/*,.pdf"
+                                            onChange={(e) => {
+                                                const file = e.target.files ? e.target.files[0] : null;
+                                                setData('declaration_form', file);
+                                                if (file && data.declaration_form_status === 'missing') {
+                                                    setData('declaration_form_status', 'submitted_online');
+                                                }
+                                            }}
+                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            title="Upload declaration form"
+                                        />
+                                        {data.declaration_form && (
+                                            <div className="mt-2.5 flex items-center justify-center gap-2 text-xs font-medium text-blue-800 bg-blue-50 py-1 px-2.5 rounded border border-blue-200 w-fit mx-auto">
+                                                <FileText className="size-3.5 shrink-0" />
+                                                <span className="truncate max-w-xs">{data.declaration_form.name}</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setData('declaration_form', null);
+                                                    }}
+                                                    className="ml-1.5 text-blue-600 hover:text-red-600 transition-colors"
+                                                    title="Remove file"
+                                                >
+                                                    <X className="size-3.5" />
+                                                </button>
+                                            </div>
+                                        )}
+                                        {booking.declaration_form_path && !data.declaration_form && (
+                                            <div className="mt-2 flex items-center justify-center">
+                                                <a
+                                                    href={`/admin/bookings/${booking.id}/declaration-file`}
+                                                    target="_blank"
+                                                    rel="noreferrer"
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-blue-800 bg-blue-100/70 hover:bg-blue-100 rounded-md border border-blue-200 transition-colors"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                >
+                                                    <FileText className="size-3 text-blue-700" />
+                                                    View Existing Attached Document
+                                                    <ExternalLink className="size-2.5 text-blue-600" />
+                                                </a>
+                                            </div>
+                                        )}
+                                    </div>
+                                    {errors.declaration_form && (
+                                        <p className="text-xs text-red-600">{errors.declaration_form}</p>
                                     )}
                                 </div>
-                                {errors.declaration_form && (
-                                    <p className="text-xs text-red-600">{errors.declaration_form}</p>
-                                )}
+                            </div>
+                        </div>
+
+                        {/* Empty Box Configuration */}
+                        <div className="rounded-lg bg-orange-50/40 p-5 border border-orange-200/80 shadow-2xs relative overflow-hidden transition-all duration-300">
+                            <div className="flex items-center justify-between border-b border-orange-200/70 pb-4 mb-4">
+                                <div className="flex items-center gap-3">
+                                    <div className="size-8 rounded-md bg-orange-500 text-white flex items-center justify-center shadow-2xs shrink-0">
+                                        <Package className="size-4" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-sm font-semibold text-orange-950">
+                                            Empty Box Configuration
+                                        </h3>
+                                        <p className="text-xs text-orange-800/80 mt-0.5">
+                                            Configure empty boxes associated with this booking. Updating these values will recalculate the invoice.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                                <div className="space-y-2">
+                                    <Label htmlFor="empty_box_count" className="text-xs font-medium text-orange-950">
+                                        Empty Box Count
+                                    </Label>
+                                    <Input
+                                        id="empty_box_count"
+                                        type="number"
+                                        min="0"
+                                        className="h-10 rounded-lg border-orange-200 bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-orange-500 transition-all"
+                                        value={data.empty_box_count}
+                                        onChange={(e) => setData('empty_box_count', parseInt(e.target.value) || 0)}
+                                    />
+                                    {errors.empty_box_count && (
+                                        <p className="text-xs text-red-600">{errors.empty_box_count}</p>
+                                    )}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="empty_box_fee" className="text-xs font-medium text-orange-950">
+                                        Empty Box Fee
+                                    </Label>
+                                    <Input
+                                        id="empty_box_fee"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className="h-10 rounded-lg border-orange-200 bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-orange-500 transition-all"
+                                        value={data.empty_box_fee}
+                                        onChange={(e) => setData('empty_box_fee', parseFloat(e.target.value) || 0)}
+                                    />
+                                    {errors.empty_box_fee && (
+                                        <p className="text-xs text-red-600">{errors.empty_box_fee}</p>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -799,57 +825,9 @@ export default function BookingsEdit({
                             </div>
                         </div>
 
-                        {/* Empty Box Configuration */}
-                        <div className="p-5 bg-muted/20 rounded-xl border border-border space-y-4">
-                            <div className="flex items-center gap-2">
-                                <Package className="size-4 text-muted-foreground" />
-                                <h3 className="text-xs font-semibold text-foreground">Empty Box Configuration</h3>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                <div className="space-y-2">
-                                    <Label htmlFor="empty_box_count" className="text-xs font-medium text-foreground">
-                                        Empty Box Count
-                                    </Label>
-                                    <Input
-                                        id="empty_box_count"
-                                        type="number"
-                                        min="0"
-                                        className="h-10 rounded-lg border-input bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-ring transition-all"
-                                        value={data.empty_box_count}
-                                        onChange={(e) => setData('empty_box_count', parseInt(e.target.value) || 0)}
-                                    />
-                                    {errors.empty_box_count && (
-                                        <p className="text-xs text-red-500">
-                                            {errors.empty_box_count}
-                                        </p>
-                                    )}
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="empty_box_fee" className="text-xs font-medium text-foreground">
-                                        Empty Box Fee ($)
-                                    </Label>
-                                    <Input
-                                        id="empty_box_fee"
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        className="h-10 rounded-lg border-input bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-ring transition-all"
-                                        value={data.empty_box_fee}
-                                        onChange={(e) => setData('empty_box_fee', parseFloat(e.target.value) || 0)}
-                                    />
-                                    {errors.empty_box_fee && (
-                                        <p className="text-xs text-red-500">
-                                            {errors.empty_box_fee}
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Form Submission Actions */}
                         <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
                             <Link
-                                href={return_url || `/admin/bookings/${booking.id}`}
+                                href={admin_return_url || `/admin/bookings/${booking.id}`}
                                 className="px-4 h-10 flex items-center justify-center rounded-lg border border-input text-xs font-medium hover:bg-muted transition-all active:scale-95 text-muted-foreground hover:text-foreground"
                             >
                                 Cancel
@@ -858,10 +836,10 @@ export default function BookingsEdit({
                                 type="submit"
                                 disabled={processing}
                                 variant="success"
-                                className="px-6 h-10 rounded-lg text-xs font-medium shadow-xs flex items-center gap-2 disabled:opacity-50"
+                                className="px-6 h-10 rounded-lg text-xs font-bold uppercase tracking-wider shadow-xs flex items-center gap-2 disabled:opacity-50"
                             >
                                 <Save className="size-4" />
-                                {processing ? 'Saving...' : 'Save Changes'}
+                                {processing ? 'SAVING...' : 'SAVE CHANGES'}
                             </Button>
                         </div>
                     </form>

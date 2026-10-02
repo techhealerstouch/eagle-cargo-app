@@ -1,16 +1,91 @@
-import React from 'react';
 import { MapPin, Clock, CheckCircle2, Ship } from 'lucide-react';
-import { formatDate } from '@/lib/logistics-utils';
-import { cn, humanize } from '@/lib/utils';
+import React from 'react';
 import { getFriendlyStepDescription } from '@/lib/logistics-theme';
+import { formatDate } from '@/lib/logistics-utils';
+import { cn } from '@/lib/utils';
 import type { TrackingTimelineItem, NormalizedStep } from '@/types/logistics';
-import { classifyStepState, shouldHideEventDateTime, type TimelineStepState } from './TrackingTimeline.helpers';
 
 interface TrackingTimelineProps {
     timeline: TrackingTimelineItem[];
     steps: NormalizedStep[];
     currentIndex: number;
-    currentStatus?: string | null;
+    currentStatus?: string;
+}
+
+export type TimelineStepState = 'completed' | 'completed_current' | 'in_progress' | 'delivered' | 'next' | 'upcoming';
+
+const FALLBACK_ONGOING_KEYS = new Set([
+    'in_transit',
+    'out_for_delivery',
+    'under_customs_clearance',
+    'en_route_roro',
+]);
+
+function isOngoingPhase(step: NormalizedStep, currentStatus?: string): boolean {
+    if (step.stepType) {
+        return step.stepType === 'ongoing';
+    }
+
+    const stepKey = (step.statusKey || '').toLowerCase();
+    const status = (currentStatus || '').toLowerCase();
+
+    return FALLBACK_ONGOING_KEYS.has(stepKey) ||
+            (FALLBACK_ONGOING_KEYS.has(status) && stepKey === status);
+}
+
+export function classifyTimelineStep(
+    originalIndex: number,
+    currentIndex: number,
+    step: NormalizedStep,
+    currentStatus?: string,
+): TimelineStepState {
+    if (currentIndex < 0) {
+        return originalIndex === 0 ? 'next' : 'upcoming';
+    }
+
+    if (originalIndex < currentIndex) {
+        return 'completed';
+    }
+
+    if (originalIndex > currentIndex) {
+        return originalIndex === currentIndex + 1 ? 'next' : 'upcoming';
+    }
+
+    const status = (currentStatus || '').toLowerCase().replace(/_/g, ' ');
+    const stepKey = step.statusKey.toLowerCase().replace(/_/g, ' ');
+
+    // Safety check: If the box has not yet been picked up by a driver,
+    // Picked Up from Sender must never be marked as completed!
+    const isPrePickup = [
+        'pending',
+        'draft',
+        'confirmed',
+        'awaiting pickup',
+        'awaiting_pickup',
+        'statuses.box.pending',
+        'statuses.booking.pending',
+        'statuses.booking.confirmed',
+    ].includes(status) || status.includes('pending') || status.includes('confirmed') || status.includes('draft');
+
+    if (isPrePickup && (stepKey === 'picked up' || step.systemStatus === 'collected' || step.statusKey === 'picked_up')) {
+        return 'next';
+    }
+
+    if (status === 'delivered' || stepKey === 'delivered' || step.systemStatus?.toLowerCase() === 'delivered') {
+        return 'delivered';
+    }
+
+    // Pending / pre-pickup milestone: if current milestone is pending, it is currently in progress / active, NEVER completed!
+    if (
+        step.systemStatus === 'pending' ||
+        stepKey === 'pending' ||
+        status === 'pending' ||
+        status.includes('pending')
+    ) {
+        return 'in_progress';
+    }
+
+    return isOngoingPhase(step, currentStatus) ? 'in_progress' : 'completed_current';
 }
 
 /**
@@ -18,26 +93,66 @@ interface TrackingTimelineProps {
  * Returns the index of the best matching step, or -1 if no match.
  */
 function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]): number {
-    const eventStatus = (event.status_label || event.status || '').toLowerCase().replace(/_/g, ' ');
-    const eventPhase = (event.tracking_phase || '').toLowerCase().replace(/_/g, ' ');
+    const eventStatus = (event.status_label || event.status || '').toLowerCase().replace(/_/g, ' ').trim();
+    const eventPhase = (event.tracking_phase || '').toLowerCase().replace(/_/g, ' ').trim();
+    const rawStatus = (event.status || '').toLowerCase().trim();
+    const desc = (event.description || '').toLowerCase();
 
+    // 1. Direct system_status / statusKey match
     for (let i = 0; i < steps.length; i++) {
-        const stepKey = steps[i].statusKey.toLowerCase().replace(/_/g, ' ');
-        const stepLabel = steps[i].label.toLowerCase();
-        const stepSystem = (steps[i].systemStatus || '').toLowerCase().replace(/_/g, ' ');
+        const step = steps[i];
+        const stepSystem = (step.systemStatus || '').toLowerCase().trim();
+        const stepKey = (step.statusKey || '').toLowerCase().trim();
 
-        // Direct key/label match
+        if (stepSystem && (rawStatus === stepSystem || eventStatus === stepSystem)) {
+            return i;
+        }
+        if (stepKey && (rawStatus === stepKey || eventStatus === stepKey)) {
+            return i;
+        }
+    }
+
+    // 2. Admin confirmation event
+    if (desc.includes('booking accepted') || desc.includes('booking confirmed') || desc.includes('confirmed by admin') || rawStatus === 'confirmed') {
+        const confirmedStepIdx = steps.findIndex((s) =>
+            s.systemStatus === 'confirmed' ||
+            s.statusKey?.toLowerCase() === 'booking_confirmed' ||
+            s.label.toLowerCase().includes('confirmed')
+        );
+
+        if (confirmedStepIdx !== -1) {
+            return confirmedStepIdx;
+        }
+    }
+
+    // 3. Booking registration / creation event (placed by customer)
+    if (desc.includes('booking created') || desc.includes('box registered') || desc.includes('booking received') || desc.includes('booking submitted') || desc.includes('booking placed') || rawStatus === 'pending') {
+        const placedStepIdx = steps.findIndex((s) =>
+            s.systemStatus === 'pending' ||
+            ['booking_placed', 'booking_created', 'manifested', 'pending'].includes(s.statusKey?.toLowerCase()) ||
+            s.label.toLowerCase().includes('placed') ||
+            s.label.toLowerCase().includes('submitted') ||
+            s.label.toLowerCase().includes('pending')
+        );
+
+        if (placedStepIdx !== -1) {
+            return placedStepIdx;
+        }
+    }
+
+    // 4. Fallback search by label or tracking_phase
+    for (let i = 0; i < steps.length; i++) {
+        const stepKey = steps[i].statusKey.toLowerCase().replace(/_/g, ' ').trim();
+        const stepLabel = steps[i].label.toLowerCase().trim();
+        const stepSystem = (steps[i].systemStatus || '').toLowerCase().replace(/_/g, ' ').trim();
+
         if (
-            eventStatus === stepKey ||
-            eventStatus === stepLabel ||
-            eventStatus === stepSystem ||
-            eventPhase === stepKey ||
-            eventPhase === stepSystem
+            (eventStatus && (eventStatus === stepKey || eventStatus === stepLabel || eventStatus === stepSystem)) ||
+            (eventPhase && (eventPhase === stepKey || eventPhase === stepSystem || eventPhase === stepLabel))
         ) {
             return i;
         }
 
-        // Partial match (status contains step key or vice versa)
         if (
             (eventStatus && stepKey && (eventStatus.includes(stepKey) || stepKey.includes(eventStatus))) ||
             (eventStatus && stepLabel && (eventStatus.includes(stepLabel) || stepLabel.includes(eventStatus)))
@@ -56,6 +171,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
 
     (timeline || []).forEach((event) => {
         const matchIdx = matchEventToStep(event, steps);
+
         if (matchIdx >= 0) {
             const existing = stepEvents.get(matchIdx) || [];
             existing.push(event);
@@ -69,6 +185,9 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
     stepEvents.forEach((events) => {
         events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     });
+
+    const isBoxPending = (currentStatus || '').toLowerCase().includes('pending') ||
+        (currentStatus || '').toLowerCase().includes('draft');
 
     return (
         <div className="card space-y-0 overflow-hidden">
@@ -92,40 +211,39 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                 <div className="relative pl-6 md:pl-8 space-y-0">
                     {/* Full vertical background line */}
                     <div
-                        className="absolute left-[0.45rem] md:left-[0.6rem] top-3 bottom-3 w-0.5 bg-zinc-100 dark:bg-zinc-800"
+                        className="absolute left-2.75 top-3 bottom-3 w-0.5 bg-zinc-100 dark:bg-zinc-800"
                         aria-hidden="true"
                     />
 
-                    {steps.map((step, originalIndex) => ({ step, originalIndex })).reverse().map(({ step, originalIndex }, displayIdx) => {
-                        const state: TimelineStepState = classifyStepState({
-                            stepIndex: originalIndex,
-                            currentIndex,
-                            step,
-                            currentStatus,
-                            totalSteps: steps.length,
-                        });
+                    {steps.map((step, originalIndex) => ({ step, originalIndex })).reverse().map(({ step, originalIndex }) => {
+                        const state = classifyTimelineStep(originalIndex, currentIndex, step, currentStatus);
+                        const isStepPendingOrConfirm = step.systemStatus === 'pending' ||
+                            step.statusKey === 'pending' ||
+                            step.systemStatus === 'confirmed' ||
+                            step.statusKey === 'booking_confirmed' ||
+                            step.label.toLowerCase().includes('confirmed');
 
-                        const isCompleted = state === 'completed';
-                        const isCompletedCurrent = state === 'completed_current';
-                        const isInProgress = state === 'in_progress';
-                        const isDelivered = state === 'delivered';
-                        const isNext = state === 'next';
-                        const isUpcoming = state === 'upcoming';
-                        const isFuture = isNext || isUpcoming;
-                        const isCurrentActive = isCompletedCurrent || isInProgress || isDelivered;
+                        const isAwaitingAdmin = isBoxPending && (
+                            (state === 'in_progress' && (step.systemStatus === 'pending' || step.statusKey === 'pending')) ||
+                            (state === 'next' && isStepPendingOrConfirm)
+                        );
 
+                        const isCompleted = ['completed', 'completed_current', 'delivered'].includes(state);
+                        const isCurrent = ['completed_current', 'in_progress', 'delivered'].includes(state);
+                        const isFuture = ['next', 'upcoming'].includes(state);
+                        const isOngoing = state === 'in_progress';
                         const events = stepEvents.get(originalIndex) || [];
                         const StepIcon = step.icon;
 
                         // Green line overlay connecting current & completed steps downward
-                        const hasGreenLineDown = currentIndex >= 0 && originalIndex <= currentIndex && originalIndex > 0;
+                        const hasGreenLineDown = originalIndex <= currentIndex && originalIndex > 0 && !isBoxPending;
 
                         return (
                             <div key={originalIndex} className="relative pb-8 last:pb-0">
                                 {/* Completed segment line overlay going down */}
                                 {hasGreenLineDown && (
                                     <div
-                                        className="absolute left-[-1.05rem] md:left-[-1.4rem] top-3 h-full w-0.5 bg-emerald-500/40 z-[5]"
+                                        className="absolute -left-3.25 md:-left-5.25 top-3 h-full w-0.5 bg-emerald-500/40 z-5"
                                         aria-hidden="true"
                                     />
                                 )}
@@ -133,17 +251,19 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                 {/* Node Icon */}
                                 <div className={cn(
                                     "absolute -left-6 md:-left-8 size-6 rounded-xl border-2 border-white dark:border-zinc-900 shadow-sm flex items-center justify-center z-10 transition-all duration-500",
-                                    isInProgress && "bg-zinc-900 dark:bg-zinc-100 ring-4 ring-zinc-900/10 dark:ring-zinc-100/20 scale-110",
-                                    (isCompleted || isCompletedCurrent || isDelivered) && "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
-                                    isCompletedCurrent && "ring-4 ring-emerald-500/10 dark:ring-emerald-400/20 scale-105",
-                                    isFuture && "bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700",
+                                    isAwaitingAdmin && "bg-amber-50 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 ring-4 ring-amber-400/20 scale-105",
+                                    state === 'in_progress' && !isAwaitingAdmin && "bg-zinc-900 dark:bg-zinc-100 ring-4 ring-zinc-900/10 dark:ring-zinc-100/20 scale-110",
+                                    isCompleted && "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
+                                    isFuture && !isAwaitingAdmin && "bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700",
                                 )}>
-                                    {(isCompleted || isCompletedCurrent || isDelivered) ? (
+                                    {isCompleted ? (
                                         <CheckCircle2 className="size-3.5 text-emerald-500" />
-                                    ) : isInProgress ? (
+                                    ) : isAwaitingAdmin ? (
+                                        <Clock className="size-3 text-amber-500 animate-pulse" />
+                                    ) : isOngoing ? (
                                         <div className="size-2 rounded-full bg-emerald-400 animate-pulse" />
                                     ) : (
-                                        <StepIcon className={cn("size-3", isNext ? "text-zinc-400 dark:text-zinc-500" : "text-zinc-300 dark:text-zinc-600")} />
+                                        <StepIcon className="size-3 text-zinc-300 dark:text-zinc-600" />
                                     )}
                                 </div>
 
@@ -153,48 +273,40 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                     <div className="flex items-center flex-wrap gap-2">
                                         <h5 className={cn(
                                             "text-xs font-black uppercase tracking-tight",
-                                            isCurrentActive && "text-zinc-900 dark:text-zinc-100",
+                                            isCurrent && "text-zinc-900 dark:text-zinc-100",
                                             isCompleted && "text-zinc-700 dark:text-zinc-300",
-                                            isNext && "text-zinc-500 dark:text-zinc-400",
-                                            isUpcoming && "text-zinc-300 dark:text-zinc-600",
+                                            isFuture && "text-zinc-300 dark:text-zinc-600",
                                         )}>
                                             {step.label}
                                         </h5>
 
-                                        {isDelivered && (
-                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50">
-                                                <CheckCircle2 className="size-2.5 text-emerald-500" />
-                                                Delivered
+                                        {isAwaitingAdmin ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200/50 dark:border-amber-800/50">
+                                                <span className="size-1 rounded-full bg-amber-500 animate-pulse" />
+                                                Awaiting Admin Confirmation
                                             </span>
-                                        )}
-
-                                        {isCompletedCurrent && (
-                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50">
-                                                <CheckCircle2 className="size-2.5 text-emerald-500" />
-                                                Completed
-                                            </span>
-                                        )}
-
-                                        {isInProgress && (
+                                        ) : state === 'in_progress' ? (
                                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/50">
                                                 <span className="size-1 rounded-full bg-emerald-500 animate-pulse" />
                                                 In Progress
                                             </span>
-                                        )}
-
-                                        {isCompleted && (
+                                        ) : state === 'completed' ? (
                                             <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-500">
                                                 ✓ Done
                                             </span>
-                                        )}
-
-                                        {isNext && (
-                                            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+                                        ) : state === 'completed_current' ? (
+                                            <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-500">
+                                                ✓ Completed
+                                            </span>
+                                        ) : state === 'delivered' ? (
+                                            <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-500">
+                                                ✓ Delivered
+                                            </span>
+                                        ) : state === 'next' ? (
+                                            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
                                                 Next Up
                                             </span>
-                                        )}
-
-                                        {isUpcoming && (
+                                        ) : (
                                             <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-300 dark:text-zinc-600">
                                                 Upcoming
                                             </span>
@@ -211,14 +323,13 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                     step.statusKey,
                                                     step.description
                                                 );
-                                                const hideDateTime = shouldHideEventDateTime(description, event);
 
                                                 return (
                                                     <div
                                                         key={eIdx}
                                                         className={cn(
                                                             "p-3.5 md:p-4 rounded-xl border transition-all duration-300 space-y-1.5",
-                                                            isCurrentActive
+                                                            isCurrent
                                                                 ? "bg-zinc-50/80 dark:bg-zinc-900/80 border-zinc-200 dark:border-zinc-800 shadow-sm"
                                                                 : "bg-white dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800/60"
                                                         )}
@@ -226,15 +337,13 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                         <div className="flex items-center justify-between">
                                                             <p className={cn(
                                                                 "text-xs font-medium leading-relaxed",
-                                                                isCurrentActive ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"
+                                                                isCurrent ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"
                                                             )}>
                                                                 {description}
                                                             </p>
-                                                            {!hideDateTime && (
-                                                                <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
-                                                                    <Clock className="size-2.5" /> {formatDate(event.date)}
-                                                                </span>
-                                                            )}
+                                                            <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
+                                                                <Clock className="size-2.5" /> {formatDate(event.date)}
+                                                            </span>
                                                         </div>
 
                                                         {event.location && (
@@ -249,11 +358,17 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                     )}
 
                                     {/* Future steps with no events — empty hint */}
-                                    {isFuture && events.length === 0 && (
+                                    {isAwaitingAdmin && events.length === 0 ? (
+                                        <div className="p-3 md:p-3.5 rounded-xl border border-amber-200/70 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-xs">
+                                            <p className="font-medium leading-relaxed">
+                                                Your booking has been received and is waiting for admin acceptance and scheduling.
+                                            </p>
+                                        </div>
+                                    ) : isFuture && events.length === 0 ? (
                                         <p className="text-[10px] text-zinc-300 dark:text-zinc-600 font-medium italic">
                                             Awaiting update...
                                         </p>
-                                    )}
+                                    ) : null}
                                 </div>
                             </div>
                         );
@@ -271,7 +386,6 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                             event.status_label || event.status || '',
                                             event.description
                                         );
-                                        const hideDateTime = shouldHideEventDateTime(description, event);
 
                                         return (
                                             <div
@@ -282,11 +396,9 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                     <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 leading-relaxed">
                                                         {description}
                                                     </p>
-                                                    {!hideDateTime && (
-                                                        <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
-                                                            <Clock className="size-2.5" /> {formatDate(event.date)}
-                                                        </span>
-                                                    )}
+                                                    <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
+                                                        <Clock className="size-2.5" /> {formatDate(event.date)}
+                                                    </span>
                                                 </div>
                                                 {event.location && (
                                                     <div className="flex items-center gap-1.5 text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">

@@ -29,6 +29,17 @@ enum RunsheetStatus: string
 
     public function label(): string
     {
-        return __('statuses.runsheet.'.$this->value);
+        $key = 'statuses.runsheet.'.$this->value;
+        $trans = __($key);
+        if ($trans !== $key) {
+            return $trans;
+        }
+
+        return match ($this) {
+            self::Draft => 'Draft',
+            self::Assigned => 'Assigned',
+            self::InProgress => 'In Progress',
+            self::Completed => 'Completed',
+        };
     }
 }

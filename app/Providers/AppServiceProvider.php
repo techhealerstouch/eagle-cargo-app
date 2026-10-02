@@ -95,7 +95,7 @@ class AppServiceProvider extends ServiceProvider
         });
 
         // Override configuration dynamically from settings
-        if (! app()->runningUnitTests()) {
+        if (! app()->runningInConsole() && ! app()->runningUnitTests()) {
             try {
                 $settingsService = app(SettingsService::class);
                 $appName = $settingsService->get('app_name');
@@ -118,6 +118,9 @@ class AppServiceProvider extends ServiceProvider
         Area::observe(ReferenceDataObserver::class);
         BoxType::observe(ReferenceDataObserver::class);
         BoxPrice::observe(ReferenceDataObserver::class);
+        \App\Models\PickupZone::observe(ReferenceDataObserver::class);
+        \App\Models\Province::observe(ReferenceDataObserver::class);
+        \App\Models\Suburb::observe(ReferenceDataObserver::class);
         ShippingUpdate::observe(ShippingUpdateObserver::class);
         DatabaseNotification::observe(DatabaseNotificationObserver::class);
         Recipient::observe(RecipientObserver::class);

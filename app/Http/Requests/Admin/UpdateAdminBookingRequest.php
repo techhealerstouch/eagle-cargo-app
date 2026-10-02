@@ -31,47 +31,42 @@ class UpdateAdminBookingRequest extends FormRequest
 
     public function rules(): array
     {
-        $booking = $this->route('booking');
         $isPaid = $this->payment_status === 'paid' || $this->payment_status === PaymentStatus::Paid->value;
-        $currentPaymentStatus = $booking ? ($booking->payment_status instanceof PaymentStatus ? $booking->payment_status->value : $booking->payment_status) : null;
-        $isTransitioningToPaid = $isPaid && $currentPaymentStatus !== 'paid';
-
         $isCash = in_array($this->payment_method, ['cash', 'cash_on_pickup'], true);
         $isOnlinePayment = in_array($this->payment_method, ['stripe', 'afterpay', 'square'], true);
+        
+        $booking = $this->route('booking');
+        $wasPaid = $booking && ($booking->payment_status === PaymentStatus::Paid || $booking->payment_status->value === 'paid');
+        $isTransitioningToPaid = ! $wasPaid && $isPaid;
 
         return [
-            'sender_id'               => 'required|exists:senders,id',
-            'status'                   => 'required|in:pending,confirmed,collected,shipped,delivered,cancelled',
-            'booking_type'             => 'nullable|string|max:50',
-            'recipient_name'           => 'required|string|max:255',
-            'recipient_address'        => 'nullable|string|max:255',
-            'recipient_city'           => 'nullable|string|max:100',
-            'recipient_province'       => 'nullable|string|max:100',
-            'recipient_zip_code'       => 'nullable|string|max:20',
-            'destination'              => 'nullable|string|max:255',
-            'preferred_date'           => 'nullable|date',
-            'pickup_zone_id'           => 'nullable|exists:pickup_zones,id',
-            'payment_status'           => ['required', Rule::enum(PaymentStatus::class)],
-            'payment_method'           => [$isPaid ? 'required' : 'nullable', 'string', Rule::in(['cash', 'stripe', 'cash_on_pickup', 'bank_transfer', 'pay_id', 'afterpay', 'square', 'cheque'])],
-            'payment_reference'        => [$isTransitioningToPaid && ! $isCash ? 'required' : 'nullable', 'string', 'max:255'],
-            'proof_of_payment'         => [
-                $isTransitioningToPaid && ! $isCash && ! $isOnlinePayment && empty($booking?->proof_of_payment) ? 'required' : 'nullable',
+            'sender_id' => 'required|exists:senders,id',
+            'status' => 'required|in:pending,confirmed,collected,shipped,delivered,cancelled',
+            'booking_type' => ['nullable', 'string', Rule::in(['drop_off', 'home_pickup', 'other'])],
+            'recipient_name' => 'required|string|max:255',
+            'recipient_address' => 'nullable|string|max:255',
+            'recipient_city' => 'nullable|string|max:100',
+            'recipient_province' => 'nullable|string|max:100',
+            'recipient_zip_code' => 'nullable|string|max:20',
+            'destination' => 'nullable|string|max:255',
+            'preferred_date' => 'nullable|date',
+            'pickup_zone_id' => 'nullable|exists:pickup_zones,id',
+            'payment_status' => ['required', Rule::enum(PaymentStatus::class)],
+            'payment_method' => [$isPaid ? 'required' : 'nullable', 'string', Rule::in(['cash', 'stripe', 'cash_on_pickup', 'bank_transfer', 'pay_id', 'afterpay', 'square', 'cheque'])],
+            'payment_reference' => [($isTransitioningToPaid && ! $isCash) ? 'required' : 'nullable', 'string', 'max:255'],
+            'proof_of_payment' => [
+                ($isTransitioningToPaid && ! $isCash && ! $isOnlinePayment && empty($booking?->proof_of_payment)) ? 'required' : 'nullable',
                 'file',
                 'mimes:jpeg,png,jpg,pdf',
-                'max:10240',
+                'max:5120',
             ],
-            'declaration_form_status'  => 'required|in:missing,submitted_online,physical_copy_received',
-            'declaration_form'         => [
-                'nullable',
-                'file',
-                'mimes:jpeg,png,jpg,pdf',
-                'max:10240',
-            ],
-            'notes'                    => 'nullable|string',
-            'admin_notes'              => 'nullable|string',
-            'declaration_data'         => 'nullable|array',
-            'empty_box_count'          => 'nullable|integer|min:0',
-            'empty_box_fee'            => 'nullable|numeric|min:0',
+            'declaration_form_status' => 'required|in:missing,submitted_online,physical_copy_received',
+            'declaration_form' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:10240',
+            'notes' => 'nullable|string',
+            'admin_notes' => 'nullable|string',
+            'declaration_data' => 'nullable|array',
+            'empty_box_count' => 'nullable|integer|min:0',
+            'empty_box_fee' => 'nullable|numeric|min:0',
         ];
     }
 
@@ -91,6 +86,9 @@ class UpdateAdminBookingRequest extends FormRequest
             'proof_of_payment.required' => 'A proof of payment file (image or PDF) is required when marking booking payment status as Paid.',
             'declaration_form_status.required' => __('messages.validation.admin_booking.declaration_form_status.required'),
             'declaration_form_status.in' => __('messages.validation.admin_booking.declaration_form_status.in'),
+            'declaration_form.file' => 'The declaration form must be a valid file.',
+            'declaration_form.mimes' => 'The declaration form must be a file of type: jpeg, png, jpg, pdf.',
+            'declaration_form.max' => 'The declaration form may not be greater than 10MB.',
         ];
     }
 }

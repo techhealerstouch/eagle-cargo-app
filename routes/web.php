@@ -1,5 +1,8 @@
 <?php
 
+use App\Http\Controllers\SenderCalendarController;
+
+
 use App\Http\Controllers\Admin\AreaController;
 use App\Http\Controllers\Admin\PickupZoneController;
 use App\Http\Controllers\Admin\SuburbController;
@@ -193,28 +196,38 @@ Route::get('/track/{tracking_number}', function (Request $request, $tracking_num
     return redirect()->route('track', array_merge(['tracking_number' => $tracking_number], $request->query()));
 });
 
-// Guest booking routes (public)
-Route::get('/guest/book', [GuestBookingController::class, 'create'])
-    ->middleware('throttle:public-tracking')
-    ->name('guest.book');
-Route::post('/guest/bookings', [GuestBookingController::class, 'store'])
-    ->middleware('throttle:booking-writes')
-    ->name('guest.bookings.store');
-Route::post('/guest/bookings/initialize', [GuestBookingController::class, 'initialize'])
-    ->middleware('throttle:booking-writes')
-    ->name('guest.bookings.initialize');
-Route::post('/guest/bookings/{booking}/stripe-intent', [StripePaymentController::class, 'createGuestIntent'])
-    ->middleware('throttle:payments')
-    ->name('guest.bookings.stripe-intent');
-Route::post('/guest/bookings/{booking}/stripe-verify', [StripePaymentController::class, 'verifyGuestPayment'])
-    ->middleware('throttle:payments')
-    ->name('guest.bookings.stripe-verify');
-Route::get('/guest/booking/confirmed', [GuestBookingController::class, 'confirmed'])
-    ->middleware('throttle:public-tracking')
-    ->name('guest.booking.confirmed');
-Route::post('/guest/booking/upload-proof', [GuestBookingController::class, 'uploadProofOfPayment'])
-    ->middleware('throttle:uploads')
-    ->name('guest.booking.upload-proof');
+// Public Guest Booking Routes
+Route::get('/guest/book', [GuestBookingController::class, 'create'])->name('guest.book');
+Route::post('/guest/bookings', [GuestBookingController::class, 'store'])->middleware('throttle:booking-writes')->name('guest.bookings.store');
+Route::post('/guest/bookings/initialize', [GuestBookingController::class, 'initialize'])->middleware('throttle:booking-writes')->name('guest.bookings.initialize');
+Route::get('/guest/booking/{booking}/confirmed', [GuestBookingController::class, 'confirmed'])->name('guest.booking.confirmed');
+Route::get('/guest/booking/{booking}/verify', [GuestBookingController::class, 'verifyAccess'])->middleware('throttle:forms')->name('guest.booking.verify');
+Route::post('/guest/booking/{booking}/verify', [GuestBookingController::class, 'verifyAccessCode'])->middleware('throttle:forms')->name('guest.booking.verify-code');
+Route::get('/guest/booking/{booking}/pay', [BookingController::class, 'guestPay'])->name('guest.bookings.pay');
+Route::post('/guest/booking/{booking}/stripe-intent', [StripePaymentController::class, 'createIntent'])->middleware('throttle:payments')->name('guest.bookings.stripe-intent');
+Route::post('/guest/booking/{booking}/stripe-verify', [StripePaymentController::class, 'verifyPayment'])->middleware('throttle:payments')->name('guest.bookings.stripe-verify');
+Route::post('/guest/booking/{booking}/bank-transfer', [BookingController::class, 'requestBankTransferDetails'])->middleware('throttle:booking-writes')->name('guest.bookings.bank-transfer');
+Route::post('/guest/booking/{booking}/upload-proof', [BookingController::class, 'guestUploadProofOfPayment'])->middleware('throttle:uploads')->name('guest.bookings.upload-proof');
+
+// Booking URL aliases and fallbacks to prevent 404s
+Route::get('/guest/bookings/{booking}/confirmed', function (Request $request, $booking) {
+    return redirect()->route('guest.booking.confirmed', array_merge(['booking' => $booking], $request->query()));
+});
+Route::get('/guest/booking/{booking}', function ($booking) {
+    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
+});
+Route::get('/guest/bookings/{booking}', function ($booking) {
+    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
+});
+Route::get('/bookings/{booking}', function ($booking) {
+    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    if (\Illuminate\Support\Facades\Auth::check()) {
+        return redirect()->route('sender.bookings', ['highlight' => $ref ?? $booking]);
+    }
+    return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
+});
 
 // Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
 Route::inertia('/about', 'marketing/about')->name('about');
@@ -244,6 +257,7 @@ Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'vie
 Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
 Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
 Route::post('/track/declaration/resend-email', [TrackingController::class, 'resendDeclarationEmail'])->middleware('throttle:declaration-resend')->name('track.declaration.resend-email');
+Route::post('/track/declaration/{booking}/verify-email', [TrackingController::class, 'verifyEmailToAccessDeclaration'])->middleware('throttle:forms')->name('track.declaration.verify-email');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('/home', 'welcome')->name('home');
@@ -262,6 +276,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('/bookings/{booking}/stripe-intent', [StripePaymentController::class, 'createIntent'])->middleware('throttle:payments')->name('bookings.stripe-intent');
     Route::post('/bookings/{booking}/stripe-verify', [StripePaymentController::class, 'verifyPayment'])->middleware('throttle:payments')->name('bookings.stripe-verify');
     Route::post('/bookings/{booking}/upload-proof', [BookingController::class, 'uploadProofOfPayment'])->middleware('throttle:uploads')->name('bookings.upload-proof');
+    Route::post('/bookings/{booking}/bank-transfer', [BookingController::class, 'requestBankTransferDetails'])->middleware('throttle:booking-writes')->name('bookings.bank-transfer');
 
     Route::get('/bookings/{booking}/edit', [BookingController::class, 'edit'])->name('bookings.edit');
     Route::put('/bookings/{booking}', [BookingController::class, 'update'])->middleware('throttle:booking-writes')->name('bookings.update');
@@ -269,8 +284,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('/dashboard', [SenderDashboardController::class, 'index'])->name('dashboard');
     Route::get('/bookings', [SenderDashboardController::class, 'bookings'])->name('sender.bookings');
+    Route::get('/calendar', [SenderCalendarController::class, 'index'])->name('sender.calendar');
+    Route::get('/calendar/export.ics', [SenderCalendarController::class, 'exportIcs'])->name('sender.calendar.export-ics');
+    Route::get('/calendar/{event}/export.ics', [SenderCalendarController::class, 'exportSingleIcs'])->name('sender.calendar.export-single-ics');
+
     Route::middleware(['role:sender'])->prefix('recipients')->name('sender.recipients.')->group(function () {
         Route::get('/', [SenderRecipientController::class, 'index'])->name('index');
+
+// Legal & Public Guides
+Route::inertia('/terms', 'marketing/terms')->name('terms');
+Route::inertia('/customs-guide', 'marketing/customs-guide')->name('customs-guide');
+Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::get('/{recipient}/edit', [SenderRecipientController::class, 'edit'])->name('edit');
         Route::put('/{recipient}', [SenderRecipientController::class, 'update'])->middleware('throttle:booking-writes')->name('update');
         Route::delete('/{recipient}', [SenderRecipientController::class, 'destroy'])->middleware('throttle:booking-writes')->name('destroy');
@@ -289,8 +313,43 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::delete('boxes/bulk-destroy', [BoxController::class, 'bulkDestroy'])->middleware('throttle:admin-mutations')->name('boxes.bulk-destroy');
         Route::post('boxes/{id}/restore', [BoxController::class, 'restore'])->middleware('throttle:admin-mutations')->name('boxes.restore');
         Route::resource('boxes', BoxController::class);
+        // Promotions Management
+        Route::post('promotions/{promotion}/toggle', [\App\Http\Controllers\Admin\PromotionController::class, 'toggle'])->name('promotions.toggle');
+        Route::resource('promotions', \App\Http\Controllers\Admin\PromotionController::class)->except(['create', 'show', 'edit']);
+
+        // Activity Logs / Audit Trails
+        Route::get('activity-logs', [\App\Http\Controllers\Admin\ActivityLogController::class, 'index'])->name('activity-logs.index');
+        Route::get('activity-logs/export', [\App\Http\Controllers\Admin\ActivityLogController::class, 'export'])->name('activity-logs.export');
+        Route::get('activity-logs/{activityLog}', [\App\Http\Controllers\Admin\ActivityLogController::class, 'show'])->name('activity-logs.show');
+
+        // Operations & Marketing Calendar
+        Route::get('calendar/feed', [\App\Http\Controllers\Admin\CalendarEventController::class, 'feed'])->name('calendar.feed');
+        Route::get('calendar/export.ics', [\App\Http\Controllers\Admin\CalendarEventController::class, 'exportIcs'])->name('calendar.export-ics');
+        Route::resource('calendar', \App\Http\Controllers\Admin\CalendarEventController::class)->parameters(['calendar' => 'event'])->except(['create', 'show', 'edit']);
+
+        // Excel Import/Export
+        Route::get('boxes/export-excel', [\App\Http\Controllers\Admin\BoxController::class, 'exportExcel'])->name('boxes.export-excel');
+        Route::get('boxes/import-template', [\App\Http\Controllers\Admin\BoxController::class, 'downloadImportTemplate'])->name('boxes.import-template');
+        Route::post('boxes/import-excel', [\App\Http\Controllers\Admin\BoxController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('boxes.import-excel');
+
+        Route::get('bookings/export-excel', [\App\Http\Controllers\Admin\BookingController::class, 'exportExcel'])->name('bookings.export-excel');
+        Route::get('bookings/import-template', [\App\Http\Controllers\Admin\BookingController::class, 'downloadImportTemplate'])->name('bookings.import-template');
+
+        Route::get('senders/export-excel', [\App\Http\Controllers\Admin\SenderController::class, 'exportExcel'])->name('senders.export-excel');
+        Route::get('senders/import-template', [\App\Http\Controllers\Admin\SenderController::class, 'downloadImportTemplate'])->name('senders.import-template');
+        Route::post('senders/import-excel', [\App\Http\Controllers\Admin\SenderController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('senders.import-excel');
+        Route::post('senders/bulk-send-credentials', [\App\Http\Controllers\Admin\SenderController::class, 'bulkSendCredentials'])->middleware('throttle:admin-mutations')->name('senders.bulk-send-credentials');
+        Route::post('senders/bulk-hold', [\App\Http\Controllers\Admin\SenderController::class, 'bulkHold'])->middleware('throttle:admin-mutations')->name('senders.bulk-hold');
+        Route::post('senders/{sender}/send-credentials', [\App\Http\Controllers\Admin\SenderController::class, 'sendCredentials'])->middleware('throttle:admin-mutations')->name('senders.send-credentials');
+
+        Route::get('recipients/export-excel', [\App\Http\Controllers\Admin\RecipientController::class, 'exportExcel'])->name('recipients.export-excel');
+        Route::get('recipients/import-template', [\App\Http\Controllers\Admin\RecipientController::class, 'downloadImportTemplate'])->name('recipients.import-template');
+        Route::post('recipients/import-excel', [\App\Http\Controllers\Admin\RecipientController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('recipients.import-excel');
         Route::get('runsheets/pickups', [RunsheetController::class, 'pickups'])->name('runsheets.pickups');
+        Route::get('runsheets/pickups/calendar', [RunsheetController::class, 'pickupCalendar'])->name('runsheets.pickups.calendar');
         Route::get('runsheets/deliveries', [RunsheetController::class, 'deliveries'])->name('runsheets.deliveries');
+        Route::get('runsheets/deliveries/calendar', [RunsheetController::class, 'deliveryCalendar'])->name('runsheets.deliveries.calendar');
+        Route::get('runsheets/calendar/feed', [RunsheetController::class, 'dispatchCalendarFeed'])->name('runsheets.calendar.feed');
         Route::resource('runsheets', RunsheetController::class);
         Route::post('runsheets/{runsheet}/attach-bookings', [RunsheetController::class, 'attachBookings'])->middleware('throttle:admin-mutations')->name('runsheets.attachBookings');
         Route::post('runsheets/{runsheet}/reorder', [RunsheetController::class, 'reorder'])->middleware('throttle:admin-mutations')->name('runsheets.reorder');
@@ -343,6 +402,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('payments/{payment}/confirm', [PaymentController::class, 'confirm'])->middleware('throttle:admin-mutations')->name('payments.confirm');
         Route::post('payments/{payment}/reject', [PaymentController::class, 'reject'])->middleware('throttle:admin-mutations')->name('payments.reject');
         Route::resource('enquiries', EnquiryController::class)->only(['index', 'show', 'update', 'destroy']);
+        Route::resource('shipping-updates', ShippingUpdateController::class);
         Route::match(['get', 'post'], 'users/check-email', [UserController::class, 'checkEmail'])->name('users.check-email');
         Route::post('users/{id}/restore', [UserController::class, 'restore'])->middleware('throttle:admin-mutations')->name('users.restore');
         Route::resource('users', UserController::class)->withTrashed();
@@ -362,6 +422,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::middleware(['role:super_admin'])->group(function () {
             Route::get('data-integrity', [DataIntegrityController::class, 'index'])->name('data-integrity.index');
             Route::post('data-integrity/scan', [DataIntegrityController::class, 'scan'])->name('data-integrity.scan');
+            Route::get('data-integrity/export', [DataIntegrityController::class, 'export'])->name('data-integrity.export');
+            Route::post('data-integrity/resolve-batch', [DataIntegrityController::class, 'resolveBatch'])->name('data-integrity.resolve-batch');
+            Route::post('data-integrity/{warning}/reopen', [DataIntegrityController::class, 'reopen'])->name('data-integrity.reopen');
+
             Route::post('data-integrity/{warning}/resolve', [DataIntegrityController::class, 'resolve'])->name('data-integrity.resolve');
         });
 
@@ -429,6 +493,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/dashboard', [WarehouseController::class, 'dashboard'])->name('warehouse.dashboard');
         Route::post('/receive', [WarehouseController::class, 'receiveBox'])->middleware('throttle:ops-scan')->name('warehouse.receive');
         Route::post('/load', [WarehouseController::class, 'loadBox'])->middleware('throttle:ops-scan')->name('warehouse.load');
+        Route::post('/load-batch', [WarehouseController::class, 'loadBatch'])->middleware('throttle:ops-scan')->name('warehouse.load-batch');
         Route::post('/unload', [WarehouseController::class, 'unloadBox'])->middleware('throttle:ops-scan')->name('warehouse.unload');
         Route::post('/mark-damaged', [WarehouseController::class, 'markDamaged'])->middleware('throttle:ops-scan')->name('warehouse.mark-damaged');
         Route::post('/mark-held', [WarehouseController::class, 'markHeld'])->middleware('throttle:ops-scan')->name('warehouse.mark-held');
@@ -444,3 +509,11 @@ require __DIR__.'/settings.php';
 if (app()->environment('local') && file_exists(__DIR__.'/local.php')) {
     require __DIR__.'/local.php';
 }
+
+
+Route::middleware('developer')->prefix('developer')->name('developer.')->group(function () {
+    Route::get('features', [\App\Http\Controllers\DeveloperFeatureController::class, 'index'])->name('features.index');
+    Route::post('features', [\App\Http\Controllers\DeveloperFeatureController::class, 'store'])->name('features.store');
+    Route::match(['patch', 'put'], 'features/{feature}', [\App\Http\Controllers\DeveloperFeatureController::class, 'update'])->name('features.update');
+    Route::delete('features/{feature}', [\App\Http\Controllers\DeveloperFeatureController::class, 'destroy'])->name('features.destroy');
+});
