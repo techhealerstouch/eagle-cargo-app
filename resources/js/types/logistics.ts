@@ -3,7 +3,6 @@ import type { LucideIcon } from 'lucide-react';
 export interface TrackingTimelineItem {
     status: string;
     status_label?: string;
-    tracking_step_key?: string | null;
     description: string;
     location?: string;
     date: string;
@@ -15,7 +14,6 @@ export interface TrackingBox {
     tracking_number: string;
     status: string;
     status_label?: string;
-    tracking_step_key?: string | null;
     destination: string;
     recipient_name?: string;
     box_type?: { name: string };
@@ -38,14 +36,25 @@ export interface TrackingBox {
         eta_at?: string;
     } | null;
     timeline?: TrackingTimelineItem[];
+    delivery_proof_url?: string | null;
+    pickup_proof_url?: string | null;
+    damage_photo_url?: string | null;
+    has_signature?: boolean;
+    signature_url?: string | null;
 }
 
 export interface TrackingData {
     tracking_number: string;
     status: string;
     status_label?: string;
-    tracking_step_key?: string | null;
     booking_id: number;
+    booking_status?: string;
+    confirmed_at?: string | null;
+    delivery_proof_url?: string | null;
+    pickup_proof_url?: string | null;
+    damage_photo_url?: string | null;
+    has_signature?: boolean;
+    signature_url?: string | null;
     booking_reference?: string;
     recipient_name?: string;
     destination?: string;
@@ -58,16 +67,14 @@ export interface TrackingData {
     total_boxes_count?: number;
     all_boxes: TrackingBox[];
     declaration_form_status?: 'missing' | 'submitted';
-    can_edit_declaration?: boolean;
-    sender_email_masked?: string | null;
     declaration_resends_remaining?: number;
-    shipped_at?: string | null;
+    sender_email_masked?: string | null;
+    guest_token?: string | null;
+    is_guest?: boolean;
     current_milestone_id?: number;
     area_milestones?: Array<{ id: number; name: string; is_final: boolean }>;
     eta_date?: string | null;
     eta_message?: string | null;
-    estimate_delivery_date?: string | null;
-    estimate_delivery_message?: string | null;
     batch?: {
         batch_number: string;
         status?: string;
@@ -88,9 +95,14 @@ export interface TrackingStep {
     phase: string;
     order: number;
     icon: string;
-    system_status?: string;
     step_type?: 'checkpoint' | 'ongoing';
+    allowed_roles?: string[];
+    system_status?: string;
     description?: string;
+    is_public?: boolean;
+    notify_sms?: boolean;
+    notify_email?: boolean;
+    customer_message?: string | null;
 }
 
 export interface NormalizedStep {
@@ -98,7 +110,8 @@ export interface NormalizedStep {
     statusKey: string;
     icon: LucideIcon;
     systemStatus?: string;
-    step_type?: 'checkpoint' | 'ongoing';
     stepType?: 'checkpoint' | 'ongoing';
     description?: string;
+    isPublic?: boolean;
+    customerMessage?: string | null;
 }

@@ -6,11 +6,16 @@ use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\Role;
 use App\Models\Booking;
 use App\Models\Invoice;
+use App\Models\User;
 use App\Notifications\BookingPaymentReceived;
 use App\Notifications\BookingStatusChanged;
+use App\Notifications\DeclarationFormSubmittedNotification;
+use App\Services\SettingsService;
 use App\Services\TrackingCacheService;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
 class BookingObserver
@@ -23,6 +28,10 @@ class BookingObserver
         if (empty($booking->reference_number)) {
             // Use a unique placeholder until we have a persisted id.
             $booking->reference_number = 'TMP-'.Str::upper(Str::random(16));
+        }
+
+        if ($booking->is_guest && empty($booking->guest_token)) {
+            $booking->guest_token = (string) Str::uuid();
         }
 
         $snapshotPayload = Booking::buildSnapshotPayload($booking);
@@ -82,7 +91,7 @@ class BookingObserver
                 return;
             }
 
-if ($newStatus === BookingStatus::Confirmed) {
+            if ($newStatus === BookingStatus::Confirmed) {
                 if (empty($booking->confirmed_at)) {
                     $booking->confirmed_at = now();
                     $booking->saveQuietly();
@@ -90,6 +99,18 @@ if ($newStatus === BookingStatus::Confirmed) {
 
                 // Auto-generate invoice when confirmed
                 Invoice::generateForBooking($booking);
+
+                // Add timeline event to boxes and clear tracking cache
+                $booking->boxes()->each(function ($box) {
+                    \App\Models\BoxUpdate::create([
+                        'box_id' => $box->id,
+                        'status' => 'confirmed',
+                        'description' => 'Booking accepted and confirmed by admin.',
+                        'location' => 'Admin Office',
+                        'updated_by' => \Illuminate\Support\Facades\Auth::id(),
+                    ]);
+                    app(TrackingCacheService::class)->forgetBox($box);
+                });
             }
             if ($newStatus === BookingStatus::Shipped && empty($booking->shipped_at)) {
                 $booking->shipped_at = now();
@@ -136,12 +157,12 @@ if ($newStatus === BookingStatus::Confirmed) {
                 if ($booking->payment_status === PaymentStatus::CashOnPickup && $hasRunsheet) {
                     $invoice = $booking->invoice()->first();
                     if ($invoice) {
-                        $settingsService = app(\App\Services\SettingsService::class);
+                        $settingsService = app(SettingsService::class);
                         $cancellationFee = (float) $settingsService->get('cancellation_flat_fee', 0);
-                        
+
                         if ($cancellationFee > 0) {
                             $vatBreakdown = Invoice::calculateVatBreakdown($cancellationFee, (float) $settingsService->getInvoiceSettings()['taxRate']);
-                            
+
                             $invoice->update([
                                 'is_cancellation_fee' => true,
                                 'amount' => $cancellationFee,
@@ -154,8 +175,8 @@ if ($newStatus === BookingStatus::Confirmed) {
                                         'tracking_number' => null,
                                         'description' => 'Cancellation Fee (Picker already dispatched)',
                                         'price_charged' => $cancellationFee,
-                                    ]
-                                ]
+                                    ],
+                                ],
                             ]);
                         } else {
                             $invoice->update(['status' => InvoiceStatus::Voided]);
@@ -200,6 +221,15 @@ if ($newStatus === BookingStatus::Confirmed) {
         // Recalculate invoice amount when payment_method changes (e.g. Afterpay surcharge)
         if ($booking->wasChanged('payment_method')) {
             $booking->invoice?->recalculateAmount();
+        }
+
+        if ($booking->wasChanged('declaration_form_status')) {
+            if (in_array($booking->declaration_form_status, ['submitted_online', 'physical_copy_received'])) {
+                $admins = User::whereIn('role', [Role::SuperAdmin, Role::Admin])->get();
+                if ($admins->isNotEmpty()) {
+                    Notification::send($admins, new DeclarationFormSubmittedNotification($booking));
+                }
+            }
         }
     }
 

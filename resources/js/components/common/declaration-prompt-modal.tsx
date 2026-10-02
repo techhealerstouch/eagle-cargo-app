@@ -16,6 +16,9 @@ interface DeclarationPromptModalProps {
     onClose: () => void;
     bookingId: number | string | null;
     guestToken?: string;
+    badgeText?: string;
+    title?: string;
+    description?: string;
 }
 
 export default function DeclarationPromptModal({
@@ -23,6 +26,9 @@ export default function DeclarationPromptModal({
     onClose,
     bookingId,
     guestToken,
+    badgeText = 'Booking Successful',
+    title = 'Customs Declaration Required',
+    description = 'To ensure smooth customs clearance and avoid any shipment delays, please fill up the declaration form for your balikbayan box.',
 }: DeclarationPromptModalProps) {
     const handleProceed = () => {
         if (bookingId) {
@@ -39,10 +45,10 @@ export default function DeclarationPromptModal({
             <DialogContent className="max-w-md gap-0 p-0 overflow-hidden border-none rounded-3xl shadow-2xl bg-white dark:bg-zinc-950">
                 <div className="p-8 pb-6 font-sans">
                     <div className="flex flex-col items-center text-center">
-                        {/* Success Badge */}
+                        {/* Status Badge */}
                         <div className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 rounded-full mb-6">
                             <Check className="size-3.5 stroke-[2.5]" />
-                            Booking Successful
+                            {badgeText}
                         </div>
 
                         {/* Premium Icon Badge */}
@@ -52,10 +58,10 @@ export default function DeclarationPromptModal({
                         
                         <DialogHeader className="space-y-2">
                             <DialogTitle className="font-sans text-2xl font-semibold text-zinc-900 dark:text-zinc-50 tracking-tight">
-                                Customs Declaration Required
+                                {title}
                             </DialogTitle>
                             <DialogDescription className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed max-w-sm pt-1">
-                                To ensure smooth customs clearance and avoid any shipment delays, please fill up the declaration form for your balikbayan box.
+                                {description}
                             </DialogDescription>
                         </DialogHeader>
                     </div>

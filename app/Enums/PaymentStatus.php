@@ -13,6 +13,19 @@ enum PaymentStatus: string
 
     public function label(): string
     {
-        return __('statuses.payment.'.$this->value);
+        $key = 'statuses.payment.'.$this->value;
+        $trans = __($key);
+        if ($trans !== $key) {
+            return $trans;
+        }
+
+        return match ($this) {
+            self::Pending => 'Pending',
+            self::Paid => 'Paid',
+            self::CashOnPickup => 'Payment on Pickup',
+            self::CashCollected => 'Cash Collected',
+            self::BalancePending => 'Balance Pending',
+            self::PartiallyPaid => 'Partially Paid',
+        };
     }
 }

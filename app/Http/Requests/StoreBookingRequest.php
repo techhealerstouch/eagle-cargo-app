@@ -2,8 +2,8 @@
 
 namespace App\Http\Requests;
 
-use App\Rules\ValidPickupDate;
 use App\Rules\Phone;
+use App\Rules\ValidPickupDate;
 use App\Services\ReferenceDataService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -29,11 +29,11 @@ class StoreBookingRequest extends FormRequest
         if ($this->filled('mobile')) {
             $this->merge(['mobile' => preg_replace('/[\s\-\(\)]+/', '', $this->input('mobile'))]);
         }
-        if ($this->filled('secondary_mobile')) {
-            $this->merge(['secondary_mobile' => preg_replace('/[\s\-\(\)]+/', '', $this->input('secondary_mobile'))]);
-        }
         if ($this->filled('sender_address') && ! $this->filled('address')) {
             $this->merge(['address' => $this->input('sender_address')]);
+        }
+        if ($this->input('booking_type') === 'drop_off') {
+            $this->merge(['pickup_zone_id' => null]);
         }
 
         $boxes = $this->input('boxes');
@@ -103,11 +103,7 @@ class StoreBookingRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:50',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        (new Phone('secondary contact phone'))->validate($attribute, $value, $fail);
-                    }
-                },
+                new Phone('secondary phone'),
             ],
             'address' => ['required', 'string', 'max:500'],
             'suburb' => ['required', 'string', 'max:100'],
@@ -117,18 +113,26 @@ class StoreBookingRequest extends FormRequest
             'longitude' => ['nullable', 'numeric', 'between:-180,180'],
 
             // Shared Booking details
-            'booking_type' => ['nullable', 'string', 'max:50'],
-            'preferred_date' => ['required', 'date', new ValidPickupDate($this->route('booking'))],
+            'preferred_date' => [
+                'required',
+                'date',
+                new ValidPickupDate(
+                    $this->route('booking'),
+                    $this->input('booking_type') === 'drop_off'
+                        ? null
+                        : ($this->filled('pickup_zone_id') ? (int) $this->input('pickup_zone_id') : ($this->user()?->sender?->pickup_zone_id ?? null))
+                ),
+            ],
             'pickup_zone_id' => ['nullable', 'exists:pickup_zones,id'],
+            'booking_type' => ['nullable', 'string', Rule::in(['drop_off', 'home_pickup', 'other'])],
             'payment_method' => ['required', 'string', 'in:cash,stripe,cash_on_pickup,bank_transfer,pay_id,afterpay,square'],
             'notes' => ['nullable', 'string', 'max:1000'],
-            'request_empty_box' => ['nullable', 'boolean'],
+            'promo_code' => ['nullable', 'string', 'max:50'],
             'empty_box_count' => ['nullable', 'integer', 'min:0'],
             'empty_box_fee' => ['nullable', 'numeric', 'min:0'],
 
             // Array of boxes, each containing recipient details and size
             'boxes' => ['required', 'array', 'min:1'],
-            'boxes.*.is_door_to_door' => ['nullable', 'boolean'],
             'boxes.*.recipient_id' => [
                 'nullable',
                 Rule::exists('recipients', 'id')->where(function ($query) use ($senderId) {
@@ -163,11 +167,7 @@ class StoreBookingRequest extends FormRequest
                 'nullable',
                 'string',
                 'max:50',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        (new Phone('secondary receiver phone'))->validate($attribute, $value, $fail);
-                    }
-                },
+                new Phone('receiver secondary phone'),
             ],
             'boxes.*.recipient_landmarks' => ['nullable', 'string', 'max:500'],
             'boxes.*.recipient_latitude' => ['nullable', 'numeric', 'between:-90,90'],

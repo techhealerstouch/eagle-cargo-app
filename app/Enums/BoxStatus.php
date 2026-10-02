@@ -24,27 +24,50 @@ enum BoxStatus: string
     public function canTransitionTo(self $target): bool
     {
         return match ($this) {
-            self::Pending             => in_array($target, [self::Collected, self::ReceivedByWarehouse, self::Cancelled]),
-            self::Collected           => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Damaged, self::Cancelled]),
+            self::Pending => in_array($target, [self::Collected, self::ReceivedByWarehouse, self::Cancelled]),
+            self::Collected => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Damaged, self::Cancelled]),
             self::ReceivedByWarehouse => in_array($target, [self::LoadedToContainer, self::InTransit, self::Arrived, self::Delivered, self::Damaged, self::Held, self::HeldBulging, self::Cancelled]),
-            self::LoadedToContainer   => in_array($target, [self::ReceivedByWarehouse, self::InTransit, self::Arrived, self::Delivered, self::Damaged, self::Held, self::HeldBulging, self::Cancelled]),
-            self::InTransit           => in_array($target, [self::Arrived, self::ForCheckingUnloading, self::EnRouteRoRo, self::OutForDelivery, self::Delivered, self::ReceivedByWarehouse, self::Cancelled]),
-            self::Arrived             => in_array($target, [self::InTransit, self::ForCheckingUnloading, self::UnloadedManila, self::EnRouteRoRo, self::OutForDelivery, self::Delivered, self::Cancelled]),
+            self::LoadedToContainer => in_array($target, [self::ReceivedByWarehouse, self::InTransit, self::Arrived, self::Delivered, self::Damaged, self::Held, self::HeldBulging, self::Cancelled]),
+            self::InTransit => in_array($target, [self::Arrived, self::ForCheckingUnloading, self::EnRouteRoRo, self::OutForDelivery, self::Delivered, self::ReceivedByWarehouse, self::Cancelled]),
+            self::Arrived => in_array($target, [self::InTransit, self::ForCheckingUnloading, self::UnloadedManila, self::EnRouteRoRo, self::OutForDelivery, self::Delivered, self::Cancelled]),
             self::ForCheckingUnloading => in_array($target, [self::UnloadedManila, self::Arrived, self::Held, self::HeldBulging, self::Damaged, self::Cancelled]),
-            self::UnloadedManila      => in_array($target, [self::ForDeliveryScheduling, self::EnRouteRoRo, self::OutForDelivery, self::Held, self::HeldBulging, self::Damaged, self::Cancelled]),
+            self::UnloadedManila => in_array($target, [self::ForDeliveryScheduling, self::EnRouteRoRo, self::OutForDelivery, self::Held, self::HeldBulging, self::Damaged, self::Cancelled]),
             self::ForDeliveryScheduling => in_array($target, [self::OutForDelivery, self::EnRouteRoRo, self::Held, self::HeldBulging, self::Cancelled]),
-            self::EnRouteRoRo         => in_array($target, [self::Arrived, self::ForCheckingUnloading, self::UnloadedManila, self::OutForDelivery, self::Delivered, self::Cancelled]),
-            self::OutForDelivery      => in_array($target, [self::Delivered, self::Cancelled, self::Held, self::HeldBulging, self::Damaged]),
-            self::Damaged             => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Arrived, self::OutForDelivery, self::Delivered, self::Cancelled]), // Can be repaired/cleared
-            self::Held                => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Arrived, self::OutForDelivery, self::Delivered, self::Cancelled]), // Can be released
-            self::HeldBulging         => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Arrived, self::OutForDelivery, self::Delivered, self::Cancelled]), // Can be released when paid
-            self::Delivered           => false, // Final state
-            self::Cancelled           => in_array($target, [self::Pending, self::Collected]), // Re-opening
+            self::EnRouteRoRo => in_array($target, [self::Arrived, self::ForCheckingUnloading, self::UnloadedManila, self::OutForDelivery, self::Delivered, self::Cancelled]),
+            self::OutForDelivery => in_array($target, [self::Delivered, self::Cancelled, self::Held, self::HeldBulging, self::Damaged]),
+            self::Damaged => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Arrived, self::OutForDelivery, self::Delivered, self::Cancelled]), // Can be repaired/cleared
+            self::Held => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Arrived, self::OutForDelivery, self::Delivered, self::Cancelled]), // Can be released
+            self::HeldBulging => in_array($target, [self::ReceivedByWarehouse, self::LoadedToContainer, self::InTransit, self::Arrived, self::OutForDelivery, self::Delivered, self::Cancelled]), // Can be released when paid
+            self::Delivered => false, // Final state
+            self::Cancelled => in_array($target, [self::Pending, self::Collected]), // Re-opening
         };
     }
 
     public function label(): string
     {
-        return __('statuses.box.'.$this->value);
+        $key = 'statuses.box.'.$this->value;
+        $trans = __($key);
+        if ($trans !== $key) {
+            return $trans;
+        }
+
+        return match ($this) {
+            self::Pending => 'Pending',
+            self::Collected => 'Collected',
+            self::ReceivedByWarehouse => 'Received by Warehouse',
+            self::LoadedToContainer => 'Loaded to Container',
+            self::InTransit => 'In Transit',
+            self::Arrived => 'Arrived',
+            self::ForCheckingUnloading => 'For Checking & Unloading Schedule',
+            self::UnloadedManila => 'Unloaded in Manila Warehouse',
+            self::ForDeliveryScheduling => 'For Delivery Scheduling',
+            self::EnRouteRoRo => 'En Route via RoRo',
+            self::OutForDelivery => 'Out for Delivery',
+            self::Delivered => 'Delivered',
+            self::Cancelled => 'Cancelled',
+            self::Damaged => 'Damaged',
+            self::Held => 'Held',
+            self::HeldBulging => 'Held (Bulging)',
+        };
     }
 }

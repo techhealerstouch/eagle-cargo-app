@@ -6,6 +6,7 @@ use App\Enums\BookingStatus;
 use App\Enums\PaymentStatus;
 use App\Rules\SecureFile;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
 
 class StoreAdminBookingRequest extends FormRequest
@@ -22,17 +23,26 @@ class StoreAdminBookingRequest extends FormRequest
             'sender_id' => 'required_without:is_new_sender|nullable|exists:senders,id',
             'sender_first_name' => 'required_if:is_new_sender,true|nullable|string|max:255',
             'sender_last_name' => 'required_if:is_new_sender,true|nullable|string|max:255',
-            'sender_email' => 'exclude_unless:is_new_sender,true|required|email|max:255|unique:users,email',
-            'sender_mobile' => 'required_if:is_new_sender,true|nullable|string|max:50',
-            'sender_secondary_mobile' => 'nullable|string|max:50',
+            'sender_email' => [
+                'required_if:is_new_sender,true',
+                'nullable',
+                'email',
+                'max:255',
+                Rule::when(
+                    $this->boolean('is_new_sender'),
+                    ['unique:users,email']
+                ),
+            ],
+            'sender_mobile' => 'required_if:is_new_sender,true|nullable|string|max:20',
+            'sender_secondary_mobile' => 'nullable|string|max:20',
             'sender_address' => 'required_if:is_new_sender,true|nullable|string|max:500',
             'sender_suburb' => 'nullable|string|max:100',
             'sender_state' => 'nullable|string|max:100',
             'sender_postcode' => 'nullable|string|max:10',
             'status' => ['required', new Enum(BookingStatus::class)],
-            'booking_type' => ['nullable', 'string', 'max:50'],
-            'picker_id' => 'required_if:status,collected|nullable|exists:users,id',
-            
+            'booking_type' => ['nullable', 'string', Rule::in(['drop_off', 'home_pickup', 'other'])],
+            'picker_id' => 'nullable|exists:users,id',
+
             // Boxes Array
             'boxes' => 'required|array|min:1',
             'boxes.*.area_id' => 'required|exists:areas,id',
@@ -52,30 +62,31 @@ class StoreAdminBookingRequest extends FormRequest
             'boxes.*.recipient_city' => 'required_without:boxes.*.recipient_id|nullable|string|max:100',
             'boxes.*.recipient_province' => 'required_without:boxes.*.recipient_id|nullable|string|max:100',
             'boxes.*.recipient_zip_code' => 'required_without:boxes.*.recipient_id|nullable|string|max:20',
-            'boxes.*.recipient_phone' => 'required_without:boxes.*.recipient_id|nullable|string|max:50',
-            'boxes.*.recipient_secondary_phone' => 'nullable|string|max:50',
+            'boxes.*.recipient_phone' => 'required_without:boxes.*.recipient_id|nullable|string|max:20',
+            'boxes.*.recipient_secondary_phone' => 'nullable|string|max:20',
             'boxes.*.recipient_landmarks' => 'nullable|string|max:255',
 
             // Pickup & Scheduling
             'preferred_date' => 'nullable|date',
-            
+
             // Payment & Declaration
             'pickup_zone_id' => 'nullable|exists:pickup_zones,id',
             'payment_status' => ['required', new Enum(PaymentStatus::class)],
-            'payment_method' => ['nullable', 'string', \Illuminate\Validation\Rule::in(['cash', 'stripe', 'cash_on_pickup', 'bank_transfer', 'pay_id', 'afterpay', 'square'])],
+            'payment_method' => ['nullable', 'string', Rule::in(['cash', 'stripe', 'cash_on_pickup', 'bank_transfer', 'pay_id', 'afterpay', 'square'])],
             'payment_reference' => 'nullable|string|max:255',
             'proof_of_payment' => ['nullable', 'file', 'mimes:jpeg,png,jpg,pdf', 'max:5120', new SecureFile],
             'declaration_form_status' => 'required|in:missing,submitted_online,physical_copy_received',
             'declaration_form' => ['nullable', 'file', 'mimes:jpeg,png,jpg,pdf', 'max:10240', new SecureFile],
-            
+
             // Empty Box Purchase Request
             'request_empty_box' => 'nullable|boolean',
             'empty_box_count' => 'nullable|integer|min:0',
             'empty_box_fee' => 'nullable|numeric|min:0',
 
-            // Notes
+            // Notes & Promos
             'notes' => 'nullable|string',
             'admin_notes' => 'nullable|string',
+            'promo_code' => 'nullable|string|max:50',
         ];
     }
 
@@ -91,15 +102,14 @@ class StoreAdminBookingRequest extends FormRequest
             'sender_address.required_if' => 'The sender address is required when creating a new sender.',
             'status.required' => __('messages.validation.admin_booking.status.required'),
             'status.in' => __('messages.validation.admin_booking.status.in'),
-            'picker_id.required_if' => 'The picker is required when status is collected.',
-            
+
             'boxes.required' => 'At least one box is required.',
             'boxes.*.area_id.required' => 'The destination area is required for all boxes.',
             'boxes.*.box_type_id.required_if' => 'The box type is required unless using custom dimensions.',
             'boxes.*.custom_length.required_if' => 'The length is required for custom boxes.',
             'boxes.*.custom_width.required_if' => 'The width is required for custom boxes.',
             'boxes.*.custom_height.required_if' => 'The height is required for custom boxes.',
-            
+
             'boxes.*.recipient_first_name.required_without' => 'The recipient first name is required.',
             'boxes.*.recipient_last_name.required_without' => 'The recipient last name is required.',
             'boxes.*.recipient_address.required_without' => 'The recipient address is required.',
@@ -112,7 +122,7 @@ class StoreAdminBookingRequest extends FormRequest
             'payment_status.in' => __('messages.validation.admin_booking.payment_status.in'),
             'declaration_form_status.required' => __('messages.validation.admin_booking.declaration_form_status.required'),
             'declaration_form_status.in' => __('messages.validation.admin_booking.declaration_form_status.in'),
-            
+
             'proof_of_payment.max' => 'The proof of payment must not be greater than 5MB.',
             'declaration_form.max' => 'The declaration form must not be greater than 10MB.',
         ];

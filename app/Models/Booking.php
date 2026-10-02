@@ -20,7 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
 /**
- * @property \Illuminate\Database\Eloquent\Collection<int, \App\Models\Box> $boxes
+ * @property Collection<int, Box> $boxes
  * @property \Illuminate\Support\Carbon|null $preferred_date
  * @property \Illuminate\Support\Carbon|null $confirmed_at
  * @property \Illuminate\Support\Carbon|null $shipped_at
@@ -56,13 +56,6 @@ class Booking extends Model
         'notes',
         'payment_method',
         'admin_notes',
-        'tracking_views_count',
-        'last_tracked_at',
-        'promotion_id',
-        'promo_code',
-        'discount_amount',
-        'is_read',
-        'is_payment_read',
         'confirmed_at',
         'shipped_at',
         'declaration_data',
@@ -71,9 +64,16 @@ class Booking extends Model
         'empty_box_fee',
         'pickup_zone_id',
         'attention_required',
+        'tracking_views_count',
+        'last_tracked_at',
+        'promotion_id',
+        'promo_code',
+        'discount_amount',
+        'is_read',
+        'is_payment_read',
     ];
 
-    protected $hidden = ['admin_notes'];
+    protected $hidden = ['admin_notes', 'guest_token'];
 
     protected $casts = [
         'preferred_date' => 'date',
@@ -91,6 +91,11 @@ class Booking extends Model
         'empty_box_count' => 'integer',
         'empty_box_fee' => 'decimal:2',
         'attention_required' => 'boolean',
+        'tracking_views_count' => 'integer',
+        'last_tracked_at' => 'datetime',
+        'discount_amount' => 'decimal:2',
+        'is_read' => 'boolean',
+        'is_payment_read' => 'boolean',
         'is_guest' => 'boolean',
     ];
 
@@ -129,9 +134,14 @@ class Booking extends Model
         $this->attributes['status'] = $newStatus->value;
     }
 
-        public function promotion()
+    public function getProofOfPaymentAttribute($value): ?string
     {
-        return $this->belongsTo(Promotion::class);
+        return ($value && $value !== '0') ? $value : null;
+    }
+
+    public function setProofOfPaymentAttribute($value): void
+    {
+        $this->attributes['proof_of_payment'] = ($value && $value !== '0') ? $value : null;
     }
 
     public function sender()
@@ -142,6 +152,11 @@ class Booking extends Model
     public function pickupZone()
     {
         return $this->belongsTo(PickupZone::class);
+    }
+
+    public function promotion()
+    {
+        return $this->belongsTo(Promotion::class);
     }
 
     public function paymentOverriddenByUser()
@@ -256,6 +271,27 @@ class Booking extends Model
     public function invoice()
     {
         return $this->hasOne(Invoice::class)->latestOfMany();
+    }
+
+    public function getTotalAmountAttribute(): float
+    {
+        if ($this->relationLoaded('invoice')) {
+            if ($this->invoice && $this->invoice->amount !== null) {
+                return (float) $this->invoice->amount;
+            }
+        } elseif ($this->invoice()->exists()) {
+            $invoice = $this->invoice()->first();
+            if ($invoice && $invoice->amount !== null) {
+                return (float) $invoice->amount;
+            }
+        }
+
+        $boxes = $this->relationLoaded('boxes') ? $this->boxes : $this->boxes()->get();
+        $boxesPrice = (float) $boxes->sum('price_charged');
+        $emptyBoxTotal = (float) (($this->empty_box_count ?? 0) * ($this->empty_box_fee ?? 10.00));
+        $discountAmount = (float) ($this->discount_amount ?? 0.00);
+
+        return max(0.0, $boxesPrice + $emptyBoxTotal - $discountAmount);
     }
 
     public function undeliveredBoxes()
@@ -545,5 +581,23 @@ class Booking extends Model
                 ->whereNull('guest_token')
                 ->whereHas('sender', fn ($sq) => $sq->whereNotNull('user_id'));
         });
+    }
+
+    /**
+     * Resolve the route binding for the model by id or reference_number.
+     *
+     * @param  mixed  $value
+     * @param  string|null  $field
+     * @return \Illuminate\Database\Eloquent\Model|null
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        if ($field) {
+            return parent::resolveRouteBinding($value, $field);
+        }
+
+        return $this->where('id', $value)
+            ->orWhere('reference_number', $value)
+            ->first();
     }
 }
