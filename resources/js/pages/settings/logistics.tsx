@@ -132,8 +132,11 @@ export default function LogisticsSettings({
                 : [];
         }
         const zone = data.zone_schedules[activeZoneIndex];
-        const zoneWindows = zone?.pickup_windows;
-        if (zoneWindows && zoneWindows.length > 0) return zoneWindows;
+        let zoneWindows = zone?.pickup_windows;
+        if (zoneWindows && typeof zoneWindows === 'object' && !Array.isArray(zoneWindows)) {
+            zoneWindows = Object.values(zoneWindows);
+        }
+        if (zoneWindows && Array.isArray(zoneWindows) && zoneWindows.length > 0) return zoneWindows as PickupWindow[];
         // Fallback to global
         return Array.isArray(data.settings[pickupWindowsIndex].value)
             ? data.settings[pickupWindowsIndex].value
@@ -147,8 +150,11 @@ export default function LogisticsSettings({
                 : [];
         }
         const zone = data.zone_schedules[activeZoneIndex];
-        const zoneDates = zone?.blackout_dates;
-        if (zoneDates && zoneDates.length > 0) return zoneDates;
+        let zoneDates = zone?.blackout_dates;
+        if (zoneDates && typeof zoneDates === 'object' && !Array.isArray(zoneDates)) {
+            zoneDates = Object.values(zoneDates);
+        }
+        if (zoneDates && Array.isArray(zoneDates) && zoneDates.length > 0) return zoneDates as string[];
         // Fallback to global
         return Array.isArray(data.settings[blackoutDatesIndex].value)
             ? data.settings[blackoutDatesIndex].value
@@ -158,10 +164,17 @@ export default function LogisticsSettings({
     const zoneHasOverrides = (zoneIdx: number): boolean => {
         const zone = data.zone_schedules[zoneIdx];
         if (!zone) return false;
+        
+        let pw = zone.pickup_windows;
+        if (pw && typeof pw === 'object' && !Array.isArray(pw)) pw = Object.values(pw);
+        
+        let bd = zone.blackout_dates;
+        if (bd && typeof bd === 'object' && !Array.isArray(bd)) bd = Object.values(bd);
+        
         return (
-            (zone.pickup_windows && zone.pickup_windows.length > 0) ||
-            (zone.blackout_dates && zone.blackout_dates.length > 0) ||
-            zone.lead_time_days !== null
+            (pw && Array.isArray(pw) && pw.length > 0) ||
+            (bd && Array.isArray(bd) && bd.length > 0) ||
+            (zone.lead_time_days !== null && zone.lead_time_days !== undefined)
         );
     };
 
@@ -338,7 +351,7 @@ export default function LogisticsSettings({
                     </Button>
                 }
             >
-                <form onSubmit={submit} className="max-w-3xl space-y-6">
+                <form onSubmit={submit} className="w-full space-y-6">
                     {/* Zone Tab Selector */}
                     {pickupZones.length > 0 && (
                         <div className="rounded-2xl border border-border bg-card p-4 shadow-2xs">

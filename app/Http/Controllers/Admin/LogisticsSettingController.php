@@ -18,6 +18,8 @@ class LogisticsSettingController extends Controller
         'logistics_lead_time_days' => 'Minimum Lead Time (Days)',
         'logistics_pickup_windows' => 'Pickup Windows',
         'logistics_blackout_dates' => 'Blackout Dates',
+        'logistics_depot_address' => 'Depot / Drop-Off Address',
+        'logistics_depot_instructions' => 'Depot Drop-Off Instructions',
     ];
 
     /**
@@ -94,13 +96,19 @@ class LogisticsSettingController extends Controller
         // Save per-zone schedules
         if (! empty($validated['zone_schedules'])) {
             foreach ($validated['zone_schedules'] as $zoneData) {
-                PickupZone::where('id', $zoneData['id'])->update([
-                    'pickup_windows' => $zoneData['pickup_windows'],
-                    'blackout_dates' => $zoneData['blackout_dates'],
-                    'lead_time_days' => $zoneData['lead_time_days'],
-                ]);
+                $zone = PickupZone::find($zoneData['id']);
+                if ($zone) {
+                    $zone->update([
+                        'pickup_windows' => $zoneData['pickup_windows'] ?? [],
+                        'blackout_dates' => $zoneData['blackout_dates'] ?? [],
+                        'lead_time_days' => $zoneData['lead_time_days'] ?? null,
+                    ]);
+                }
             }
         }
+
+        // Invalidate cached reference data so updated pickup schedules take effect immediately
+        app(\App\Services\ReferenceDataService::class)->forgetBookingReferenceData();
 
         return redirect()->back()->with('success', 'Logistics settings updated successfully.');
     }

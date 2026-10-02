@@ -308,8 +308,9 @@ interface PageProps {
 
 export default function Book(props?: PageProps) {
   const pageProps = usePage().props as any;
-  const isGuest = Boolean(props?.isGuest || pageProps.isGuest || !pageProps.auth?.user);
-  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [] } = pageProps;
+  const mergedProps = { ...pageProps, ...(props || {}) };
+  const isGuest = Boolean(props?.isGuest || mergedProps.isGuest || !mergedProps.auth?.user);
+  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [] } = mergedProps;
 
   const depotAddress = logistics?.depotAddress || '6 Ivan St, Arundel QLD 4214';
   const depotInstructions = logistics?.depotInstructions || '';
@@ -380,62 +381,213 @@ export default function Book(props?: PageProps) {
 
 
 
-  const detectPickupZoneBySuburb = (suburbStr: string) => {
-    if (!suburbStr || !pickupZones) return '';
+  const resolveZoneIdForSuburb = useCallback((suburbStr: string) => {
+    if (!suburbStr || typeof suburbStr !== 'string') return '';
     const searchStr = suburbStr.toLowerCase().trim();
-    for (const zone of pickupZones) {
+    if (!searchStr) return '';
+
+    // 1. Check active suburbs list
+    const found = (suburbs || []).find(
+      (s: any) => s.name?.toLowerCase().trim() === searchStr
+    );
+    if (found?.pickup_zone_id) {
+      return String(found.pickup_zone_id);
+    }
+
+    // 2. Check each pickup zone's suburbs list
+    for (const zone of (pickupZones || [])) {
       if (zone.suburbs && Array.isArray(zone.suburbs)) {
-        if (zone.suburbs.some((s: any) => {
+        const matches = zone.suburbs.some((s: any) => {
           const name = typeof s === 'string' ? s : (s.name || '');
           return name.toLowerCase().trim() === searchStr;
-        })) {
-          return zone.id.toString();
+        });
+        if (matches) {
+          return String(zone.id);
         }
       }
     }
-    return '';
-  };
 
-  const handleSuburbChange = (suburbName: string, postcode?: string) => {
-    let detectedZoneId = '';
-    const found = (suburbs || []).find(
-      (s: any) => s.name?.toLowerCase() === suburbName.toLowerCase()
-    );
-
-    if (found?.pickup_zone_id) {
-      detectedZoneId = String(found.pickup_zone_id);
-    } else {
-      detectedZoneId = detectPickupZoneBySuburb(suburbName);
+    // 3. Suburb keyword in zone name fallback (e.g. Geelong in Ballarat/Geelong zone)
+    for (const zone of (pickupZones || [])) {
+      const zoneNameLower = (zone.name || '').toLowerCase();
+      if (searchStr.length >= 4 && zoneNameLower.includes(searchStr)) {
+        return String(zone.id);
+      }
     }
 
-    setData((prev: any) => ({
-      ...prev,
-      suburb: suburbName,
-      postcode: postcode || found?.postcode || prev.postcode,
-      pickup_zone_id: detectedZoneId || prev.pickup_zone_id,
-    }));
-  };
+    return '';
+  }, [suburbs, pickupZones]);
 
-  const parseLogisticsWindows = (rawWindows: any[] = []) => {
+  // Backward compatibility alias
+  const detectPickupZoneBySuburb = resolveZoneIdForSuburb;
+
+  const parseLogisticsWindows = useCallback((rawWindowsInput: any) => {
     const recurring: any[] = [];
     const specificDates: Record<string, { available: boolean; time_start?: string; time_end?: string; label?: string }> = {};
 
-    (rawWindows || []).forEach((w: any) => {
-      if (w.date) {
-        const isAvail = w.available ?? w.enabled ?? true;
-        specificDates[w.date] = {
+    if (!rawWindowsInput) return { recurring, specificDates };
+
+    let raw = rawWindowsInput;
+    if (typeof raw === 'string') {
+      try {
+        raw = JSON.parse(raw);
+      } catch {
+        return { recurring, specificDates };
+      }
+    }
+
+    const toArray = (val: any): any[] => {
+      if (Array.isArray(val)) return val;
+      if (val && typeof val === 'object') return Object.values(val);
+      return [];
+    };
+
+    // Case 1: Structured object with { weekly, specific_dates }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && ('weekly' in raw || 'specific_dates' in raw)) {
+      if (raw.weekly) {
+        const weeklyItems = toArray(raw.weekly);
+        weeklyItems.forEach((w: any) => {
+          if (!w || typeof w !== 'object') return;
+          const days = toArray(w.days).map(Number).filter((n: number) => !isNaN(n));
+          if (days.length > 0) {
+            recurring.push({
+              ...w,
+              days,
+              weeks_of_month: w.weeks_of_month ? toArray(w.weeks_of_month).map(Number).filter((n: number) => !isNaN(n)) : undefined,
+            });
+          }
+        });
+      }
+      if (raw.specific_dates && typeof raw.specific_dates === 'object') {
+        Object.entries(raw.specific_dates).forEach(([dateStr, config]: [string, any]) => {
+          if (typeof config === 'object' && config !== null) {
+            specificDates[dateStr] = {
+              available: Boolean(config.available ?? config.enabled ?? true),
+              time_start: config.time_start || '08:00',
+              time_end: config.time_end || '17:00',
+              label: config.label,
+            };
+          } else {
+            specificDates[dateStr] = {
+              available: Boolean(config),
+              time_start: '08:00',
+              time_end: '17:00',
+            };
+          }
+        });
+      }
+      return { recurring, specificDates };
+    }
+
+    // Case 2: Array or object of window items
+    const items = toArray(raw);
+    items.forEach((item: any) => {
+      if (!item || typeof item !== 'object') return;
+
+      if (Array.isArray(item)) {
+        item.forEach((subItem: any) => {
+          if (!subItem || typeof subItem !== 'object') return;
+          if (subItem.date) {
+            const isAvail = subItem.available ?? subItem.enabled ?? true;
+            specificDates[subItem.date] = {
+              available: Boolean(isAvail),
+              time_start: subItem.time_start || '08:00',
+              time_end: subItem.time_end || '17:00',
+              label: subItem.label,
+            };
+          } else {
+            const days = toArray(subItem.days).map(Number).filter((n: number) => !isNaN(n));
+            if (days.length > 0) {
+              recurring.push({
+                ...subItem,
+                days,
+                weeks_of_month: subItem.weeks_of_month ? toArray(subItem.weeks_of_month).map(Number).filter((n: number) => !isNaN(n)) : undefined,
+              });
+            }
+          }
+        });
+        return;
+      }
+
+      if (item.date) {
+        const isAvail = item.available ?? item.enabled ?? true;
+        specificDates[item.date] = {
           available: Boolean(isAvail),
-          time_start: w.time_start || '08:00',
-          time_end: w.time_end || '17:00',
-          label: w.label,
+          time_start: item.time_start || '08:00',
+          time_end: item.time_end || '17:00',
+          label: item.label,
         };
-      } else if (Array.isArray(w.days) && w.days.length > 0) {
-        recurring.push(w);
+      } else {
+        const days = toArray(item.days).map(Number).filter((n: number) => !isNaN(n));
+        if (days.length > 0) {
+          recurring.push({
+            ...item,
+            days,
+            weeks_of_month: item.weeks_of_month ? toArray(item.weeks_of_month).map(Number).filter((n: number) => !isNaN(n)) : undefined,
+          });
+        }
       }
     });
 
     return { recurring, specificDates };
-  };
+  }, []);
+
+  const resolveLogisticsForZone = useCallback((
+    zoneId: string | number | undefined,
+    zonesList: any[],
+    baseLogistics: any
+  ) => {
+    if (!zoneId) return baseLogistics;
+    const zone = zonesList?.find((z: any) => z.id.toString() === zoneId.toString());
+    if (!zone) return baseLogistics;
+
+    const toArray = (val: any): any[] => {
+      if (Array.isArray(val)) return val;
+      if (val && typeof val === 'object') return Object.values(val);
+      if (typeof val === 'string') {
+        try { const parsed = JSON.parse(val); return toArray(parsed); } catch { return []; }
+      }
+      return [];
+    };
+
+    const parsed = parseLogisticsWindows(zone.pickup_windows);
+    const recurring = parsed.recurring;
+    const zoneSpecific = parsed.specificDates;
+    const hasZoneRecurring = recurring.length > 0;
+    const hasZoneSpecific = Object.keys(zoneSpecific).length > 0;
+    const hasZoneWindows = hasZoneRecurring || hasZoneSpecific;
+
+    const parsedBlackout = toArray(zone.blackout_dates);
+    const hasZoneBlackout = parsedBlackout.length > 0;
+
+    const hasCustomLeadTime = zone.lead_time_days !== null && zone.lead_time_days !== undefined;
+    const leadTimeDays = hasCustomLeadTime ? zone.lead_time_days : (baseLogistics?.leadTimeDays ?? 2);
+
+    const isCustomZoneSchedule = hasZoneWindows || hasZoneBlackout || hasCustomLeadTime;
+
+    const pickupWindows = hasZoneWindows
+      ? recurring
+      : (baseLogistics?.pickupWindows || []);
+
+    const specificDates = hasZoneWindows
+      ? zoneSpecific
+      : (baseLogistics?.specificDates || {});
+
+    const blackoutDates = hasZoneBlackout
+      ? parsedBlackout
+      : (baseLogistics?.blackoutDates || []);
+
+    return {
+      ...baseLogistics,
+      pickupWindows,
+      specificDates,
+      blackoutDates,
+      leadTimeDays,
+      zoneName: zone.name,
+      zoneCode: zone.code,
+      isCustomZoneSchedule,
+    };
+  }, [parseLogisticsWindows]);
 
   const evaluateDateAvailability = (
     dateInput: Date | string,
@@ -443,24 +595,36 @@ export default function Book(props?: PageProps) {
   ): { isInvalid: boolean; message?: string; timeStart?: string; timeEnd?: string } => {
     if (!logisticsObj) return { isInvalid: false };
 
-    const date = new Date(dateInput);
-    if (isNaN(date.getTime())) return { isInvalid: true, message: 'Invalid date' };
+    let checkDate: Date;
+    if (typeof dateInput === 'string') {
+      const cleanStr = dateInput.includes('T') ? dateInput.split('T')[0] : dateInput.slice(0, 10);
+      const [yearStr, monthStr, dayStr] = cleanStr.split('-');
+      if (yearStr && monthStr && dayStr) {
+        checkDate = new Date(parseInt(yearStr, 10), parseInt(monthStr, 10) - 1, parseInt(dayStr, 10));
+      } else {
+        checkDate = new Date(dateInput);
+      }
+    } else {
+      checkDate = new Date(dateInput);
+    }
+
+    if (isNaN(checkDate.getTime())) return { isInvalid: true, message: 'Invalid date' };
 
     // Lead time check
     const leadTimeDate = new Date();
     leadTimeDate.setHours(0, 0, 0, 0);
     leadTimeDate.setDate(leadTimeDate.getDate() + (logisticsObj.leadTimeDays || 2));
 
-    const checkDate = new Date(date);
-    checkDate.setHours(0, 0, 0, 0);
+    const checkDateMidnight = new Date(checkDate);
+    checkDateMidnight.setHours(0, 0, 0, 0);
 
-    if (checkDate < leadTimeDate) {
+    if (checkDateMidnight < leadTimeDate) {
       return { isInvalid: true, message: `Minimum ${logisticsObj.leadTimeDays || 2} days lead time required` };
     }
 
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
+    const y = checkDate.getFullYear();
+    const m = String(checkDate.getMonth() + 1).padStart(2, '0');
+    const d = String(checkDate.getDate()).padStart(2, '0');
     const dateStr = `${y}-${m}-${d}`;
 
     // Blackout check
@@ -484,15 +648,17 @@ export default function Book(props?: PageProps) {
     const hasSpecific = Object.keys(specificDates).length > 0;
 
     if (windows.length > 0) {
-      const dayOfWeek = date.getDay();
-      const weekOfMonth = Math.ceil(date.getDate() / 7);
+      const dayOfWeek = checkDate.getDay();
+      const weekOfMonth = Math.ceil(checkDate.getDate() / 7);
 
-      const matchingWindow = windows.find((w: any) =>
-        w.enabled !== false &&
-        Array.isArray(w.days) &&
-        w.days.includes(dayOfWeek) &&
-        (w.weeks_of_month || [1, 2, 3, 4, 5]).includes(weekOfMonth)
-      );
+      const matchingWindow = windows.find((w: any) => {
+        if (w.enabled === false) return false;
+        const days = Array.isArray(w.days) ? w.days : (w.days && typeof w.days === 'object' ? Object.values(w.days).map(Number) : []);
+        const wom = w.weeks_of_month
+          ? (Array.isArray(w.weeks_of_month) ? w.weeks_of_month : Object.values(w.weeks_of_month).map(Number))
+          : [1, 2, 3, 4, 5];
+        return days.includes(dayOfWeek) && wom.includes(weekOfMonth);
+      });
 
       if (!matchingWindow) {
         return { isInvalid: true, message: 'No pickup service available on the selected day' };
@@ -508,61 +674,14 @@ export default function Book(props?: PageProps) {
       return { isInvalid: true, message: 'No pickup service scheduled on the selected date' };
     }
 
+    // Default fallback when no specific schedule is defined:
+    // Sundays are closed for collection unless explicitly scheduled
+    const dayOfWeek = checkDate.getDay();
+    if (dayOfWeek === 0) {
+      return { isInvalid: true, message: 'No collections scheduled on Sundays' };
+    }
+
     return { isInvalid: false, timeStart: '08:00', timeEnd: '17:00' };
-  };
-
-  const getInitialValidDate = (zoneId?: string) => {
-    let currentLogistics = logistics;
-
-    // Auto-detect zone from suburb if not provided
-    if (!zoneId && (sender?.suburb || editingBooking?.sender?.suburb)) {
-      zoneId = detectPickupZoneBySuburb(sender?.suburb || editingBooking?.sender?.suburb || '');
-    }
-
-    if (zoneId) {
-      const zone = pickupZones?.find((z: any) => z.id.toString() === zoneId.toString());
-      if (zone) {
-        const rawWindows = zone.pickup_windows?.length > 0 ? zone.pickup_windows : (logistics?.pickupWindows || []);
-        const { recurring, specificDates: zoneSpecific } = parseLogisticsWindows(rawWindows);
-
-        currentLogistics = {
-          ...logistics,
-          pickupWindows: recurring.length > 0 ? recurring : (logistics?.pickupWindows || []),
-          specificDates: {
-            ...(logistics?.specificDates || {}),
-            ...zoneSpecific,
-          },
-          blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : (logistics?.blackoutDates || []),
-          leadTimeDays: zone.lead_time_days ?? (logistics?.leadTimeDays ?? 2),
-        };
-      }
-    }
-
-    if (!currentLogistics) {
-      return new Date(Date.now() + 86400000 * 2).toISOString().slice(0, 16);
-    }
-
-    let date = new Date(Date.now() + 86400000 * (currentLogistics.leadTimeDays || 2));
-    let attempts = 0;
-
-    while (attempts < 365) {
-      attempts++;
-      const evalResult = evaluateDateAvailability(date, currentLogistics);
-      if (evalResult.isInvalid) {
-        date = new Date(date.getTime() + 86400000);
-        continue;
-      }
-
-      const [hh, mm] = (evalResult.timeStart || '08:00').split(':');
-      date.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
-      break;
-    }
-
-    // Offset local timezone format for datetime-local
-    const offset = date.getTimezoneOffset() * 60000;
-    const localDate = new Date(date.getTime() - offset);
-
-    return localDate.toISOString().slice(0, 16);
   };
 
   const { data, setData, post, put, processing, errors, setError, clearErrors, transform } = useForm({
@@ -578,12 +697,14 @@ export default function Book(props?: PageProps) {
     postcode: sender?.postcode || '',
     latitude: sender?.latitude || null,
     longitude: sender?.longitude || null,
-    pickup_zone_id: sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || '',
+    pickup_zone_id: editingBooking?.pickup_zone_id?.toString() || (!isGuest && !isEditingSender && sender?.pickup_zone_id ? sender.pickup_zone_id.toString() : (sender?.suburb ? resolveZoneIdForSuburb(sender.suburb) : '') || ''),
     website: '',
 
     // Shared Booking Data
     booking_type: 'home_pickup',
-    preferred_date: getInitialValidDate(sender?.pickup_zone_id?.toString() || editingBooking?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(sender?.suburb || '') || ''),
+    preferred_date: editingBooking?.preferred_date
+      ? new Date(editingBooking.preferred_date).toISOString().slice(0, 16)
+      : '',
     payment_method: 'stripe',
     notes: '',
     promo_code: '',
@@ -616,31 +737,89 @@ export default function Book(props?: PageProps) {
     ],
   });
 
-  const detectedZoneId = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb || '');
+  const detectedZoneId = useMemo(() => {
+    if (!data.suburb) return '';
+    return resolveZoneIdForSuburb(data.suburb);
+  }, [data.suburb, resolveZoneIdForSuburb]);
+
   const activeZoneId = data.pickup_zone_id || detectedZoneId;
   const selectedZone = pickupZones?.find((z: any) => z.id.toString() === activeZoneId?.toString());
 
   const activeLogistics = useMemo(() => {
     if (data.booking_type === 'drop_off') return logistics;
-    const currentZoneId = data.pickup_zone_id || detectedZoneId;
-    if (!currentZoneId) return logistics;
-    const zone = pickupZones?.find((z: any) => z.id.toString() === currentZoneId.toString());
-    if (!zone) return logistics;
+    if (!activeZoneId) return null;
+    return resolveLogisticsForZone(activeZoneId, pickupZones, logistics);
+  }, [data.booking_type, activeZoneId, pickupZones, logistics, resolveLogisticsForZone]);
 
-    const rawWindows = zone.pickup_windows?.length > 0 ? zone.pickup_windows : (logistics?.pickupWindows || []);
-    const { recurring, specificDates: zoneSpecific } = parseLogisticsWindows(rawWindows);
+  const getInitialValidDate = useCallback((zoneId?: string) => {
+    let targetZoneId = zoneId || data?.pickup_zone_id || (data?.suburb ? resolveZoneIdForSuburb(data.suburb) : '');
 
-    return {
-      ...logistics,
-      pickupWindows: recurring.length > 0 ? recurring : (logistics?.pickupWindows || []),
-      specificDates: {
-        ...(logistics?.specificDates || {}),
-        ...zoneSpecific,
-      },
-      blackoutDates: zone.blackout_dates?.length > 0 ? zone.blackout_dates : (logistics?.blackoutDates || []),
-      leadTimeDays: zone.lead_time_days ?? (logistics?.leadTimeDays ?? 2),
-    };
-  }, [data.booking_type, data?.pickup_zone_id, detectedZoneId, pickupZones, logistics]);
+    if (data?.booking_type === 'home_pickup' && !targetZoneId) {
+      return '';
+    }
+
+    const currentLogistics = data?.booking_type === 'drop_off'
+      ? logistics
+      : resolveLogisticsForZone(targetZoneId, pickupZones, logistics);
+
+    if (!currentLogistics) {
+      return '';
+    }
+
+    const windows = currentLogistics.pickupWindows || [];
+    const specificDates = currentLogistics.specificDates || {};
+    const validWindows = windows.filter((w: any) => {
+      if (w.enabled === false) return false;
+      const days = Array.isArray(w.days) ? w.days : (w.days && typeof w.days === 'object' ? Object.values(w.days) : []);
+      return days.length > 0;
+    });
+    const hasSpecific = Object.keys(specificDates).length > 0;
+
+    // If no schedule windows or specific dates are configured, don't guess an arbitrary date
+    if (validWindows.length === 0 && !hasSpecific) {
+      return '';
+    }
+
+    let date = new Date(Date.now() + 86400000 * (currentLogistics.leadTimeDays || 2));
+    let attempts = 0;
+
+    while (attempts < 180) {
+      attempts++;
+      const evalResult = evaluateDateAvailability(date, currentLogistics);
+      if (evalResult.isInvalid) {
+        date = new Date(date.getTime() + 86400000);
+        continue;
+      }
+
+      const [hh, mm] = (evalResult.timeStart || '08:00').split(':');
+      date.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+
+      // Offset local timezone format for datetime-local
+      const offset = date.getTimezoneOffset() * 60000;
+      const localDate = new Date(date.getTime() - offset);
+      return localDate.toISOString().slice(0, 16);
+    }
+
+    return '';
+  }, [data?.booking_type, data?.pickup_zone_id, data?.suburb, logistics, pickupZones, resolveLogisticsForZone, resolveZoneIdForSuburb]);
+
+  const handleSuburbChange = (suburbName: string, postcode?: string) => {
+    const detectedZoneId = resolveZoneIdForSuburb(suburbName);
+    const found = (suburbs || []).find(
+      (s: any) => s.name?.toLowerCase().trim() === suburbName.toLowerCase().trim()
+    );
+
+    setData((prev: any) => ({
+      ...prev,
+      suburb: suburbName,
+      postcode: postcode || found?.postcode || prev.postcode,
+      pickup_zone_id: detectedZoneId,
+    }));
+    clearErrors('suburb');
+    if (detectedZoneId) {
+      clearErrors('pickup_zone_id');
+    }
+  };
 
   // Auto-sync pickup_zone_id with suburb when home_pickup is selected
   useEffect(() => {
@@ -651,15 +830,27 @@ export default function Book(props?: PageProps) {
       return;
     }
     if (data.suburb) {
-      const detected = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb);
+      const detected = resolveZoneIdForSuburb(data.suburb);
       if (detected && detected !== data.pickup_zone_id) {
         setData('pickup_zone_id', detected);
       }
+    } else if (!data.suburb && isEditingSender) {
+      if (data.pickup_zone_id) {
+        setData('pickup_zone_id', '');
+      }
     }
-  }, [data.suburb, data.booking_type, pickupZones, sender?.pickup_zone_id]);
+  }, [data.suburb, data.booking_type, resolveZoneIdForSuburb, isEditingSender]);
 
   useEffect(() => {
-    if (!data.preferred_date || !activeLogistics) return;
+    if (!activeLogistics) return;
+
+    if (!data.preferred_date) {
+      const initialDate = getInitialValidDate(data.pickup_zone_id);
+      if (initialDate) {
+        setData('preferred_date', initialDate);
+      }
+      return;
+    }
 
     const date = new Date(data.preferred_date);
     const { isInvalid } = evaluateDateAvailability(date, activeLogistics);
@@ -670,54 +861,300 @@ export default function Book(props?: PageProps) {
         setData('preferred_date', newValidDate);
       }
     }
-  }, [data.pickup_zone_id, activeLogistics, data.preferred_date]);
+  }, [data.pickup_zone_id, activeLogistics, data.preferred_date, getInitialValidDate]);
 
-  const PickupScheduleSummary = () => {
-    const windows = activeLogistics?.pickupWindows || [];
-    const specificDates = activeLogistics?.specificDates || {};
-    const validWindows = windows.filter((w: any) => w.enabled !== false && Array.isArray(w.days) && w.days.length > 0);
+  const getUpcomingAvailableDates = useCallback((logisticsObj: any, limit = 6) => {
+    if (!logisticsObj) return [];
 
-    const upcomingSpecific = Object.entries(specificDates)
-      .filter(([dateStr, config]: [string, any]) => {
-        const isAvail = typeof config === 'object' ? config.available : Boolean(config);
-        return isAvail && dateStr >= new Date().toISOString().slice(0, 10);
-      })
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(0, 4);
+    const windows = logisticsObj.pickupWindows || [];
+    const specificDates = logisticsObj.specificDates || {};
+    const validWindows = windows.filter((w: any) => {
+      if (w.enabled === false) return false;
+      const days = Array.isArray(w.days) ? w.days : (w.days && typeof w.days === 'object' ? Object.values(w.days) : []);
+      return days.length > 0;
+    });
+    const hasSpecific = Object.keys(specificDates).length > 0;
 
-    if (validWindows.length === 0 && upcomingSpecific.length === 0) {
-      return null;
+    // If no recurring windows or specific dates are configured, there are no scheduled runs to display
+    if (validWindows.length === 0 && !hasSpecific) {
+      return [];
     }
 
+    const availableSlots: {
+      date: Date;
+      dateStr: string;
+      formattedWeekday: string;
+      formattedMonthDay: string;
+      timeStart: string;
+      timeEnd: string;
+      label?: string;
+      isEarliest?: boolean;
+    }[] = [];
+
+    const leadTime = logisticsObj.leadTimeDays ?? 2;
+    const startDate = new Date();
+    startDate.setHours(0, 0, 0, 0);
+    startDate.setDate(startDate.getDate() + leadTime);
+
+    let checkDate = new Date(startDate);
+    let daysChecked = 0;
+
+    while (availableSlots.length < limit && daysChecked < 90) {
+      const evalResult = evaluateDateAvailability(checkDate, logisticsObj);
+      if (!evalResult.isInvalid) {
+        const y = checkDate.getFullYear();
+        const m = String(checkDate.getMonth() + 1).padStart(2, '0');
+        const d = String(checkDate.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${d}`;
+
+        const isEarliest = availableSlots.length === 0;
+
+        const specificDates = logisticsObj.specificDates || {};
+        const specificConfig = specificDates[dateStr];
+        const label = typeof specificConfig === 'object' ? specificConfig.label : undefined;
+
+        availableSlots.push({
+          date: new Date(checkDate),
+          dateStr,
+          formattedWeekday: checkDate.toLocaleDateString('en-AU', { weekday: 'short' }),
+          formattedMonthDay: checkDate.toLocaleDateString('en-AU', { month: 'short', day: 'numeric' }),
+          timeStart: evalResult.timeStart || '08:00',
+          timeEnd: evalResult.timeEnd || '17:00',
+          label,
+          isEarliest,
+        });
+      }
+
+      checkDate = new Date(checkDate.getTime() + 86400000);
+      daysChecked++;
+    }
+
+    return availableSlots;
+  }, []);
+
+  const PickupScheduleShowcase = () => {
+    if (data.booking_type === 'drop_off') {
+      return (
+        <div className="rounded-2xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/30 p-4 md:p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-9 items-center justify-center rounded-xl bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300">
+                <Building2 className="size-4.5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-sky-900 dark:text-sky-100">
+                  Depot Drop-Off Schedule & Location
+                </h4>
+                <p className="text-[11px] text-sky-700 dark:text-sky-300">
+                  Deliver your box directly to our warehouse facility
+                </p>
+              </div>
+            </div>
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-semibold bg-sky-100 dark:bg-sky-900/80 text-sky-800 dark:text-sky-200">
+              Drop-Off Mode
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
+            <div className="p-3 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-sky-100 dark:border-sky-900/40 space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Warehouse Address</span>
+              <p className="font-semibold text-zinc-800 dark:text-zinc-200 flex items-start gap-1.5">
+                <MapPin className="size-3.5 text-sky-600 shrink-0 mt-0.5" />
+                <span>{depotAddress}</span>
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-white/80 dark:bg-zinc-900/80 border border-sky-100 dark:border-sky-900/40 space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Operating Hours & Instructions</span>
+              <p className="text-zinc-700 dark:text-zinc-300 leading-relaxed text-[11px]">
+                {depotInstructions || 'Monday – Friday, 8:00 AM – 4:30 PM. Please check in with warehouse staff upon arrival with your booking reference.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const upcomingSlots = getUpcomingAvailableDates(activeLogistics, 6);
+    const windows = activeLogistics?.pickupWindows || [];
+    const specificDates = activeLogistics?.specificDates || {};
+    const validWindows = windows.filter((w: any) => {
+      if (w.enabled === false) return false;
+      const days = Array.isArray(w.days) ? w.days : (w.days && typeof w.days === 'object' ? Object.values(w.days) : []);
+      return days.length > 0;
+    });
+    const hasSpecificOverrides = Object.keys(specificDates).length > 0;
     const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     return (
-      <div className="mt-4 rounded-xl border border-sky-100 dark:border-sky-900/30 bg-sky-50/50 dark:bg-sky-950/20 p-4">
-        <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">Our Collection Schedule</p>
-        <ul className="space-y-2">
-          {validWindows.map((window: any) => (
-            <li key={window.id} className="text-xs text-zinc-600 dark:text-zinc-400">
-              <span className="font-bold text-zinc-900 dark:text-zinc-100">{window.label || 'Regular Window'}: </span>
-              {(window.days || []).map((d: number) => daysOfWeek[d]).join(', ')}
-              <span className="mx-1 text-zinc-400 dark:text-zinc-600">·</span>
-              {formatTime(window.time_start)} – {formatTime(window.time_end)}
-              {window.weeks_of_month && window.weeks_of_month.length < 5 && (
-                <span className="ml-1 text-sky-600 dark:text-sky-400 italic">
-                  ({window.weeks_of_month.map((w: number) => w === 1 ? '1st' : w === 2 ? '2nd' : w === 3 ? '3rd' : w === 4 ? '4th' : '5th (29+)').join(', ')} week only)
-                </span>
-              )}
-            </li>
-          ))}
-          {upcomingSpecific.map(([dateStr, config]: [string, any]) => (
-            <li key={dateStr} className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
-              <span className="inline-block size-1.5 rounded-full bg-emerald-500" />
-              <span className="font-bold text-zinc-900 dark:text-zinc-100">
-                {new Date(dateStr + 'T00:00:00').toLocaleDateString('en-AU', { weekday: 'short', month: 'short', day: 'numeric' })}:
+      <div className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-linear-to-b from-zinc-50/80 to-white dark:from-zinc-900/90 dark:to-zinc-900/40 p-4 md:p-5 space-y-4 shadow-2xs">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200/70 dark:border-zinc-800 pb-3.5">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-brand-warm/15 dark:bg-brand-rust/20 text-brand-rust">
+              <CalendarIcon className="size-4.5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-900 dark:text-zinc-100">
+                  Pickup Schedule & Rules
+                </h4>
+                {activeLogistics?.isCustomZoneSchedule ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-800/60">
+                    Zone Schedule Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                    Standard Schedule
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                {selectedZone ? (
+                  <>Operating schedule for <strong className="text-zinc-800 dark:text-zinc-200">{selectedZone.name}</strong></>
+                ) : (
+                  'Operating schedule set in admin settings'
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-medium bg-amber-50 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-900/50 text-amber-800 dark:text-amber-300">
+              <Clock className="size-3 text-amber-600 shrink-0" />
+              <span>Min. <strong>{activeLogistics?.leadTimeDays ?? 2} days</strong> advance notice</span>
+            </span>
+          </div>
+        </div>
+
+        {/* Regular Service Windows summary if defined */}
+        {validWindows.length > 0 && (
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Regular Service Days & Hours
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {validWindows.map((w: any) => (
+                <div
+                  key={w.id}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-zinc-800/80 border border-zinc-200/80 dark:border-zinc-700/80 text-xs shadow-2xs"
+                >
+                  <span className="font-semibold text-zinc-800 dark:text-zinc-200">
+                    {w.label || 'Regular Run'}:
+                  </span>
+                  <div className="flex items-center gap-1">
+                    {(w.days || []).map((d: number) => (
+                      <span
+                        key={d}
+                        className="px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-700/70 font-bold text-[10px] text-zinc-700 dark:text-zinc-300"
+                      >
+                        {daysOfWeek[d]}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-zinc-400 dark:text-zinc-600">·</span>
+                  <span className="text-zinc-600 dark:text-zinc-400 text-[11px]">
+                    {formatTime(w.time_start)} – {formatTime(w.time_end)}
+                  </span>
+                  {w.weeks_of_month && w.weeks_of_month.length < 5 && (
+                    <span className="text-[10px] font-medium text-brand-rust dark:text-amber-400 italic">
+                      ({w.weeks_of_month.map((wm: number) => wm === 1 ? '1st' : wm === 2 ? '2nd' : wm === 3 ? '3rd' : wm === 4 ? '4th' : '5th').join(', ')} wk)
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {validWindows.length === 0 && hasSpecificOverrides && (
+          <div className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400 bg-sky-50/60 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-900/40 p-2.5 rounded-xl">
+            <Info className="size-4 text-sky-600 shrink-0" />
+            <span>This area operates on <strong>specific designated run dates</strong>. Please select from the upcoming dates below or use the calendar.</span>
+          </div>
+        )}
+
+        {validWindows.length === 0 && !hasSpecificOverrides && (
+          <div className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-100/70 dark:bg-zinc-800/60 p-2.5 rounded-xl">
+            <Info className="size-4 text-zinc-500 shrink-0" />
+            <span>No specific pickup schedule has been configured for this area. Please contact us to arrange pickup. Minimum {activeLogistics?.leadTimeDays ?? 2} days advance notice required.</span>
+          </div>
+        )}
+
+        {/* Upcoming Available Scheduled Runs (Interactive Quick Select Chips) */}
+        {upcomingSlots.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+                <Sparkles className="size-3 text-brand-rust" /> Upcoming Scheduled Runs (Click to Select)
               </span>
-              <span>{formatTime(config.time_start || '08:00')} – {formatTime(config.time_end || '17:00')}</span>
-            </li>
-          ))}
-        </ul>
+              <span className="text-[11px] text-zinc-400">Available slots</span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+              {upcomingSlots.map((slot) => {
+                const isSelected = data.preferred_date?.slice(0, 10) === slot.dateStr;
+
+                return (
+                  <button
+                    key={slot.dateStr}
+                    type="button"
+                    onClick={() => {
+                      const [hh, mm] = (slot.timeStart || '09:00').split(':');
+                      const newDate = new Date(slot.date);
+                      newDate.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+
+                      const offset = newDate.getTimezoneOffset() * 60000;
+                      const localDate = new Date(newDate.getTime() - offset);
+
+                      setData('preferred_date', localDate.toISOString().slice(0, 16));
+                      clearErrors('preferred_date');
+                    }}
+                    className={cn(
+                      "relative flex flex-col items-center justify-center p-2.5 rounded-xl border text-center transition-all cursor-pointer shadow-2xs group",
+                      isSelected
+                        ? "bg-brand-warm/15 dark:bg-brand-rust/20 border-brand-rust dark:border-brand-rust ring-2 ring-brand-rust/30 dark:ring-brand-rust/40 text-brand-rust dark:text-amber-200"
+                        : "bg-white dark:bg-zinc-800/80 border-zinc-200/80 dark:border-zinc-700/80 hover:border-zinc-300 dark:hover:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+                    )}
+                  >
+                    {slot.isEarliest && (
+                      <span className="absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-600 text-white shadow-xs">
+                        Earliest
+                      </span>
+                    )}
+
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                      {slot.formattedWeekday}
+                    </span>
+                    <span className="text-sm font-black text-zinc-900 dark:text-zinc-100 my-0.5">
+                      {slot.formattedMonthDay}
+                    </span>
+                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      {formatTime(slot.timeStart)}
+                    </span>
+
+                    {isSelected && (
+                      <span className="mt-1 inline-flex items-center gap-0.5 text-[10px] font-bold text-brand-rust dark:text-amber-300">
+                        <Check className="size-3" /> Selected
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Blackout notice if any exist */}
+        {activeLogistics?.blackoutDates && activeLogistics.blackoutDates.length > 0 && (
+          <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 text-[11px] text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="size-3.5 text-amber-600 shrink-0" />
+            <span>
+              <strong>Holiday / Blackout Notice:</strong> No collections are scheduled on: {activeLogistics.blackoutDates.slice(0, 4).map((d: string) => {
+                try { return new Date(d + 'T00:00:00').toLocaleDateString('en-AU', { month: 'short', day: 'numeric' }); } catch { return d; }
+              }).join(', ')}{activeLogistics.blackoutDates.length > 4 ? '...' : ''}.
+            </span>
+          </div>
+        )}
       </div>
     );
   };
@@ -1540,6 +1977,11 @@ field = 'recipient mobile number';
         }
       });
 
+      if (!isDropOff && !data.pickup_zone_id) {
+        setError('pickup_zone_id', 'Please select or confirm your pickup area');
+        hasErrors = true;
+      }
+
       if (data.mobile) {
         const phoneError = validatePhone(data.mobile, 'Contact Phone', senderCountryCode);
 
@@ -2207,7 +2649,7 @@ if (step === 2) {
                       <button
                         type="button"
                         onClick={() => {
-                          const detected = sender?.pickup_zone_id?.toString() || detectPickupZoneBySuburb(data.suburb || '');
+                          const detected = data.suburb ? resolveZoneIdForSuburb(data.suburb) : '';
                           setData((prev: any) => ({
                             ...prev,
                             booking_type: 'home_pickup',
@@ -2248,55 +2690,53 @@ if (step === 2) {
                         <span>Drop-Off at Depot</span>
                       </button>
                     </div>
-
-                    {data.booking_type === 'drop_off' && (
-                      <div className="flex flex-col gap-1 p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-900/40 text-xs text-sky-800 dark:text-sky-300">
-                        <div className="flex items-center gap-2">
-                          <MapPinned className="size-4 text-sky-600 shrink-0" />
-                          <span className="truncate">
-                            Depot Address: <strong>{depotAddress}</strong>
-                          </span>
-                        </div>
-                        {depotInstructions && (
-                          <p className="text-[11px] text-sky-700/80 dark:text-sky-300/80 pl-6 leading-relaxed">
-                            {depotInstructions}
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
 
-                  {/* Home Pickup Zone Detection (Auto-assigned based on suburb) */}
+                  {/* Home Pickup Zone Detection (Auto-assigned based on suburb or selected) */}
                   {data.booking_type === 'home_pickup' && (
                     <div className="space-y-3">
                       {selectedZone ? (
-                        <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200/80 dark:border-zinc-700/80 text-xs">
+                        <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/80 dark:border-emerald-800/60 text-xs shadow-2xs">
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <MapPin className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                            <p className="text-zinc-700 dark:text-zinc-300 font-medium truncate">
-                              Pickup Area: <strong className="text-zinc-900 dark:text-zinc-100">{selectedZone.name}</strong>
-                              {data.suburb && (
-                                <span className="text-zinc-500 dark:text-zinc-400 font-normal ml-1.5">
-                                  (Auto-recognized from {data.suburb})
-                                </span>
-                              )}
-                            </p>
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 shrink-0">
+                              <MapPin className="size-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-zinc-900 dark:text-zinc-100 font-semibold truncate">
+                                Pickup Area: <span className="font-bold text-emerald-800 dark:text-emerald-300">{selectedZone.name}</span>
+                              </p>
+                              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                {data.suburb ? `Auto-assigned from suburb "${data.suburb}"` : 'Selected service area'}
+                              </p>
+                            </div>
                           </div>
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
-                            <CheckCircle className="size-3.5" /> Auto-Assigned
-                          </span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/80 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
+                              <CheckCircle className="size-3" /> Area Assigned
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setData('pickup_zone_id', '')}
+                              className="text-[11px] font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 underline cursor-pointer"
+                            >
+                              Change
+                            </button>
+                          </div>
                         </div>
                       ) : data.suburb ? (
                         <Field
                           label="Pickup Area"
                           required
                           error={errors.pickup_zone_id}
-                          hint={`We couldn't automatically match "${data.suburb}" to a zone. Please select your area.`}
+                          hint={`We couldn't automatically match "${data.suburb}" to a pickup zone. Please select your pickup area from the list.`}
                         >
                           <select
                             className={cn(baseInputClass)}
                             value={data.pickup_zone_id || ''}
-                            onChange={(e) => setData('pickup_zone_id', e.target.value)}
+                            onChange={(e) => {
+                              setData('pickup_zone_id', e.target.value);
+                              clearErrors('pickup_zone_id');
+                            }}
                             disabled={!!editingBooking}
                           >
                             <option value="" disabled>Select your pickup area</option>
@@ -2308,83 +2748,150 @@ if (step === 2) {
                           </select>
                         </Field>
                       ) : (
-                        <div className="flex items-center gap-2 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-dashed border-zinc-200 dark:border-zinc-700 text-xs text-zinc-500 dark:text-zinc-400">
-                          <Info className="size-4 text-zinc-400 shrink-0" />
-                          <span>Pickup area and schedule will auto-load once you select your suburb above.</span>
+                        <div className="rounded-2xl border border-zinc-200/90 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/40 p-4 space-y-3">
+                          <div className="flex items-start gap-3">
+                            <div className="flex size-8 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5">
+                              <MapPin className="size-4" />
+                            </div>
+                            <div className="space-y-1 min-w-0">
+                              <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                                Suburb or Pickup Area Required
+                              </p>
+                              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                                Please select your <strong>Suburb</strong> in the address section above to automatically detect your pickup area and see available collection schedules.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-zinc-200/60 dark:border-zinc-800">
+                            <Field label="Or select your pickup area directly" hint="Optional if you already know your pickup zone">
+                              <select
+                                className={cn(baseInputClass)}
+                                value={data.pickup_zone_id || ''}
+                                onChange={(e) => {
+                                  setData('pickup_zone_id', e.target.value);
+                                  clearErrors('pickup_zone_id');
+                                }}
+                                disabled={!!editingBooking}
+                              >
+                                <option value="">-- Choose Pickup Area --</option>
+                                {pickupZones?.map((zone: any) => (
+                                  <option key={zone.id} value={zone.id}>
+                                    {zone.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </Field>
+                          </div>
                         </div>
                       )}
                     </div>
                   )}
 
+                  {/* Placeholder when pickup area is not yet determined */}
+                  {data.booking_type === 'home_pickup' && !selectedZone && (
+                    <div className="rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800 p-8 text-center space-y-2 bg-zinc-50/40 dark:bg-zinc-900/20">
+                      <div className="flex size-10 items-center justify-center rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400 mx-auto">
+                        <CalendarIcon className="size-5" />
+                      </div>
+                      <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                        Pickup Schedule Will Appear Here
+                      </p>
+                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
+                        Once your suburb or pickup area is selected, operating schedule, advance notice rules, and upcoming collection runs will display here.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Pickup Rules & Schedule Showcase */}
+                  {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!selectedZone)) && (
+                    <PickupScheduleShowcase />
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-                    <Field
-                      label={data.booking_type === 'drop_off' ? 'Preferred Drop-Off Date' : 'Preferred Pickup Date'}
-                      required
-                      error={errors.preferred_date}
-                      hint={`Minimum ${activeLogistics?.leadTimeDays ?? 2} days lead time required.`}
-                    >
-                      <div className="flex w-full items-center gap-2">
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant={"outline"}
-                              className={cn(
-                                "flex-1 h-12 w-full justify-start text-left font-normal rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800",
-                                !data.preferred_date && "text-muted-foreground"
-                              )}
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {data.preferred_date ? format(new Date(data.preferred_date), "PPP") : <span>Pick a date</span>}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              mode="single"
-                              selected={data.preferred_date ? new Date(data.preferred_date) : undefined}
-                              onSelect={(date) => {
-                                if (date) {
-                                  const existing = data.preferred_date ? new Date(data.preferred_date) : null;
-                                  const hours = existing ? existing.getHours() : 9;
-                                  const minutes = existing ? existing.getMinutes() : 0;
+                    {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!selectedZone)) && (
+                      <Field
+                        label={data.booking_type === 'drop_off' ? 'Preferred Drop-Off Date' : 'Preferred Pickup Date'}
+                        required
+                        error={errors.preferred_date}
+                        hint={`Minimum ${activeLogistics?.leadTimeDays ?? 2} days lead time required.`}
+                      >
+                        <div className="flex w-full items-center gap-2">
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant={"outline"}
+                                className={cn(
+                                  "flex-1 h-12 w-full justify-start text-left font-normal rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800",
+                                  !data.preferred_date && "text-muted-foreground"
+                                )}
+                              >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {data.preferred_date ? format(new Date(data.preferred_date), "PPP") : <span>Pick a date</span>}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-0" align="start">
+                              <Calendar
+                                mode="single"
+                                selected={data.preferred_date ? new Date(data.preferred_date) : undefined}
+                                onSelect={(date) => {
+                                  if (date) {
+                                    const evalRes = evaluateDateAvailability(date, activeLogistics);
+                                    const [hhStr, mmStr] = (evalRes.timeStart || '09:00').split(':');
+                                    const hours = parseInt(hhStr, 10) || 9;
+                                    const minutes = parseInt(mmStr, 10) || 0;
 
-                                  const newDate = new Date(date);
-                                  newDate.setHours(hours, minutes, 0, 0);
+                                    const newDate = new Date(date);
+                                    newDate.setHours(hours, minutes, 0, 0);
 
-                                  const offset = newDate.getTimezoneOffset() * 60000;
-                                  const localDate = new Date(newDate.getTime() - offset);
+                                    const offset = newDate.getTimezoneOffset() * 60000;
+                                    const localDate = new Date(newDate.getTime() - offset);
 
-                                  setData('preferred_date', localDate.toISOString().slice(0, 16));
-                                  clearErrors('preferred_date');
-                                }
-                              }}
-                              disabled={(date) => {
-                                if (!activeLogistics) {
-                                  return false;
-                                }
-                                return evaluateDateAvailability(date, activeLogistics).isInvalid;
-                              }}
-                              initialFocus
-                            />
-                          </PopoverContent>
-                        </Popover>
+                                    setData('preferred_date', localDate.toISOString().slice(0, 16));
+                                    clearErrors('preferred_date');
+                                  }
+                                }}
+                                disabled={(date) => {
+                                  if (!activeLogistics) {
+                                    return false;
+                                  }
+                                  return evaluateDateAvailability(date, activeLogistics).isInvalid;
+                                }}
+                                initialFocus
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        </div>
 
+                        {data.preferred_date && (() => {
+                          const evalRes = evaluateDateAvailability(data.preferred_date, activeLogistics);
+                          if (evalRes.isInvalid) return null;
+                          return (
+                            <div className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                              <CheckCircle className="size-3.5 shrink-0" />
+                              <span>
+                                Confirmed: <strong>{format(new Date(data.preferred_date), 'EEEE, MMMM d, yyyy')}</strong> ({formatTime(evalRes.timeStart || '08:00')} – {formatTime(evalRes.timeEnd || '17:00')})
+                              </span>
+                            </div>
+                          );
+                        })()}
+                      </Field>
+                    )}
 
-                      </div>
-                      <PickupScheduleSummary />
-                    </Field>
-
-                    <Field
-                      label={data.booking_type === 'drop_off' ? 'Additional Drop-Off Notes' : 'Additional Pickup Notes'}
-                      hint={data.booking_type === 'drop_off' ? 'Estimated arrival time or depot remarks.' : 'Gate codes, parking info, etc.'}
-                    >
-                      <textarea
-                        className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-100 dark:focus:ring-zinc-800 min-h-25"
-                        placeholder={data.booking_type === 'drop_off' ? 'Optional remarks for warehouse team...' : 'Optional notes for the driver...'}
-                        value={data.notes || ''}
-                        onChange={e => setData('notes', e.target.value)}
-                      />
-                    </Field>
+                    {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!data.pickup_zone_id)) && (
+                      <Field
+                        label={data.booking_type === 'drop_off' ? 'Additional Drop-Off Notes' : 'Additional Pickup Notes'}
+                        hint={data.booking_type === 'drop_off' ? 'Estimated arrival time or depot remarks.' : 'Gate codes, parking info, etc.'}
+                      >
+                        <textarea
+                          className="w-full rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:border-zinc-400 dark:focus:border-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-100 dark:focus:ring-zinc-800 min-h-25"
+                          placeholder={data.booking_type === 'drop_off' ? 'Optional remarks for warehouse team...' : 'Optional notes for the driver...'}
+                          value={data.notes || ''}
+                          onChange={e => setData('notes', e.target.value)}
+                        />
+                      </Field>
+                    )}
                   </div>
                 </section>
               </form>

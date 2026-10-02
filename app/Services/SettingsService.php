@@ -129,9 +129,11 @@ class SettingsService
                     $zoneParsed = $this->parsePickupWindows($zone->pickup_windows);
                     if (! empty($zoneParsed['weekly'])) {
                         $result['pickupWindows'] = $zoneParsed['weekly'];
+                    } elseif (! empty($zoneParsed['specific_dates'])) {
+                        $result['pickupWindows'] = [];
                     }
                     if (! empty($zoneParsed['specific_dates'])) {
-                        $result['specificDates'] = array_merge($result['specificDates'], $zoneParsed['specific_dates']);
+                        $result['specificDates'] = $zoneParsed['specific_dates'];
                     }
                 }
                 if (! empty($zone->blackout_dates)) {
