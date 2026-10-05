@@ -203,19 +203,43 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
         return null;
     }, [data, uniqueWarnings, checkingUnique, errors]);
 
+    const getStepForField = useCallback((field: string): number => {
+        if (['batch_number', 'branch_name', 'container_number', 'seal_number', 'container_size'].includes(field)) {
+            return 0;
+        }
+        if (['vessel_name', 'shipping_line', 'voyage_number', 'origin_port', 'destination_port'].includes(field)) {
+            return 1;
+        }
+        if (['cutoff_at', 'eta_at', 'departed_at', 'sailed_at', 'closed_at', 'arrived_at', 'delivered_at'].includes(field)) {
+            return 2;
+        }
+        if (['capacity_boxes', 'capacity_weight_kg', 'capacity_cbm', 'status', 'override_note'].includes(field)) {
+            return 3;
+        }
+        return 0;
+    }, []);
+
     const isStepSatisfied = useCallback((step: number): boolean => {
         return getStepUnsatisfiedReason(step) === null;
     }, [getStepUnsatisfiedReason]);
 
     const canProceedCurrentStep = isStepSatisfied(currentStep);
 
+    const stepHasError = useCallback((stepIdx: number): boolean => {
+        const hasFieldError = Object.keys(errors).some(f => getStepForField(f) === stepIdx);
+        if (hasFieldError) return true;
+        if (visitedSteps.includes(stepIdx) && !isStepSatisfied(stepIdx)) return true;
+        return false;
+    }, [errors, getStepForField, visitedSteps, isStepSatisfied]);
+
     const canNavigateToStep = useCallback((targetIdx: number): boolean => {
         if (targetIdx <= currentStep) return true;
+        if (stepHasError(targetIdx)) return true;
         for (let i = 0; i < targetIdx; i++) {
             if (!isStepSatisfied(i)) return false;
         }
         return true;
-    }, [currentStep, isStepSatisfied]);
+    }, [currentStep, isStepSatisfied, stepHasError]);
 
     const isStepDone = useCallback((idx: number): boolean => {
         if (!isStepSatisfied(idx)) return false;
@@ -228,6 +252,26 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
     const allStepsSatisfied = useMemo(() => {
         return [0, 1, 2, 3].every(idx => isStepSatisfied(idx));
     }, [isStepSatisfied]);
+
+    // Automatically navigate to the earliest step where an error occurs whenever errors are present
+    useEffect(() => {
+        const errorFields = Object.keys(errors);
+        if (errorFields.length > 0) {
+            let earliestStep = 3;
+            for (const field of errorFields) {
+                const stepIdx = getStepForField(field);
+                if (stepIdx < earliestStep) {
+                    earliestStep = stepIdx;
+                }
+            }
+            setCurrentStep(earliestStep);
+            setVisitedSteps(prev => {
+                const next = new Set([...prev, earliestStep]);
+                errorFields.forEach(f => next.add(getStepForField(f)));
+                return Array.from(next);
+            });
+        }
+    }, [errors, getStepForField]);
 
     useEffect(() => {
         if (!templateBatch) {
@@ -263,7 +307,7 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
     const nextStep = () => {
         if (!canProceedCurrentStep) {
             const reason = getStepUnsatisfiedReason(currentStep);
-            toast.error('Cannot proceed', {
+            toast.error(`Incomplete: Step ${currentStep + 1} (${STEPS[currentStep].title})`, {
                 description: reason || 'Please satisfy all required fields on this step before continuing.',
             });
             return;
@@ -284,43 +328,64 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
 
+        // 1. Uniqueness check warnings (Step 0)
+        if (Object.keys(uniqueWarnings).length > 0) {
+            setCurrentStep(0);
+            setVisitedSteps(prev => prev.includes(0) ? prev : [...prev, 0]);
+            const firstWarning = Object.values(uniqueWarnings)[0];
+            toast.error('Cannot submit: Reference number warning', {
+                description: firstWarning || 'Please resolve reference number warnings.',
+            });
+            return;
+        }
+
+        if (Object.values(checkingUnique).some(Boolean)) {
+            setCurrentStep(0);
+            setVisitedSteps(prev => prev.includes(0) ? prev : [...prev, 0]);
+            toast.error('Please wait', {
+                description: 'Container reference numbers are still being validated.',
+            });
+            return;
+        }
+
+        // 2. Sequential check of all steps; automatically jump to the earliest unsatisfied step
         for (let i = 0; i < STEPS.length; i++) {
             if (!isStepSatisfied(i)) {
                 setCurrentStep(i);
+                setVisitedSteps(prev => prev.includes(i) ? prev : [...prev, i]);
                 const reason = getStepUnsatisfiedReason(i);
                 toast.error(`Cannot submit: Step ${i + 1} (${STEPS[i].title}) is incomplete`, {
-                    description: reason || 'Please resolve all required fields and warnings.',
+                    description: reason || 'Please resolve all required fields before continuing.',
                 });
                 return;
             }
         }
 
-        if (Object.keys(uniqueWarnings).length > 0) {
-            toast.error('Cannot submit', { description: 'Please resolve uniqueness warnings before initializing the batch.' });
-            return;
-        }
-
-        if (Object.values(checkingUnique).some(Boolean)) {
-            toast.error('Please wait', { description: 'Reference numbers are still being validated.' });
-            return;
-        }
-
+        // 3. Post to backend; on validation error automatically jump to the step with the error
         post('/admin/batches', {
             onError: (formErrors) => {
-                const firstError = Object.values(formErrors)[0];
-                if (firstError) {
-                    toast.error('Validation failed', { description: firstError as string });
+                const errorFields = Object.keys(formErrors);
+                if (errorFields.length === 0) return;
+
+                let earliestStep = 3;
+                for (const field of errorFields) {
+                    const stepIdx = getStepForField(field);
+                    if (stepIdx < earliestStep) {
+                        earliestStep = stepIdx;
+                    }
                 }
-                // Auto-navigate to the step containing the first error
-                if (formErrors.batch_number || formErrors.container_number || formErrors.seal_number || formErrors.container_size || formErrors.branch_name) {
-                    setCurrentStep(0);
-                } else if (formErrors.vessel_name || formErrors.shipping_line || formErrors.voyage_number || formErrors.origin_port || formErrors.destination_port) {
-                    setCurrentStep(1);
-                } else if (formErrors.cutoff_at || formErrors.eta_at) {
-                    setCurrentStep(2);
-                } else if (formErrors.capacity_boxes || formErrors.capacity_cbm) {
-                    setCurrentStep(3);
-                }
+
+                setCurrentStep(earliestStep);
+                setVisitedSteps(prev => {
+                    const next = new Set([...prev, earliestStep]);
+                    errorFields.forEach(f => next.add(getStepForField(f)));
+                    return Array.from(next);
+                });
+
+                const firstErrorMessage = formErrors[errorFields[0]];
+                toast.error(`Validation failed on Step ${earliestStep + 1} (${STEPS[earliestStep].title})`, {
+                    description: typeof firstErrorMessage === 'string' ? firstErrorMessage : 'Please correct the highlighted issues and try again.',
+                });
             },
         });
     };

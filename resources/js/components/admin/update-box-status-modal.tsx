@@ -25,6 +25,7 @@ export interface UpdateBoxStatusModalBox {
     eta_date?: string | null;
     eta_message?: string | null;
     has_delivery_proof?: boolean;
+    has_pickup_proof?: boolean;
     has_signature?: boolean;
 }
 
@@ -103,9 +104,13 @@ export default function UpdateBoxStatusModal({
         const systemStatus = selectedStep ? selectedStep.system_status : newStatus;
         const trackingStepKey = selectedStep ? selectedStep.key : undefined;
 
-        const proofRequiredStatuses = ['delivered', 'collected'];
-        if (proofRequiredStatuses.includes(systemStatus) && !proofFile && !box.has_delivery_proof) {
-            toast.error('A proof photo is required for this status.');
+        if (systemStatus === 'delivered' && !proofFile && !box.has_delivery_proof) {
+            toast.error('A proof photo is required when marking a box as Delivered.');
+            return;
+        }
+
+        if (systemStatus === 'collected' && !proofFile && !box.has_pickup_proof) {
+            toast.error('A proof photo is required when marking a box as Collected.');
             return;
         }
 
@@ -328,7 +333,7 @@ export default function UpdateBoxStatusModal({
                     <Button
                         type="button"
                         onClick={handleStatusUpdate}
-                        disabled={isUpdating || !newStatus || (['delivered', 'collected'].includes(newStatus) && !proofFile && !box.has_delivery_proof)}
+                        disabled={isUpdating || !newStatus || (newStatus === 'delivered' && !proofFile && !box.has_delivery_proof) || (newStatus === 'collected' && !proofFile && !box.has_pickup_proof)}
                         className="h-9 rounded-lg px-4 text-xs font-medium bg-brand-rust text-white hover:bg-brand-rust/90 transition-colors shadow-2xs"
                     >
                         {isUpdating ? 'Updating...' : 'Update Status'}

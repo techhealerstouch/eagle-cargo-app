@@ -2,7 +2,7 @@ import type { PageProps } from '@inertiajs/core';
 import { Head, useForm, usePage, router, Link } from '@inertiajs/react';
 import {
     Package, Ship, ShieldCheck, Layers, ScanLine, Truck, Home,
-    Eye, Activity, ExternalLink, Camera, CheckCircle2, Sparkles
+    Activity, ExternalLink, Camera, CheckCircle2, Sparkles
 } from 'lucide-react';
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { toast } from 'sonner';
@@ -14,13 +14,6 @@ import { TrackingMultiBoxDashboard } from '@/components/logistics/TrackingMultiB
 import { TrackingSearchForm } from '@/components/logistics/TrackingSearchForm';
 import { TrackingSkeleton } from '@/components/logistics/TrackingSkeleton';
 import { TrackingTimeline } from '@/components/logistics/TrackingTimeline';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
 import { useRecentSearches } from '@/hooks/use-recent-searches';
 import AppLayout from '@/layouts/app-layout';
 import MarketingLayout from '@/layouts/marketing-layout';
@@ -76,7 +69,6 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
     const [hasSearched, setHasSearched] = useState(!!trackingData || !!tracking_number);
     const [isCopied, setIsCopied] = useState(false);
     const [isHighlighted, setIsHighlighted] = useState(false);
-    const [viewingPhotoUrl, setViewingPhotoUrl] = useState<string | null>(null);
     const [activeBoxTrackingNumber, setActiveBoxTrackingNumber] = useState<string>(
         trackingData?.tracking_number || ''
     );
@@ -174,12 +166,16 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
             delivery_proof_url: selectedBox.delivery_proof_url ?? trackingData.delivery_proof_url,
             pickup_proof_url: selectedBox.pickup_proof_url ?? trackingData.pickup_proof_url,
             damage_photo_url: selectedBox.damage_photo_url ?? trackingData.damage_photo_url,
+            has_delivery_proof: selectedBox.has_delivery_proof ?? trackingData.has_delivery_proof,
+            has_pickup_proof: selectedBox.has_pickup_proof ?? trackingData.has_pickup_proof,
             has_signature: selectedBox.has_signature ?? trackingData.has_signature,
             signature_url: selectedBox.signature_url ?? trackingData.signature_url,
             batch: selectedBox.batch ? {
                 batch_number: selectedBox.batch.batch_number,
                 status: selectedBox.batch.status,
+                status_label: selectedBox.batch.status_label,
                 container_number: selectedBox.batch.container_number,
+                seal_number: selectedBox.batch.seal_number,
                 vessel_name: selectedBox.batch.vessel_name,
                 voyage_number: selectedBox.batch.voyage_number,
                 shipping_line: selectedBox.batch.shipping_line,
@@ -187,7 +183,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                 destination_port: selectedBox.batch.destination_port,
                 branch_code: selectedBox.batch.branch_code,
                 eta_at: selectedBox.batch.eta_at,
-            } : trackingData.batch,
+            } : null,
             timeline: selectedBox.timeline && selectedBox.timeline.length > 0 ? selectedBox.timeline : trackingData.timeline,
         };
     }, [trackingData, activeBoxTrackingNumber]);
@@ -335,7 +331,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
 
         if (s.includes('transit') || s.includes('shipping') || s.includes('vessel') || s.includes('container') || s.includes('arrived')) {
             const transitIdx = dynamicSteps.findIndex(
-                (step) => step.statusKey === 'in_transit' || step.systemStatus === 'in_transit' || step.phase?.toLowerCase().includes('transit')
+                (step) => step.statusKey === 'in_transit' || step.systemStatus === 'in_transit' || step.label?.toLowerCase().includes('transit')
             );
             if (transitIdx !== -1) {
                 return transitIdx;
@@ -538,9 +534,8 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                         {activeTrackingData.booking_id && activeTrackingData.declaration_form_status === 'missing' && activeTrackingData.status?.toLowerCase() !== 'cancelled' && (
                             <DeclarationAlert
                                 bookingId={activeTrackingData.booking_id}
-                                bookingReference={activeTrackingData.booking_reference}
-                                isGuest={activeTrackingData.is_guest}
-                                canSubmit={Boolean(auth.user)}
+                                trackingNumber={activeTrackingData.tracking_number || activeTrackingData.booking_reference}
+                                canEdit={Boolean(auth.user)}
                                 resendsRemaining={activeTrackingData.declaration_resends_remaining}
                                 senderEmailMasked={activeTrackingData.sender_email_masked}
                             />
@@ -576,15 +571,21 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                             </div>
                         )}
 
-                        {/* Pacific Ocean Voyage Card (Visible when in container/sea transit) */}
-                        {activeTrackingData.status?.toLowerCase() !== 'delivered' &&
-                            activeTrackingData.status?.toLowerCase() !== 'cancelled' &&
-                            (['loading_container', 'in_transit', 'customs_clearance', 'container_dispatched', 'ocean_freight'].includes(activeTrackingData.status?.toLowerCase() || '') || (activeTrackingData.status || '').toLowerCase().includes('transit')) && (
+                        {/* Ocean Freight / Batch Shipment Details Card (Visible only when box is assigned to a batch) */}
+                        {Boolean(
+                            activeTrackingData.batch &&
+                            (activeTrackingData.batch.batch_number ||
+                                activeTrackingData.batch.container_number ||
+                                activeTrackingData.batch.origin_port ||
+                                activeTrackingData.batch.destination_port)
+                        ) &&
+                            activeTrackingData.status?.toLowerCase() !== 'delivered' &&
+                            activeTrackingData.status?.toLowerCase() !== 'cancelled' && (
                                 <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-zinc-200 dark:border-zinc-800 bg-zinc-900 shadow-md group min-h-35 sm:min-h-40 flex flex-col justify-between p-3.5 sm:p-5">
                                     {/* Backdrop Image & Gradient */}
                                     <img
                                         src="/images/ocean_freight_vessel.jpg"
-                                        alt="Pacific Ocean Freight Vessel"
+                                        alt="Freight Vessel"
                                         className="absolute inset-0 w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-700 pointer-events-none"
                                     />
                                     <div className="absolute inset-0 bg-linear-to-t from-black/95 via-black/60 to-black/35 pointer-events-none" />
@@ -593,33 +594,113 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                                     <div className="relative z-10 flex items-center justify-between gap-2 flex-wrap">
                                         <span className="px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/20 text-white text-[10px] sm:text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-xs">
                                             <Ship className="size-3 text-sky-400 animate-pulse" />
-                                            <span>Trans-Pacific Sea Lane</span>
-                                        </span>
-                                        {activeTrackingData.batch?.batch_number && (
-                                            <span className="px-2.5 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/10 text-white text-[9px] sm:text-[10px] font-mono font-bold">
-                                                Container: {activeTrackingData.batch.batch_number}
+                                            <span>
+                                                {activeTrackingData.batch?.shipping_line
+                                                    ? `${activeTrackingData.batch.shipping_line} Sea Lane`
+                                                    : activeTrackingData.batch?.vessel_name
+                                                        ? activeTrackingData.batch.vessel_name
+                                                        : 'Ocean Freight Transit'}
                                             </span>
-                                        )}
+                                        </span>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                            {activeTrackingData.batch?.container_number && (
+                                                <span className="px-2.5 py-1 rounded-full bg-white/15 backdrop-blur-md border border-white/10 text-white text-[9px] sm:text-[10px] font-mono font-bold">
+                                                    Container: {activeTrackingData.batch.container_number}
+                                                </span>
+                                            )}
+                                            {activeTrackingData.batch?.batch_number && (
+                                                <span className="px-2.5 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white text-[9px] sm:text-[10px] font-mono font-semibold">
+                                                    Batch: {activeTrackingData.batch.batch_number}
+                                                </span>
+                                            )}
+                                            {activeTrackingData.batch?.seal_number && (
+                                                <span className="px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-zinc-300 text-[9px] font-mono hidden md:inline-flex">
+                                                    Seal: {activeTrackingData.batch.seal_number}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Bottom Row: Nautical Route & Live Transit Status */}
                                     <div className="relative z-10 flex items-end justify-between gap-3 text-white pt-3 sm:pt-4">
                                         <div className="min-w-0">
-                                            <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-bold text-sky-300 uppercase tracking-wider flex-wrap">
-                                                <span className="text-white">Port of Sydney / Melb</span>
-                                                <span className="text-zinc-400">→</span>
-                                                <span className="text-amber-400 font-extrabold">Port of Manila</span>
-                                            </div>
-                                            <p className="text-[10px] sm:text-xs text-zinc-300 font-medium mt-0.5 hidden sm:block truncate">
-                                                Navigating standard international maritime container route
-                                            </p>
+                                            {(activeTrackingData.batch?.origin_port || activeTrackingData.batch?.destination_port) ? (
+                                                <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs font-bold text-sky-300 uppercase tracking-wider flex-wrap">
+                                                    {activeTrackingData.batch.origin_port && (
+                                                        <span className="text-white">{activeTrackingData.batch.origin_port}</span>
+                                                    )}
+                                                    {activeTrackingData.batch.origin_port && activeTrackingData.batch.destination_port && (
+                                                        <span className="text-zinc-400">→</span>
+                                                    )}
+                                                    {activeTrackingData.batch.destination_port && (
+                                                        <span className="text-amber-400 font-extrabold">{activeTrackingData.batch.destination_port}</span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <div className="text-[11px] sm:text-xs font-bold text-sky-300 uppercase tracking-wider">
+                                                    Ocean Freight Shipment
+                                                </div>
+                                            )}
+                                            {(() => {
+                                                const meta: string[] = [];
+                                                if (activeTrackingData.batch?.vessel_name) {
+                                                    meta.push(`Vessel: ${activeTrackingData.batch.vessel_name}`);
+                                                }
+                                                if (activeTrackingData.batch?.voyage_number) {
+                                                    meta.push(`Voyage: ${activeTrackingData.batch.voyage_number}`);
+                                                }
+                                                if (activeTrackingData.batch?.eta_at) {
+                                                    meta.push(`ETA: ${activeTrackingData.batch.eta_at}`);
+                                                }
+                                                if (meta.length > 0) {
+                                                    return (
+                                                        <p className="text-[10px] sm:text-xs text-zinc-300 font-medium mt-0.5 hidden sm:block truncate">
+                                                            {meta.join(' • ')}
+                                                        </p>
+                                                    );
+                                                }
+                                                if (activeTrackingData.batch?.shipping_line) {
+                                                    return (
+                                                        <p className="text-[10px] sm:text-xs text-zinc-300 font-medium mt-0.5 hidden sm:block truncate">
+                                                            Handled by {activeTrackingData.batch.shipping_line}
+                                                        </p>
+                                                    );
+                                                }
+                                                return null;
+                                            })()}
                                         </div>
-                                        <div className="text-right shrink-0">
-                                            <span className="text-[8px] uppercase font-bold tracking-widest text-zinc-400 block mb-0.5">Status</span>
-                                            <span className="inline-flex items-center text-[10px] sm:text-xs font-black text-emerald-400 bg-emerald-950/80 border border-emerald-500/40 px-2.5 py-0.5 sm:py-1 rounded-md whitespace-nowrap shadow-xs">
-                                                Smooth Sailing
-                                            </span>
-                                        </div>
+                                        {(() => {
+                                            const rawStatus = (activeTrackingData.batch?.status || '').toLowerCase();
+                                            const statusLabel =
+                                                activeTrackingData.batch?.status_label ||
+                                                humanize(rawStatus) ||
+                                                'In Transit';
+                                            const isSailed = rawStatus === 'sailed' || rawStatus.includes('transit');
+                                            const isArrived = rawStatus === 'arrived';
+                                            const isLoading = rawStatus === 'loading' || rawStatus === 'open';
+
+                                            return (
+                                                <div className="text-right shrink-0">
+                                                    <span className="text-[8px] uppercase font-bold tracking-widest text-zinc-400 block mb-0.5">
+                                                        Batch Status
+                                                    </span>
+                                                    <span
+                                                        className={cn(
+                                                            "inline-flex items-center text-[10px] sm:text-xs font-black px-2.5 py-0.5 sm:py-1 rounded-md whitespace-nowrap shadow-xs border",
+                                                            isSailed
+                                                                ? "text-emerald-400 bg-emerald-950/80 border-emerald-500/40"
+                                                                : isArrived
+                                                                    ? "text-sky-300 bg-sky-950/80 border-sky-500/40"
+                                                                    : isLoading
+                                                                        ? "text-amber-300 bg-amber-950/80 border-amber-500/40"
+                                                                        : "text-emerald-400 bg-emerald-950/80 border-emerald-500/40"
+                                                        )}
+                                                    >
+                                                        {statusLabel}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                             )}
@@ -642,8 +723,12 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                             </div>
 
                             <div className="space-y-6 md:space-y-8 lg:sticky lg:top-6 self-start">
-                                {/* Proof of Delivery Card (Visible on Delivered or Handover) */}
-                                {(activeTrackingData.delivery_proof_url || activeTrackingData.has_signature) && (
+                                {/* Proof of Delivery Card (Visible only when Delivered) */}
+                                {activeTrackingData.status?.toLowerCase() === 'delivered' &&
+                                    (activeTrackingData.has_delivery_proof ||
+                                     activeTrackingData.has_signature ||
+                                     activeTrackingData.delivery_proof_url ||
+                                     activeTrackingData.signature_url) && (
                                     <div className="card overflow-hidden border-emerald-500/30 bg-emerald-50/10 dark:bg-emerald-950/10 shadow-sm animate-in fade-in duration-300">
                                         <div className="px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 bg-emerald-500/10 dark:bg-emerald-950/30 flex items-center justify-between">
                                             <div className="flex items-center gap-2">
@@ -657,64 +742,34 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                                             </span>
                                         </div>
 
-                                        <div className="p-4 sm:p-5 space-y-4">
-                                            {/* Delivery Photo */}
-                                            {activeTrackingData.delivery_proof_url && (
-                                                <div className="space-y-2">
-                                                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 block">
-                                                        Doorstep / Handover Photo
-                                                    </span>
-                                                    <div
-                                                        onClick={() => setViewingPhotoUrl(activeTrackingData.delivery_proof_url!)}
-                                                        className="relative group rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 cursor-pointer aspect-video bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center"
-                                                        title="Click to view full image"
-                                                    >
-                                                        <img
-                                                            src={activeTrackingData.delivery_proof_url}
-                                                            alt="Proof of Delivery"
-                                                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                                        />
-                                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
-                                                            <Eye className="size-4" />
-                                                            <span>View High-Res Photo</span>
-                                                        </div>
+                                        <div className="p-4 sm:p-5 space-y-3">
+                                            {/* Delivery Photo (Privacy Protected - No Image on Public) */}
+                                            {(activeTrackingData.has_delivery_proof || activeTrackingData.delivery_proof_url) && (
+                                                <div className="flex items-center gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-700 text-xs text-zinc-600 dark:text-zinc-400">
+                                                    <Camera className="size-4 text-emerald-500 shrink-0" />
+                                                    <div className="space-y-0.5">
+                                                        <span className="text-[11px] font-bold text-zinc-800 dark:text-zinc-200 block">
+                                                            Doorstep / Handover Photo Verified
+                                                        </span>
+                                                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 block">
+                                                            Proof photo captured on delivery. Confidential for recipient privacy.
+                                                        </span>
                                                     </div>
                                                 </div>
                                             )}
 
-                                            {/* Recipient Signature Stamp (Privacy Blurred) */}
-                                            {activeTrackingData.has_signature && (
-                                                <div className="space-y-2 pt-1 border-t border-zinc-100 dark:border-zinc-800">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 block">
-                                                            Recipient Signature
+                                            {/* Recipient Signature (Privacy Protected - No Image on Public) */}
+                                            {(activeTrackingData.has_signature || activeTrackingData.signature_url) && (
+                                                <div className="flex items-center gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-700 text-xs text-zinc-600 dark:text-zinc-400">
+                                                    <ShieldCheck className="size-4 text-emerald-500 shrink-0" />
+                                                    <div className="space-y-0.5">
+                                                        <span className="text-[11px] font-bold text-zinc-800 dark:text-zinc-200 block">
+                                                            Recipient Signature Verified
                                                         </span>
-                                                        <span className="text-[9px] font-medium text-zinc-400 flex items-center gap-1">
-                                                            🔒 Privacy Protected
+                                                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 block">
+                                                            Digital signature recorded on courier handover.
                                                         </span>
                                                     </div>
-
-                                                    {activeTrackingData.signature_url ? (
-                                                        <div className="relative rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 p-2 overflow-hidden">
-                                                            {/* Privacy blur to protect recipient signature on public URL */}
-                                                            <img
-                                                                src={activeTrackingData.signature_url}
-                                                                alt="Recipient Signature"
-                                                                className="h-12 w-full object-contain filter blur-xs opacity-70 select-none pointer-events-none"
-                                                            />
-                                                            <div className="absolute inset-0 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]">
-                                                                <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-800 dark:text-zinc-200 bg-white/90 dark:bg-zinc-900/90 px-2.5 py-1 rounded-md shadow-2xs border border-zinc-200 dark:border-zinc-700 flex items-center gap-1">
-                                                                    <ShieldCheck className="size-3 text-emerald-500" />
-                                                                    Signed at Handover
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-700 text-xs text-zinc-600 dark:text-zinc-400">
-                                                            <ShieldCheck className="size-4 text-emerald-500 shrink-0" />
-                                                            <span className="text-[11px] font-medium">Digital signature captured & verified on courier handover.</span>
-                                                        </div>
-                                                    )}
                                                 </div>
                                             )}
                                         </div>
@@ -791,31 +846,6 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                     </div>
                 )}
 
-                {/* Lightbox Dialog for Proof of Delivery Photo */}
-                <Dialog open={!!viewingPhotoUrl} onOpenChange={(open) => !open && setViewingPhotoUrl(null)}>
-                    <DialogContent className="rounded-3xl p-0 border border-zinc-200 dark:border-zinc-800 bg-black/95 text-white max-w-3xl overflow-hidden">
-                        <DialogHeader className="p-4 sm:p-6 border-b border-zinc-800 flex flex-row items-center justify-between">
-                            <div>
-                                <DialogTitle className="text-sm font-bold text-white flex items-center gap-2">
-                                    <Camera className="size-4 text-emerald-400" />
-                                    Verified Proof of Delivery
-                                </DialogTitle>
-                                <DialogDescription className="text-xs text-zinc-400">
-                                    Tracking ID: {activeTrackingData.tracking_number}
-                                </DialogDescription>
-                            </div>
-                        </DialogHeader>
-                        {viewingPhotoUrl && (
-                            <div className="p-2 sm:p-4 flex items-center justify-center bg-black">
-                                <img
-                                    src={viewingPhotoUrl}
-                                    alt="Proof of Delivery Full Resolution"
-                                    className="max-h-[75vh] w-auto object-contain rounded-xl"
-                                />
-                            </div>
-                        )}
-                    </DialogContent>
-                </Dialog>
             </div>
         </Layout>
     );
