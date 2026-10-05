@@ -3,6 +3,16 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import laravel from 'laravel-vite-plugin';
 import { defineConfig } from 'vite';
+import { execSync } from 'child_process';
+
+const hasPhp = (() => {
+    try {
+        execSync('php -v', { stdio: 'ignore' });
+        return true;
+    } catch {
+        return false;
+    }
+})();
 
 export default defineConfig({
     server: {
@@ -37,9 +47,13 @@ export default defineConfig({
             },
         }),
         tailwindcss(),
-        // wayfinder({
-        //     formVariants: true,
-        // }),
+        ...(hasPhp
+            ? [
+                  wayfinder({
+                      formVariants: true,
+                  }),
+              ]
+            : []),
     ],
     esbuild: {
         jsx: 'automatic',
