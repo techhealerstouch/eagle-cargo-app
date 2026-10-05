@@ -164,6 +164,23 @@ function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]):
     return -1;
 }
 
+function isInitialRegistrationEvent(desc: string, rawDesc?: string): boolean {
+    const d = (desc || '').toLowerCase();
+    const rd = (rawDesc || '').toLowerCase();
+    return (
+        d.includes('booking created') ||
+        d.includes('box registered') ||
+        d.includes('booking received') ||
+        d.includes('booking submitted') ||
+        d.includes('booking placed') ||
+        rd.includes('booking created') ||
+        rd.includes('box registered') ||
+        rd.includes('booking received') ||
+        rd.includes('booking submitted') ||
+        rd.includes('booking placed')
+    );
+}
+
 export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, steps, currentIndex, currentStatus }) => {
     // Build a map: step index → timeline events that belong to it
     const stepEvents = new Map<number, TrackingTimelineItem[]>();
@@ -341,9 +358,11 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                             )}>
                                                                 {description}
                                                             </p>
-                                                            <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
-                                                                <Clock className="size-2.5" /> {formatDate(event.date)}
-                                                            </span>
+                                                            {!isInitialRegistrationEvent(description, event.description) && (
+                                                                <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
+                                                                    <Clock className="size-2.5" /> {formatDate(event.date)}
+                                                                </span>
+                                                            )}
                                                         </div>
 
                                                         {event.location && (
@@ -396,9 +415,11 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                                     <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 leading-relaxed">
                                                         {description}
                                                     </p>
-                                                    <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
-                                                        <Clock className="size-2.5" /> {formatDate(event.date)}
-                                                    </span>
+                                                    {!isInitialRegistrationEvent(description, event.description) && (
+                                                        <span className="text-[9px] font-mono font-bold text-zinc-400 dark:text-zinc-500 uppercase flex items-center gap-1 shrink-0 ml-3">
+                                                            <Clock className="size-2.5" /> {formatDate(event.date)}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {event.location && (
                                                     <div className="flex items-center gap-1.5 text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">

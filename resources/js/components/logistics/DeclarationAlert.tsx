@@ -14,18 +14,26 @@ import {
 interface DeclarationAlertProps {
     bookingId: number;
     canEdit?: boolean;
+    canSubmit?: boolean;
     trackingNumber?: string;
+    bookingReference?: string;
+    isGuest?: boolean;
     senderEmailMasked?: string | null;
     resendsRemaining?: number;
 }
 
 export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
     bookingId,
-    canEdit = false,
+    canEdit: propCanEdit,
+    canSubmit,
     trackingNumber,
+    bookingReference,
+    isGuest,
     senderEmailMasked,
     resendsRemaining = 3,
 }) => {
+    const canEdit = propCanEdit ?? canSubmit ?? false;
+    const resolvedTrackingNumber = trackingNumber || bookingReference;
     const [helpOpen, setHelpOpen] = useState(false);
     const [isResending, setIsResending] = useState(false);
     const [cooldown, setCooldown] = useState(0);
@@ -70,7 +78,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                 },
                 body: JSON.stringify({
                     booking_id: bookingId,
-                    tracking_number: trackingNumber,
+                    tracking_number: resolvedTrackingNumber,
                 }),
             });
 

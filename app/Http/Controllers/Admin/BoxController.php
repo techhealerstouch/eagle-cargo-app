@@ -471,11 +471,19 @@ class BoxController extends Controller
             }
         }
 
+        $isDelivered = $newStatus === BoxStatus::Delivered->value;
+        $isCollected = $newStatus === BoxStatus::Collected->value;
+
         // Proof is required only for delivered and collected statuses
-        $proofRequiredStatuses = [BoxStatus::Delivered->value, BoxStatus::Collected->value];
-        if (in_array($newStatus, $proofRequiredStatuses) && ! $request->hasFile('delivery_proof') && blank($box->delivery_proof_path)) {
+        if ($isDelivered && ! $request->hasFile('delivery_proof') && blank($box->delivery_proof_path)) {
             throw ValidationException::withMessages([
-                'delivery_proof' => 'A proof photo is required when marking a box as '.ucfirst(str_replace('_', ' ', $newStatus)).'.',
+                'delivery_proof' => 'A proof photo is required when marking a box as Delivered.',
+            ]);
+        }
+
+        if ($isCollected && ! $request->hasFile('delivery_proof') && blank($box->pickup_proof_path)) {
+            throw ValidationException::withMessages([
+                'delivery_proof' => 'A proof photo is required when marking a box as Collected.',
             ]);
         }
 
@@ -500,8 +508,9 @@ class BoxController extends Controller
                 $newStatus,
                 ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
                 Auth::id(),
-                deliveryProof: $request->file('delivery_proof'),
+                deliveryProof: $isDelivered ? $request->file('delivery_proof') : null,
                 deliveryOverrideReason: $overrideReason,
+                pickupProof: $isCollected ? $request->file('delivery_proof') : null,
                 bypassValidation: !blank($overrideReason),
                 trackingStepKey: $trackingStepKey
             );

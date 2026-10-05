@@ -26,7 +26,9 @@ export interface TrackingBox {
     batch?: {
         batch_number: string;
         status?: string;
+        status_label?: string;
         container_number?: string;
+        seal_number?: string;
         vessel_name?: string;
         voyage_number?: string;
         shipping_line?: string;
@@ -39,6 +41,8 @@ export interface TrackingBox {
     delivery_proof_url?: string | null;
     pickup_proof_url?: string | null;
     damage_photo_url?: string | null;
+    has_delivery_proof?: boolean;
+    has_pickup_proof?: boolean;
     has_signature?: boolean;
     signature_url?: string | null;
 }
@@ -53,6 +57,8 @@ export interface TrackingData {
     delivery_proof_url?: string | null;
     pickup_proof_url?: string | null;
     damage_photo_url?: string | null;
+    has_delivery_proof?: boolean;
+    has_pickup_proof?: boolean;
     has_signature?: boolean;
     signature_url?: string | null;
     booking_reference?: string;
@@ -78,7 +84,9 @@ export interface TrackingData {
     batch?: {
         batch_number: string;
         status?: string;
+        status_label?: string;
         container_number?: string;
+        seal_number?: string;
         vessel_name?: string;
         voyage_number?: string;
         shipping_line?: string;

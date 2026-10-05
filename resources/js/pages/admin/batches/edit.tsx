@@ -4,7 +4,7 @@ import {
     Container, AlertTriangle, ShieldCheck, CheckCircle2,
     Package, Clock, Anchor, Box, ChevronRight, ChevronLeft, Info, Sparkles, Activity
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import AppLayout from '@/layouts/app-layout';
 import { ORIGIN_PORTS, DESTINATION_PORTS } from '@/lib/ports';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import type { BreadcrumbItem } from '@/types';
 
 interface BatchPayload {
@@ -141,13 +142,64 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
         { title: 'Edit Batch', href: '#' },
     ];
 
+    const getStepForField = useCallback((field: string): number => {
+        if (['status', 'override_note'].includes(field)) {
+            return 0;
+        }
+        if (['batch_number', 'branch_name', 'container_number', 'seal_number', 'container_size'].includes(field)) {
+            return 1;
+        }
+        if (['vessel_name', 'shipping_line', 'voyage_number', 'origin_port', 'destination_port'].includes(field)) {
+            return 2;
+        }
+        if (['cutoff_at', 'eta_at', 'departed_at', 'sailed_at', 'closed_at', 'arrived_at', 'delivered_at'].includes(field)) {
+            return 3;
+        }
+        if (['capacity_boxes', 'capacity_weight_kg', 'capacity_cbm'].includes(field)) {
+            return 4;
+        }
+        return 0;
+    }, []);
+
+    useEffect(() => {
+        const errorFields = Object.keys(errors);
+        if (errorFields.length > 0) {
+            let earliestStep = 4;
+            for (const field of errorFields) {
+                const stepIdx = getStepForField(field);
+                if (stepIdx < earliestStep) {
+                    earliestStep = stepIdx;
+                }
+            }
+            setCurrentStep(earliestStep);
+        }
+    }, [errors, getStepForField]);
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         transform((data) => ({
             ...data,
             ...(return_url ? { return_to: return_url } : {}),
         }));
-        put(`/admin/batches/${batch.id}`);
+        put(`/admin/batches/${batch.id}`, {
+            onError: (formErrors) => {
+                const errorFields = Object.keys(formErrors);
+                if (errorFields.length === 0) return;
+
+                let earliestStep = 4;
+                for (const field of errorFields) {
+                    const stepIdx = getStepForField(field);
+                    if (stepIdx < earliestStep) {
+                        earliestStep = stepIdx;
+                    }
+                }
+                setCurrentStep(earliestStep);
+                const firstErrorMessage = formErrors[errorFields[0]];
+                toast.error(`Validation failed on Section ${earliestStep + 1} (${STEPS[earliestStep].title})`, {
+                    description: typeof firstErrorMessage === 'string' ? firstErrorMessage : 'Please correct the highlighted issues and try again.',
+                });
+            },
+        });
     };
 
     const getStatusTimeline = () => {
