@@ -22,6 +22,7 @@ import {
     Banknote,
     AlertCircle,
     CheckCircle2,
+    Phone,
 } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,9 @@ interface Booking {
     status: string;
     booking_type?: string | null;
     recipient_name: string;
+    recipient_phone?: string | null;
+    recipient_secondary_phone?: string | null;
+    recipient_address?: string | null;
     destination: string;
     preferred_date: string | null;
     payment_status: string;
@@ -105,6 +109,9 @@ export default function BookingsEdit({
         status: booking.status,
         booking_type: booking.booking_type || 'drop_off',
         recipient_name: booking.recipient_name || '',
+        recipient_phone: booking.recipient_phone || '',
+        recipient_secondary_phone: booking.recipient_secondary_phone || '',
+        recipient_address: booking.recipient_address || '',
         destination: booking.destination || '',
         preferred_date: formattedDate,
         payment_status: booking.payment_status,
@@ -341,7 +348,7 @@ export default function BookingsEdit({
                                 )}
                             </div>
 
-                            {/* Recipient */}
+                            {/* Recipient Name */}
                             <div className="space-y-2">
                                 <Label htmlFor="recipient_name" className="text-xs font-medium text-foreground">
                                     Recipient Name
@@ -363,7 +370,7 @@ export default function BookingsEdit({
                             {/* Destination */}
                             <div className="space-y-2">
                                 <Label htmlFor="destination" className="text-xs font-medium text-foreground">
-                                    Destination
+                                    Destination (City, Province)
                                 </Label>
                                 <div className="relative">
                                     <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -378,6 +385,69 @@ export default function BookingsEdit({
                                 {errors.destination && (
                                     <p className="text-xs text-red-500">
                                         {errors.destination}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Recipient Primary Phone */}
+                            <div className="space-y-2">
+                                <Label htmlFor="recipient_phone" className="text-xs font-medium text-foreground">
+                                    Recipient Phone Number
+                                </Label>
+                                <div className="relative">
+                                    <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                                    <Input
+                                        id="recipient_phone"
+                                        className="h-10 rounded-lg border-input bg-white pl-10 pr-3 font-medium text-sm focus:ring-1 focus:ring-ring transition-all"
+                                        value={data.recipient_phone}
+                                        onChange={(e) => setData('recipient_phone', e.target.value)}
+                                        placeholder="e.g. 09171234567 or +639171234567"
+                                    />
+                                </div>
+                                {errors.recipient_phone && (
+                                    <p className="text-xs text-red-500">
+                                        {errors.recipient_phone}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Recipient Secondary Phone */}
+                            <div className="space-y-2">
+                                <Label htmlFor="recipient_secondary_phone" className="text-xs font-medium text-foreground">
+                                    Alternate Phone Number (Optional)
+                                </Label>
+                                <div className="relative">
+                                    <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                                    <Input
+                                        id="recipient_secondary_phone"
+                                        className="h-10 rounded-lg border-input bg-white pl-10 pr-3 font-medium text-sm focus:ring-1 focus:ring-ring transition-all"
+                                        value={data.recipient_secondary_phone}
+                                        onChange={(e) => setData('recipient_secondary_phone', e.target.value)}
+                                        placeholder="e.g. 09181234567"
+                                    />
+                                </div>
+                                {errors.recipient_secondary_phone && (
+                                    <p className="text-xs text-red-500">
+                                        {errors.recipient_secondary_phone}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Recipient Address */}
+                            <div className="space-y-2 md:col-span-2">
+                                <Label htmlFor="recipient_address" className="text-xs font-medium text-foreground">
+                                    Delivery Address (Street / House / Barangay)
+                                </Label>
+                                <Input
+                                    id="recipient_address"
+                                    className="h-10 rounded-lg border-input bg-white font-medium px-3 text-sm focus:ring-1 focus:ring-ring transition-all"
+                                    value={data.recipient_address}
+                                    onChange={(e) => setData('recipient_address', e.target.value)}
+                                    placeholder="e.g. Unit 4B, 123 Rizal St., Brgy. San Antonio"
+                                />
+                                {errors.recipient_address && (
+                                    <p className="text-xs text-red-500">
+                                        {errors.recipient_address}
                                     </p>
                                 )}
                             </div>

@@ -61,12 +61,15 @@ class AdminBookingUpdateRecipientTest extends TestCase
         $this->assertSame('CHRISTOPHER CAPILI CRUZ', data_get($payloadBefore, 'boxes.0.recipient.name'));
         $this->assertSame('Dasmarinas, Cavite', data_get($payloadBefore, 'boxes.0.destination'));
 
-        // Admin updates recipient name to "Froilan Flores" and destination to "Cabuyao, LAGUNA"
+        // Admin updates recipient name to "Froilan Flores", destination to "Cabuyao, LAGUNA", phone and address
         $updatePayload = [
             'sender_id' => $sender->id,
             'status' => 'confirmed',
             'booking_type' => 'home_pickup',
             'recipient_name' => 'Froilan Flores',
+            'recipient_phone' => '09171234567',
+            'recipient_secondary_phone' => '09181234567',
+            'recipient_address' => 'Unit 12B Amber Tower',
             'destination' => 'Cabuyao, LAGUNA',
             'payment_status' => 'paid',
             'payment_method' => 'bank_transfer',
@@ -84,6 +87,9 @@ class AdminBookingUpdateRecipientTest extends TestCase
 
         // Check recipient model was updated
         $this->assertSame('Froilan Flores', $recipient->fresh()->name);
+        $this->assertSame('09171234567', $recipient->fresh()->phone_number);
+        $this->assertSame('09181234567', $recipient->fresh()->secondary_phone_number);
+        $this->assertSame('Unit 12B Amber Tower', $recipient->fresh()->address);
         $this->assertSame('Cabuyao', $recipient->fresh()->city);
         $this->assertSame('LAGUNA', $recipient->fresh()->province);
 
@@ -91,18 +97,37 @@ class AdminBookingUpdateRecipientTest extends TestCase
         $refreshedBox = $box->fresh();
         $this->assertSame('Cabuyao, LAGUNA', $refreshedBox->destination);
         $this->assertSame('Froilan Flores', data_get($refreshedBox->recipient_snapshot, 'name'));
+        $this->assertSame('09171234567', data_get($refreshedBox->recipient_snapshot, 'phone_number'));
+        $this->assertSame('09181234567', data_get($refreshedBox->recipient_snapshot, 'secondary_phone_number'));
+        $this->assertSame('Unit 12B Amber Tower', data_get($refreshedBox->recipient_snapshot, 'address'));
         $this->assertSame('Cabuyao', data_get($refreshedBox->recipient_snapshot, 'city'));
         $this->assertSame('LAGUNA', data_get($refreshedBox->recipient_snapshot, 'province'));
 
         // Check booking primary recipient snapshot was updated
         $refreshedBooking = $booking->fresh();
         $this->assertSame('Froilan Flores', data_get($refreshedBooking->primary_recipient_snapshot, 'name'));
+        $this->assertSame('09171234567', data_get($refreshedBooking->primary_recipient_snapshot, 'phone_number'));
+        $this->assertSame('09181234567', data_get($refreshedBooking->primary_recipient_snapshot, 'secondary_phone_number'));
+        $this->assertSame('Unit 12B Amber Tower', data_get($refreshedBooking->primary_recipient_snapshot, 'address'));
 
         // Verify toHistoricalPayload() now reflects the updated recipient and destination
         $payloadAfter = $refreshedBooking->toHistoricalPayload();
         $this->assertSame('Froilan Flores', data_get($payloadAfter, 'recipient_name'));
         $this->assertSame('Froilan Flores', data_get($payloadAfter, 'boxes.0.recipient.name'));
+        $this->assertSame('09171234567', data_get($payloadAfter, 'boxes.0.recipient.phone_number'));
+        $this->assertSame('Unit 12B Amber Tower', data_get($payloadAfter, 'boxes.0.recipient.address'));
         $this->assertSame('Cabuyao, LAGUNA', data_get($payloadAfter, 'destination'));
         $this->assertSame('Cabuyao, LAGUNA', data_get($payloadAfter, 'boxes.0.destination'));
+
+        // Verify edit route provides the updated recipient fields
+        $editResponse = $this->actingAs($admin)->get("/admin/bookings/{$booking->id}/edit");
+        $editResponse->assertOk();
+        $editResponse->assertInertia(fn ($page) => $page
+            ->component('admin/bookings/edit')
+            ->where('booking.recipient_name', 'Froilan Flores')
+            ->where('booking.recipient_phone', '09171234567')
+            ->where('booking.recipient_secondary_phone', '09181234567')
+            ->where('booking.recipient_address', 'Unit 12B Amber Tower')
+        );
     }
 }
