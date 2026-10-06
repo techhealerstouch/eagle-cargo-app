@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Enums\BookingStatus;
+use App\Enums\BoxStatus;
 use App\Models\ActivityLog;
 use App\Models\Booking;
 use App\Models\Box;
@@ -357,6 +359,82 @@ class TransactionSnapshotService
         }
 
         return collect([$city, $province])->filter()->implode(', ');
+    }
+
+    public function syncActiveRecipientSnapshots(Recipient $recipient): void
+    {
+        $recipient->refresh();
+        $recipientSnapshot = $this->recipientSnapshot($recipient);
+        $newDestination = $this->destinationFromRecipient($recipient);
+        $versionId = $recipient->exists ? $this->entityVersionService->latestVersionId($recipient) : null;
+
+        $activeBoxStatuses = [
+            BoxStatus::Pending->value,
+            BoxStatus::Collected->value,
+            BoxStatus::ReceivedByWarehouse->value,
+        ];
+
+        $activeBookingStatuses = [
+            BookingStatus::Draft->value,
+            BookingStatus::Pending->value,
+            BookingStatus::Confirmed->value,
+            BookingStatus::Collected->value,
+        ];
+
+        $boxes = $recipient->boxes()
+            ->with(['booking.invoice'])
+            ->whereIn('status', $activeBoxStatuses)
+            ->get();
+
+        $touchedBookings = collect();
+
+        foreach ($boxes as $box) {
+            $boxUpdates = [
+                'recipient_snapshot' => $recipientSnapshot,
+                'recipient_version_id' => $versionId,
+                'snapshot_taken_at' => now(),
+            ];
+
+            if ($newDestination !== 'N/A') {
+                $boxUpdates['destination'] = $newDestination;
+            }
+
+            $box->updateQuietly($boxUpdates);
+
+            $booking = $box->booking;
+            if ($booking) {
+                $bookingStatus = $booking->status instanceof BookingStatus
+                    ? $booking->status->value
+                    : (string) $booking->status;
+
+                if (in_array($bookingStatus, $activeBookingStatuses)) {
+                    $booking->updateQuietly([
+                        'primary_recipient_snapshot' => $recipientSnapshot,
+                        'recipient_version_id' => $versionId,
+                    ]);
+
+                    if ($booking->invoice && is_array($booking->invoice->line_items_snapshot) && $newDestination !== 'N/A') {
+                        $lineItems = $booking->invoice->line_items_snapshot;
+                        foreach ($lineItems as &$item) {
+                            if (isset($item['id']) && (int) $item['id'] === (int) $box->id && isset($item['destination']) && $item['destination'] !== 'N/A') {
+                                $item['destination'] = $newDestination;
+                            }
+                        }
+                        unset($item);
+                        $booking->invoice->updateQuietly(['line_items_snapshot' => $lineItems]);
+                    }
+
+                    $touchedBookings->push($booking);
+                }
+            }
+        }
+
+        if (class_exists(TrackingCacheService::class)) {
+            $trackingCache = app(TrackingCacheService::class);
+            foreach ($touchedBookings->unique('id') as $b) {
+                $trackingCache->forgetBooking($b);
+            }
+        }
     }
 
     private function primaryRecipientFromBookingPayload(array $bookingPayload): array

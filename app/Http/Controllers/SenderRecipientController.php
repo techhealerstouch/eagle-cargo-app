@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Area;
 use App\Models\Recipient;
+use App\Services\TransactionSnapshotService;
 use App\Rules\Phone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -86,6 +87,8 @@ class SenderRecipientController extends Controller
         }
 
         $recipient->update($validated);
+
+        app(TransactionSnapshotService::class)->syncActiveRecipientSnapshots($recipient);
 
         return redirect()->route('sender.recipients.index')->with('success', 'Recipient updated successfully.');
     }
