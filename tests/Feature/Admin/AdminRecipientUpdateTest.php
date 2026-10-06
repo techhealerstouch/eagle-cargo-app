@@ -152,4 +152,33 @@ class AdminRecipientUpdateTest extends TestCase
         $this->assertSame('Jane Doe', data_get($shippedPayload, 'boxes.0.recipient.name'));
         $this->assertSame('Jane Doe', data_get($shippedPayload, 'primary_recipient_snapshot.name'));
     }
+
+    public function test_admin_recipient_edit_page_receives_provinces_list(): void
+    {
+        $this->withoutExceptionHandling();
+
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $sender = Sender::factory()->create();
+        $area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+
+        $recipient = Recipient::create([
+            'sender_id' => $sender->id,
+            'area_id' => $area->id,
+            'name' => 'Jane Dave Pangit',
+            'address' => '456 Sampaguita St',
+            'city' => 'Manila',
+            'province' => 'METRO MANILA',
+            'zip_code' => '1000',
+            'phone_number' => '09123456789',
+        ]);
+
+        $response = $this->actingAs($admin)->get(route('admin.recipients.edit', $recipient));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('admin/recipients/edit')
+            ->has('provinces')
+            ->where('recipient.province', 'METRO MANILA')
+        );
+    }
 }

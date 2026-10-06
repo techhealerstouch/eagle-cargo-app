@@ -2,21 +2,18 @@
 
 namespace App\Http\Controllers\Admin;
 
-use Maatwebsite\Excel\Facades\Excel;
-
-use App\Services\AuditLogService;
-
-use App\Imports\RecipientsImport;
-
 use App\Exports\RecipientsExport;
-
 use App\Http\Controllers\Controller;
+use App\Imports\RecipientsImport;
 use App\Models\Area;
 use App\Models\Recipient;
-use App\Services\TransactionSnapshotService;
 use App\Rules\Phone;
+use App\Services\AuditLogService;
+use App\Services\ReferenceDataService;
+use App\Services\TransactionSnapshotService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
+use Maatwebsite\Excel\Facades\Excel;
 
 class RecipientController extends Controller
 {
@@ -67,26 +64,28 @@ class RecipientController extends Controller
         ]);
     }
 
-    public function edit(Recipient $recipient)
+    public function edit(Recipient $recipient, ReferenceDataService $referenceDataService)
     {
         $areas = Area::where('is_active', true)->orderBy('name')->get();
+        $provinces = $referenceDataService->activeProvinces();
 
         return Inertia::render('admin/recipients/edit', [
             'recipient' => $recipient->load(['sender', 'area']),
             'areas' => $areas,
+            'provinces' => $provinces,
         ]);
     }
 
-    public function update(Request $request, Recipient $recipient)
+    public function update(Request $request, Recipient $recipient, ReferenceDataService $referenceDataService)
     {
         if ($request->filled('phone_number')) {
             $request->merge([
-                'phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('phone_number'))
+                'phone_number' => preg_replace('/[\s\-\(\)]+/', '', (string) $request->input('phone_number')),
             ]);
         }
         if ($request->filled('secondary_phone_number')) {
             $request->merge([
-                'secondary_phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('secondary_phone_number'))
+                'secondary_phone_number' => preg_replace('/[\s\-\(\)]+/', '', (string) $request->input('secondary_phone_number')),
             ]);
         }
 
@@ -95,18 +94,14 @@ class RecipientController extends Controller
             'phone_number' => [
                 'nullable',
                 'string',
-                'max:50',
+                'max:20',
                 new Phone('phone number'),
             ],
             'secondary_phone_number' => [
                 'nullable',
                 'string',
-                'max:50',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        (new Phone('secondary phone number'))->validate($attribute, $value, $fail);
-                    }
-                },
+                'max:20',
+                new Phone('secondary phone number'),
             ],
             'address' => 'required|string|max:500',
             'city' => 'required|string|max:100', // Mandate city to avoid N/A destinations (Item 74)
@@ -116,22 +111,22 @@ class RecipientController extends Controller
             'area_id' => 'nullable|exists:areas,id',
         ]);
 
+        if (empty($validated['area_id']) && ! empty($validated['province'])) {
+            $resolvedAreaId = $referenceDataService->resolveDestinationAreaId(
+                $validated['province'],
+                $validated['city'] ?? null
+            );
+            if ($resolvedAreaId) {
+                $validated['area_id'] = $resolvedAreaId;
+            }
+        }
+
         $recipient->update($validated);
 
         app(TransactionSnapshotService::class)->syncActiveRecipientSnapshots($recipient);
 
-        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.recipients.index') ?? session('admin_return_url') ?? route('admin.recipients.index');
-        return redirect($returnUrl)->with('success', 'Recipient updated successfully.');
+        return redirect($this->adminReturnUrl('admin.recipients.index'))->with('success', 'Recipient updated successfully.');
     }
-
-    public function destroy(Recipient $recipient)
-    {
-        $recipient->delete();
-
-        return redirect()->back()->with('success', 'Recipient deleted.');
-    }
-
-
 
     public function exportExcel(Request $request)
     {
@@ -166,14 +161,10 @@ class RecipientController extends Controller
         return Excel::download(new RecipientsExport($recipients), 'recipients_export_'.now()->format('Ymd_His').'.xlsx');
     }
 
-
-
     public function downloadImportTemplate()
     {
         return Excel::download(new RecipientsExport(null, true), 'recipients_import_template.xlsx');
     }
-
-
 
     public function importExcel(Request $request)
     {
@@ -200,4 +191,10 @@ class RecipientController extends Controller
         ]);
     }
 
+    public function destroy(Recipient $recipient)
+    {
+        $recipient->delete();
+
+        return redirect($this->adminReturnUrl('admin.recipients.index'))->with('success', 'Recipient deleted.');
+    }
 }

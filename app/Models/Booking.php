@@ -16,11 +16,15 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\DB;
 
 /**
  * @property Collection<int, Box> $boxes
+ * @property Invoice|null $invoice
+ * @property Collection<int, Invoice> $invoices
  * @property \Illuminate\Support\Carbon|null $preferred_date
  * @property \Illuminate\Support\Carbon|null $confirmed_at
  * @property \Illuminate\Support\Carbon|null $shipped_at
@@ -99,7 +103,17 @@ class Booking extends Model
         'is_guest' => 'boolean',
     ];
 
-    protected $appends = ['destination', 'recipient_name', 'delivery_progress', 'undelivered_boxes_count', 'boxes_without_serial_count', 'is_guest'];
+    protected $appends = [
+        'destination',
+        'recipient_name',
+        'recipient_phone',
+        'recipient_secondary_phone',
+        'recipient_address',
+        'delivery_progress',
+        'undelivered_boxes_count',
+        'boxes_without_serial_count',
+        'is_guest',
+    ];
 
     /**
      * Set the booking status with transition validation.
@@ -237,6 +251,41 @@ class Booking extends Model
         return 'N/A';
     }
 
+    public function getRecipientPhoneAttribute()
+    {
+        $box = $this->relationLoaded('boxes')
+            ? $this->boxes->first()
+            : $this->boxes()->with('recipient')->first();
+
+        return $box?->recipient?->phone_number
+            ?? $this->primary_recipient_snapshot['phone_number']
+            ?? $this->primary_recipient_snapshot['phone']
+            ?? null;
+    }
+
+    public function getRecipientSecondaryPhoneAttribute()
+    {
+        $box = $this->relationLoaded('boxes')
+            ? $this->boxes->first()
+            : $this->boxes()->with('recipient')->first();
+
+        return $box?->recipient?->secondary_phone_number
+            ?? $this->primary_recipient_snapshot['secondary_phone_number']
+            ?? $this->primary_recipient_snapshot['secondary_phone']
+            ?? null;
+    }
+
+    public function getRecipientAddressAttribute()
+    {
+        $box = $this->relationLoaded('boxes')
+            ? $this->boxes->first()
+            : $this->boxes()->with('recipient')->first();
+
+        return $box?->recipient?->address
+            ?? $this->primary_recipient_snapshot['address']
+            ?? null;
+    }
+
     public function boxes()
     {
         return $this->hasMany(Box::class);
@@ -263,12 +312,18 @@ class Booking extends Model
         return empty($this->declaration_data) && empty($this->declaration_form_path);
     }
 
-    public function invoices()
+    /**
+     * @return HasMany<Invoice, $this>
+     */
+    public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class);
     }
 
-    public function invoice()
+    /**
+     * @return HasOne<Invoice, $this>
+     */
+    public function invoice(): HasOne
     {
         return $this->hasOne(Invoice::class)->latestOfMany();
     }

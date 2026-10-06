@@ -506,11 +506,20 @@ class BookingController extends Controller
     {
         $senders = Sender::orderBy('first_name')->get();
         $referenceDataService = app(ReferenceDataService::class);
+        $booking->load(['pickupZone', 'boxes.recipient']);
+
+        $primaryRecipient = $booking->boxes->first()?->recipient;
+        $snapshot = $booking->primary_recipient_snapshot ?? $booking->boxes->first()?->recipient_snapshot ?? [];
+
+        $booking->recipient_phone = $primaryRecipient?->phone_number ?? $snapshot['phone_number'] ?? $snapshot['phone'] ?? '';
+        $booking->recipient_secondary_phone = $primaryRecipient?->secondary_phone_number ?? $snapshot['secondary_phone_number'] ?? $snapshot['secondary_phone'] ?? '';
+        $booking->recipient_address = $primaryRecipient?->address ?? $snapshot['address'] ?? '';
 
         return Inertia::render('admin/bookings/edit', [
-            'booking' => $booking->load(['pickupZone', 'boxes.recipient']),
+            'booking' => $booking,
             'senders' => $senders,
             'pickupZones' => $referenceDataService->activePickupZones(),
+            'provinces' => $referenceDataService->activeProvinces(),
         ]);
     }
 
@@ -582,7 +591,15 @@ class BookingController extends Controller
                     'name' => $validated['recipient_name'],
                 ];
 
-                if (! empty($validated['recipient_address'])) {
+                if (array_key_exists('recipient_phone', $validated)) {
+                    $recipientUpdates['phone_number'] = $validated['recipient_phone'];
+                }
+
+                if (array_key_exists('recipient_secondary_phone', $validated)) {
+                    $recipientUpdates['secondary_phone_number'] = $validated['recipient_secondary_phone'];
+                }
+
+                if (array_key_exists('recipient_address', $validated) && ! empty($validated['recipient_address'])) {
                     $recipientUpdates['address'] = $validated['recipient_address'];
                 }
 

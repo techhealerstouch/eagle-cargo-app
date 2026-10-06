@@ -4,6 +4,7 @@ namespace App\Http\Requests\Admin;
 
 use App\Enums\BookingStatus;
 use App\Enums\PaymentStatus;
+use App\Rules\Phone;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -29,6 +30,21 @@ class UpdateAdminBookingRequest extends FormRequest
         });
     }
 
+    protected function prepareForValidation(): void
+    {
+        if ($this->filled('recipient_phone')) {
+            $this->merge([
+                'recipient_phone' => preg_replace('/[\s\-\(\)]+/', '', (string) $this->input('recipient_phone')),
+            ]);
+        }
+
+        if ($this->filled('recipient_secondary_phone')) {
+            $this->merge([
+                'recipient_secondary_phone' => preg_replace('/[\s\-\(\)]+/', '', (string) $this->input('recipient_secondary_phone')),
+            ]);
+        }
+    }
+
     public function rules(): array
     {
         $isPaid = $this->payment_status === 'paid' || $this->payment_status === PaymentStatus::Paid->value;
@@ -44,7 +60,27 @@ class UpdateAdminBookingRequest extends FormRequest
             'status' => 'required|in:pending,confirmed,collected,shipped,delivered,cancelled',
             'booking_type' => ['nullable', 'string', Rule::in(['drop_off', 'home_pickup', 'other'])],
             'recipient_name' => 'required|string|max:255',
-            'recipient_address' => 'nullable|string|max:255',
+            'recipient_phone' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('recipient phone number'))->validate($attribute, $value, $fail);
+                    }
+                },
+            ],
+            'recipient_secondary_phone' => [
+                'nullable',
+                'string',
+                'max:50',
+                function ($attribute, $value, $fail) {
+                    if (! empty($value)) {
+                        (new Phone('secondary phone number'))->validate($attribute, $value, $fail);
+                    }
+                },
+            ],
+            'recipient_address' => 'nullable|string|max:500',
             'recipient_city' => 'nullable|string|max:100',
             'recipient_province' => 'nullable|string|max:100',
             'recipient_zip_code' => 'nullable|string|max:20',
