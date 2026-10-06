@@ -13,6 +13,7 @@ use App\Exports\RecipientsExport;
 use App\Http\Controllers\Controller;
 use App\Models\Area;
 use App\Models\Recipient;
+use App\Services\TransactionSnapshotService;
 use App\Rules\Phone;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -116,6 +117,8 @@ class RecipientController extends Controller
         ]);
 
         $recipient->update($validated);
+
+        app(TransactionSnapshotService::class)->syncActiveRecipientSnapshots($recipient);
 
         $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.recipients.index') ?? session('admin_return_url') ?? route('admin.recipients.index');
         return redirect($returnUrl)->with('success', 'Recipient updated successfully.');

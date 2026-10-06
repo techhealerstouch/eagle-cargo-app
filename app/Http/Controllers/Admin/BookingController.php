@@ -28,10 +28,13 @@ use App\Notifications\AccountCreatedByAdmin;
 use App\Notifications\BookingCreatedByAdmin;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\AuditLogService;
+use App\Services\EntityVersionService;
 use App\Services\ReferenceDataService;
 use App\Services\RunsheetService;
 use App\Services\SettingsService;
+use App\Services\TrackingCacheService;
 use App\Services\TrackingStepService;
+use App\Services\TransactionSnapshotService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Request;
@@ -505,7 +508,7 @@ class BookingController extends Controller
         $referenceDataService = app(ReferenceDataService::class);
 
         return Inertia::render('admin/bookings/edit', [
-            'booking' => $booking->load(['pickupZone']),
+            'booking' => $booking->load(['pickupZone', 'boxes.recipient']),
             'senders' => $senders,
             'pickupZones' => $referenceDataService->activePickupZones(),
         ]);
@@ -568,26 +571,91 @@ class BookingController extends Controller
             }
         }
 
-        // Update recipient info on boxes/recipients
+        // Update recipient info on boxes/recipients and sync snapshots
         $booking->load('boxes.recipient');
-        $booking->boxes->each(function ($box) use ($validated) {
+        $snapshotService = app(TransactionSnapshotService::class);
+        $versionService = app(EntityVersionService::class);
+
+        $booking->boxes->each(function ($box) use ($validated, $snapshotService, $versionService) {
             if ($box->recipient) {
-                $box->recipient->update([
+                $recipientUpdates = [
                     'name' => $validated['recipient_name'],
-                ]);
+                ];
+
+                if (! empty($validated['recipient_address'])) {
+                    $recipientUpdates['address'] = $validated['recipient_address'];
+                }
 
                 // If destination is provided, try to update city/province (City, Province format)
                 if (! empty($validated['destination'])) {
-                    $parts = explode(',', $validated['destination']);
+                    $parts = array_map('trim', explode(',', $validated['destination']));
                     if (count($parts) >= 2) {
-                        $box->recipient->update([
-                            'city' => trim($parts[0]),
-                            'province' => trim($parts[1]),
-                        ]);
+                        $recipientUpdates['city'] = $parts[0];
+                        $recipientUpdates['province'] = $parts[1];
+                    } elseif (count($parts) === 1 && $parts[0] !== '') {
+                        $recipientUpdates['city'] = $parts[0];
+                    }
+                } elseif (! empty($validated['recipient_city'])) {
+                    $recipientUpdates['city'] = $validated['recipient_city'];
+                    if (! empty($validated['recipient_province'])) {
+                        $recipientUpdates['province'] = $validated['recipient_province'];
                     }
                 }
+
+                if (! empty($validated['recipient_zip_code'])) {
+                    $recipientUpdates['zip_code'] = $validated['recipient_zip_code'];
+                }
+
+                $box->recipient->update($recipientUpdates);
+                $box->recipient->refresh();
+            }
+
+            // Sync box destination and recipient snapshot
+            $boxUpdates = [];
+            if (! empty($validated['destination'])) {
+                $boxUpdates['destination'] = $validated['destination'];
+            } elseif ($box->recipient) {
+                $boxUpdates['destination'] = $snapshotService->destinationFromRecipient($box->recipient);
+            }
+
+            if ($box->recipient) {
+                $boxUpdates['recipient_snapshot'] = $snapshotService->recipientSnapshot($box->recipient);
+                $boxUpdates['recipient_version_id'] = $box->recipient->exists
+                    ? $versionService->latestVersionId($box->recipient)
+                    : null;
+                $boxUpdates['snapshot_taken_at'] = now();
+            }
+
+            if (! empty($boxUpdates)) {
+                $box->updateQuietly($boxUpdates);
             }
         });
+
+        // Sync booking primary recipient snapshot
+        $booking->load('boxes.recipient');
+        $primaryRecipient = $booking->boxes->pluck('recipient')->filter()->first();
+        if ($primaryRecipient) {
+            $booking->updateQuietly([
+                'primary_recipient_snapshot' => $snapshotService->recipientSnapshot($primaryRecipient),
+                'recipient_version_id' => $primaryRecipient->exists
+                    ? $versionService->latestVersionId($primaryRecipient)
+                    : null,
+            ]);
+        }
+
+        // Keep invoice line items destination consistent if invoice exists
+        if ($booking->invoice && is_array($booking->invoice->line_items_snapshot) && ! empty($validated['destination'])) {
+            $lineItems = $booking->invoice->line_items_snapshot;
+            foreach ($lineItems as &$item) {
+                if (isset($item['destination']) && $item['destination'] !== 'N/A') {
+                    $item['destination'] = $validated['destination'];
+                }
+            }
+            unset($item);
+            $booking->invoice->updateQuietly(['line_items_snapshot' => $lineItems]);
+        }
+
+        app(TrackingCacheService::class)->forgetBooking($booking);
 
         return redirect($this->adminReturnUrl('admin.bookings.index'))->with('success', 'Booking updated successfully.');
     }
