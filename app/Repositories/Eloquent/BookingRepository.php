@@ -730,17 +730,17 @@ class BookingRepository implements BookingRepositoryInterface
 
             if (! $recipient && $address) {
                 $recipient = $sender->recipients()->create([
-                    'area_id' => $firstBox['area_id'],
+                    'area_id' => $firstBox['area_id'] ?? null,
                     'name' => trim(($firstBox['recipient_first_name'] ?? '').' '.($firstBox['recipient_last_name'] ?? '')),
                     'first_name' => $firstBox['recipient_first_name'] ?? null,
                     'last_name' => $firstBox['recipient_last_name'] ?? null,
                     'email' => $firstBox['recipient_email'] ?? null,
                     'phone_number' => $firstBox['recipient_phone'] ?? null,
                     'secondary_phone_number' => $firstBox['recipient_secondary_phone'] ?? null,
-                    'address' => $firstBox['recipient_address'],
-                    'city' => $firstBox['recipient_city'],
-                    'province' => $firstBox['recipient_province'],
-                    'zip_code' => $firstBox['recipient_zip_code'],
+                    'address' => $firstBox['recipient_address'] ?? $address,
+                    'city' => $firstBox['recipient_city'] ?? null,
+                    'province' => $firstBox['recipient_province'] ?? null,
+                    'zip_code' => $firstBox['recipient_zip_code'] ?? '',
                     'landmarks' => $firstBox['recipient_landmarks'] ?? null,
                 ]);
             }

@@ -16,6 +16,13 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Superseded by guest booking (2026_09_21_000001_allow_guest_senders): senders.user_id
+        // must remain nullable for guests. When this runs out of order it would convert guest
+        // senders into placeholder user accounts and re-add NOT NULL, breaking guest checkout.
+        if (Schema::hasColumn('bookings', 'guest_token')) {
+            return;
+        }
+
         // 1. Backfill any senders that do not have a user_id
         $sendersWithoutUsers = Sender::whereNull('user_id')->get();
 
