@@ -399,12 +399,21 @@ class PaymentService
         });
     }
 
-    private function settledPaymentsTotal(Invoice $invoice): float
+    public function settledPaymentsTotal(Invoice $invoice): float
     {
         return (float) $invoice->payments()
             ->where(function ($query) {
-                $query->whereNotNull('paid_at')
-                    ->orWhere('stripe_status', 'succeeded');
+                $query->where(function ($q) {
+                    $q->whereNotNull('stripe_payment_intent_id')
+                        ->where(function ($sq) {
+                            $sq->whereNotNull('paid_at')
+                                ->orWhere('stripe_status', 'succeeded');
+                        });
+                })
+                ->orWhere(function ($q) {
+                    $q->whereNull('stripe_payment_intent_id')
+                        ->whereNotNull('confirmed_at');
+                });
             })
             ->sum('amount');
     }
@@ -419,15 +428,55 @@ class PaymentService
     }
 
     /**
-     * Confirm a cash payment recorded by a picker.
-     * Admin calls this to verify the cash was actually received.
+     * Initialize or update an unconfirmed offline/manual payment (e.g. Bank Transfer with Proof of Payment).
      */
-    public function confirmCashPayment(Payment $payment, ?int $confirmedBy = null, ?string $note = null): Payment
+    public function initializeOfflinePayment(Booking $booking, array $data): Payment
     {
-        if (! $payment->is_cash_payment) {
-            throw new \InvalidArgumentException('Only cash payments require confirmation.');
-        }
+        return DB::transaction(function () use ($booking, $data) {
+            $invoice = $booking->invoice ?? Invoice::generateForBooking($booking);
 
+            $amount = (float) ($data['amount'] ?? $invoice->amount);
+            $paymentMethod = $data['payment_method'] ?? $booking->payment_method ?? 'bank_transfer';
+            $referenceNumber = $data['reference_number'] ?? $booking->payment_reference ?? null;
+
+            // Check if an unconfirmed offline payment already exists for this invoice
+            $existingPayment = Payment::where('invoice_id', $invoice->id)
+                ->whereNull('confirmed_at')
+                ->whereNull('stripe_payment_intent_id')
+                ->first();
+
+            if ($existingPayment) {
+                $existingPayment->update([
+                    'amount' => $amount,
+                    'payment_method' => $paymentMethod,
+                    'reference_number' => $referenceNumber,
+                    'paid_at' => now(),
+                    'is_read' => false,
+                ]);
+
+                return $existingPayment->fresh();
+            }
+
+            return Payment::create([
+                'invoice_id' => $invoice->id,
+                'amount' => $amount,
+                'payment_method' => $paymentMethod,
+                'reference_number' => $referenceNumber,
+                'paid_at' => now(),
+                'collected_by' => Auth::id(),
+                'confirmed_at' => null,
+                'is_cash_payment' => in_array($paymentMethod, ['cash', 'cash_on_pickup'], true),
+                'confirmation_note' => $data['note'] ?? null,
+            ]);
+        });
+    }
+
+    /**
+     * Confirm a payment recorded by a picker or submitted via bank transfer / proof of payment.
+     * Admin calls this to verify the funds were actually received.
+     */
+    public function confirmPayment(Payment $payment, ?int $confirmedBy = null, ?string $note = null): Payment
+    {
         if ($payment->confirmed_at !== null) {
             throw new \InvalidArgumentException('This payment has already been confirmed.');
         }
@@ -439,26 +488,31 @@ class PaymentService
         ]);
 
         // Safety net: explicitly re-sync invoice & booking status.
-        // The PaymentObserver should handle this, but if it didn't fire
-        // (e.g. event suppression, trait listener error), this ensures
-        // the invoice and booking statuses are always consistent.
         $this->ensureInvoiceStatusSynced($payment);
 
         return $payment->fresh();
     }
 
     /**
-     * Reject a cash payment recorded by a picker.
-     * Admin calls this if the cash was not actually received.
+     * Backwards-compatible alias for confirmPayment.
+     */
+    public function confirmCashPayment(Payment $payment, ?int $confirmedBy = null, ?string $note = null): Payment
+    {
+        return $this->confirmPayment($payment, $confirmedBy, $note);
+    }
+
+    /**
+     * Reject an unconfirmed payment.
+     * Admin calls this if the funds were not received or proof is rejected.
      * This deletes the payment record.
      */
-    public function rejectCashPayment(Payment $payment, ?string $reason = null): void
+    public function rejectPayment(Payment $payment, ?string $reason = null): void
     {
-        if (! $payment->is_cash_payment) {
-            throw new \InvalidArgumentException('Only cash payments can be rejected.');
+        if ($payment->confirmed_at !== null) {
+            throw new \InvalidArgumentException('Confirmed payments cannot be rejected.');
         }
 
-        Log::info('Cash payment rejected.', [
+        Log::info('Payment rejected.', [
             'payment_id' => $payment->id,
             'amount' => $payment->amount,
             'reason' => $reason,
@@ -469,11 +523,18 @@ class PaymentService
 
         $payment->delete();
 
-        // Safety net: explicitly re-sync after deletion, in case the
-        // PaymentObserver::deleted() didn't fire or used stale data.
+        // Safety net: explicitly re-sync after deletion
         if ($invoiceId) {
             $this->ensureInvoiceStatusSyncedByInvoiceId($invoiceId);
         }
+    }
+
+    /**
+     * Backwards-compatible alias for rejectPayment.
+     */
+    public function rejectCashPayment(Payment $payment, ?string $reason = null): void
+    {
+        $this->rejectPayment($payment, $reason);
     }
 
     /**
@@ -500,13 +561,14 @@ class PaymentService
             ->where(function ($query) {
                 $query
                     ->where(function ($q) {
-                        $q->where(function ($inner) {
-                            $inner->where('is_cash_payment', false)
-                                ->orWhereNull('is_cash_payment');
-                        })->whereNotNull('paid_at');
+                        $q->whereNotNull('stripe_payment_intent_id')
+                            ->where(function ($sq) {
+                                $sq->whereNotNull('paid_at')
+                                    ->orWhere('stripe_status', 'succeeded');
+                            });
                     })
                     ->orWhere(function ($q) {
-                        $q->where('is_cash_payment', true)
+                        $q->whereNull('stripe_payment_intent_id')
                             ->whereNotNull('confirmed_at');
                     });
             })

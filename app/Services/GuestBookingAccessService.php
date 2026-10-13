@@ -2,8 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\Role;
 use App\Models\Booking;
 use App\Models\GuestBookingAccessChallenge;
+use App\Models\Recipient;
+use App\Models\Sender;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
@@ -119,12 +123,30 @@ class GuestBookingAccessService
         }
 
         // 2. Allow if valid guest token matches
-        $token = $request->header('X-Guest-Token') ?? $request->input('guest_token') ?? $request->query('token');
+        $token = $request->header('X-Guest-Token') ?? $request->input('guest_token') ?? $request->input('token') ?? $request->query('token');
         if ($token && $booking->guest_token && hash_equals((string) $booking->guest_token, (string) $token)) {
             return;
         }
 
-        // 3. Fallback to temporary signed URL check
+        // 3. Allow if valid signed URL for the current request
+        if ($request->hasValidSignature() && $request->query('purpose') === $purpose) {
+            return;
+        }
+
+        // 4. Fallback: Check if signature was for track.declaration.form route
+        if ($purpose === self::DECLARATION && $request->query('signature') && $request->query('expires') && $request->query('purpose') === $purpose) {
+            $expectedFormUrl = URL::route('track.declaration.form', [
+                'booking' => $booking->getRouteKey(),
+                'purpose' => $purpose,
+                'expires' => $request->query('expires'),
+            ]);
+            $expectedSignature = hash_hmac('sha256', $expectedFormUrl, config('app.key'));
+            if (hash_equals($expectedSignature, (string) $request->query('signature')) && (int) $request->query('expires') >= now()->timestamp) {
+                return;
+            }
+        }
+
+        // 5. Fallback to temporary signed URL check
         $this->authorize($request, $booking, $purpose);
     }
 
@@ -154,5 +176,51 @@ class GuestBookingAccessService
     private function sessionKey(Booking $booking, string $purpose): string
     {
         return 'guest_booking_access.'.$booking->id.'.'.$purpose;
+    }
+
+    /**
+     * Link any unlinked guest bookings and recipient profiles matching the user's email
+     * to the user's primary sender profile.
+     */
+    public function linkGuestBookingsToUser(User $user): int
+    {
+        if (! $user->email) {
+            return 0;
+        }
+
+        $userRole = $user->role instanceof Role
+            ? $user->role
+            : (is_string($user->role) ? Role::tryFrom($user->role) : null);
+
+        if ($userRole !== Role::Sender) {
+            return 0;
+        }
+
+        $sender = $user->sender ?? Sender::where('user_id', $user->id)->first();
+
+        if (! $sender) {
+            $guestSender = Sender::where('email', $user->email)->whereNull('user_id')->first();
+            if ($guestSender) {
+                $guestSender->update(['user_id' => $user->id]);
+                $sender = $guestSender;
+            }
+        }
+
+        if (! $sender) {
+            return 0;
+        }
+
+        $otherGuestSenders = Sender::where('email', $user->email)
+            ->where('id', '!=', $sender->id)
+            ->get();
+
+        $linkedCount = 0;
+        foreach ($otherGuestSenders as $other) {
+            $linkedCount += Booking::where('sender_id', $other->id)->update(['sender_id' => $sender->id]);
+            Recipient::where('sender_id', $other->id)->update(['sender_id' => $sender->id]);
+            $other->delete();
+        }
+
+        return $linkedCount;
     }
 }

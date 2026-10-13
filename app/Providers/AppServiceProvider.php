@@ -16,6 +16,14 @@ use App\Models\Runsheet;
 use App\Models\ShippingUpdate;
 use App\Models\User;
 use App\Jobs\AuditDataIntegrityJob;
+use App\Services\AuditLogService;
+use App\Services\DeveloperAccess;
+use App\Services\SecurityAnomalyService;
+use Illuminate\Auth\Events\Failed;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Auth\Events\Logout;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Support\Facades\Event;
 use App\Observers\BatchObserver;
 use App\Observers\BookingObserver;
 use App\Observers\BoxObserver;
@@ -124,6 +132,32 @@ class AppServiceProvider extends ServiceProvider
         ShippingUpdate::observe(ShippingUpdateObserver::class);
         DatabaseNotification::observe(DatabaseNotificationObserver::class);
         Recipient::observe(RecipientObserver::class);
+
+        // Security & Authentication Audit Logging
+        Event::listen(Login::class, function ($event) {
+            if ($event->user instanceof User) {
+                app(AuditLogService::class)->logSecurityEvent('login', "User {$event->user->name} ({$event->user->email}) logged in.", $event->user);
+                app(\App\Services\GuestBookingAccessService::class)->linkGuestBookingsToUser($event->user);
+            }
+        });
+
+        Event::listen(Logout::class, function ($event) {
+            if ($event->user instanceof User) {
+                app(AuditLogService::class)->logSecurityEvent('logout', "User {$event->user->name} ({$event->user->email}) logged out.", $event->user);
+            }
+        });
+
+        Event::listen(Failed::class, function ($event) {
+            $email = $event->credentials['email'] ?? 'unknown';
+            app(AuditLogService::class)->logSecurityEvent('failed_login', "Failed login attempt for email: {$email}.", $event->user);
+            app(SecurityAnomalyService::class)->checkFailedLoginThreshold($email, request()?->ip());
+        });
+
+        Event::listen(PasswordReset::class, function ($event) {
+            if ($event->user instanceof User) {
+                app(AuditLogService::class)->logSecurityEvent('password_reset', "Password was reset for {$event->user->email}.", $event->user);
+            }
+        });
 
         // Trigger real-time data integrity audits on key model changes
         $auditModels = [

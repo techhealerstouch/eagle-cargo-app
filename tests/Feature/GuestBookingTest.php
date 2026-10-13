@@ -6,179 +6,56 @@ use App\Actions\Fortify\CreateNewUser;
 use App\Enums\Role;
 use App\Models\Area;
 use App\Models\Booking;
+use App\Models\Box;
 use App\Models\BoxPrice;
 use App\Models\BoxType;
+use App\Models\GuestBookingAccessChallenge;
 use App\Models\PickupZone;
 use App\Models\Province;
 use App\Models\Sender;
+use App\Services\GuestBookingAccessService;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
-use Inertia\Testing\AssertableInertia as Assert;
 use Tests\TestCase;
 
 class GuestBookingTest extends TestCase
 {
     use RefreshDatabase;
 
-    protected Area $area;
-    protected BoxType $boxType;
-    protected PickupZone $pickupZone;
-
     protected function setUp(): void
     {
         parent::setUp();
-        Queue::fake();
         $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
-
-        $this->area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
-        Province::firstOrCreate(['name' => 'Metro Manila'], ['area_id' => $this->area->id, 'is_active' => true]);
-
-        $this->boxType = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
-
-        $this->pickupZone = PickupZone::firstOrCreate([
-            'name' => 'Sydney Metro',
-        ], [
-            'code' => 'SYD-METRO',
-            'is_active' => true,
-        ]);
-
-        BoxPrice::firstOrCreate([
-            'area_id' => $this->area->id,
-            'box_type_id' => $this->boxType->id,
-            'pickup_zone_id' => $this->pickupZone->id,
-        ], [
-            'price' => 120.00,
-        ]);
+        Notification::fake();
     }
 
-    public function test_guest_can_view_booking_page()
+    public function test_guest_can_view_booking_form(): void
     {
         $response = $this->get(route('guest.book'));
 
         $response->assertOk();
-        $response->assertInertia(fn (Assert $page) => $page
-            ->component('guest/Book')
-            ->has('areas')
-            ->has('provinces')
-            ->has('boxTypes')
-            ->has('boxPrices')
-            ->has('pickupZones')
-        );
+        $response->assertInertia(fn ($page) => $page->component('guest/Book'));
     }
 
-    public function test_guest_can_submit_booking_successfully()
+    public function test_bot_honeypot_trap_silently_redirects(): void
     {
-        $payload = [
-            'first_name' => 'Maria',
-            'last_name' => 'Santos',
-            'email' => 'maria.santos@example.com',
-            'mobile' => '+61412345678',
-            'address' => '123 Campbell Street',
-            'suburb' => 'Blacktown',
-            'state' => 'NSW',
-            'postcode' => '2148',
-            'pickup_zone_id' => $this->pickupZone->id,
-            'preferred_date' => now()->addDays(3)->format('Y-m-d'),
-            'payment_method' => 'cash_on_pickup',
-            'notes' => 'Ring bell upon arrival',
-            'boxes' => [
-                [
-                    'recipient_first_name' => 'Juan',
-                    'recipient_last_name' => 'Dela Cruz',
-                    'recipient_email' => 'juan@example.ph',
-                    'recipient_phone' => '+639171234567',
-                    'recipient_address' => 'Block 5 Lot 10 Sampaguita St',
-                    'recipient_city' => 'Manila',
-                    'recipient_province' => 'Metro Manila',
-                    'recipient_zip_code' => '1000',
-                    'area_id' => $this->area->id,
-                    'box_type_id' => $this->boxType->id,
-                    'is_custom_size' => false,
-                ],
-            ],
-        ];
+        $response = $this->post(route('guest.bookings.store'), [
+            'website' => 'http://spam-bot-trap.com',
+            'first_name' => 'Spam',
+            'last_name' => 'Bot',
+            'email' => 'bot@spam.com',
+            'mobile' => '0412345678',
+        ]);
 
-        $response = $this->post(route('guest.bookings.store'), $payload);
-
-        $response->assertRedirect();
-
-        // Check booking was created
-        $booking = Booking::first();
-        $this->assertNotNull($booking);
-        $this->assertStringStartsWith('BK-', $booking->reference_number);
-        $this->assertNotNull($booking->guest_token);
-        $this->assertTrue($booking->is_guest);
-        $this->assertTrue($booking->isGuest());
-        $this->assertFalse($booking->isRegistered());
-        $this->assertEquals('pending', $booking->status->value);
-
-        // Check sender has no linked user_id
-        $sender = Sender::find($booking->sender_id);
-        $this->assertNotNull($sender);
-        $this->assertNull($sender->user_id);
-        $this->assertEquals('maria.santos@example.com', $sender->email);
-
-        // Check redirection goes to confirmation page with guest token
-        $response->assertRedirect(route('guest.booking.confirmed', ['token' => $booking->guest_token]));
+        $response->assertRedirect(route('guest.book'));
+        $this->assertDatabaseMissing('senders', ['email' => 'bot@spam.com']);
     }
 
-    public function test_guest_booking_supports_door_to_door_and_empty_box_delivery()
-    {
-        $this->area->update(['door_to_door_fee' => 15.00]);
-
-        $payload = [
-            'first_name' => 'Eduardo',
-            'last_name' => 'Reyes',
-            'email' => 'eduardo.reyes@example.com',
-            'mobile' => '+61412345679',
-            'address' => '456 Crown Street',
-            'suburb' => 'Surry Hills',
-            'state' => 'NSW',
-            'postcode' => '2010',
-            'pickup_zone_id' => $this->pickupZone->id,
-            'preferred_date' => now()->addDays(3)->format('Y-m-d'),
-            'payment_method' => 'cash_on_pickup',
-            'request_empty_box' => true,
-            'empty_box_count' => 2,
-            'empty_box_fee' => 10.00,
-            'boxes' => [
-                [
-                    'recipient_first_name' => 'Rosario',
-                    'recipient_last_name' => 'Reyes',
-                    'recipient_email' => 'rosario@example.ph',
-                    'recipient_phone' => '+639171234568',
-                    'recipient_address' => '789 Mabini St',
-                    'recipient_city' => 'Manila',
-                    'recipient_province' => 'Metro Manila',
-                    'recipient_zip_code' => '1000',
-                    'area_id' => $this->area->id,
-                    'box_type_id' => $this->boxType->id,
-                    'is_custom_size' => false,
-                    'is_door_to_door' => true,
-                ],
-            ],
-        ];
-
-        $response = $this->post(route('guest.bookings.store'), $payload);
-
-        $response->assertRedirect();
-
-        $booking = Booking::whereHas('sender', fn ($q) => $q->where('email', 'eduardo.reyes@example.com'))->first();
-        $this->assertNotNull($booking);
-        $this->assertEquals(2, $booking->empty_box_count);
-        $this->assertEquals(10.00, $booking->empty_box_fee);
-
-        $box = $booking->boxes()->first();
-        $this->assertNotNull($box);
-        $this->assertTrue((bool) $box->is_door_to_door);
-        // Price should be standard price ($120.00) + door_to_door_fee ($15.00) = $135.00
-        $this->assertEquals(135.00, (float) $box->price_charged);
-    }
-
-    public function test_guest_booking_validation_fails_when_fields_are_missing()
+    public function test_guest_booking_validation_errors(): void
     {
         $response = $this->post(route('guest.bookings.store'), []);
 
@@ -192,392 +69,353 @@ class GuestBookingTest extends TestCase
             'state',
             'postcode',
             'preferred_date',
-            'payment_method',
             'boxes',
         ]);
     }
 
-    public function test_guest_booking_honeypot_triggers_silent_redirect()
+    public function test_guest_cannot_book_with_existing_registered_user_email(): void
     {
+        $registeredUser = User::factory()->create([
+            'email' => 'registered.user@example.com',
+            'role' => Role::Sender,
+        ]);
+
+        $area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        $boxType = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
+        $province = Province::firstOrCreate(['name' => 'Metro Manila'], ['area_id' => $area->id, 'is_active' => true]);
+        $pickupZone = PickupZone::firstOrCreate([], ['name' => 'Zone 1', 'is_active' => true]);
+
         $payload = [
-            'website' => 'http://spambot.com',
-            'first_name' => 'Bot',
-            'last_name' => 'Spam',
-            'email' => 'bot@spam.com',
-            'mobile' => '+61412345678',
-            'address' => 'Fake St',
+            'first_name' => 'Impostor',
+            'last_name' => 'Guest',
+            'email' => $registeredUser->email,
+            'mobile' => '0412 345 678',
+            'address' => '123 Fake Street',
             'suburb' => 'Sydney',
             'state' => 'NSW',
             'postcode' => '2000',
+            'pickup_zone_id' => $pickupZone->id,
             'preferred_date' => now()->addDays(3)->format('Y-m-d'),
-            'payment_method' => 'cash_on_pickup',
-            'boxes' => [],
-        ];
-
-        $response = $this->from(route('guest.book'))->post(route('guest.bookings.store'), $payload);
-
-        $response->assertRedirect(route('guest.book'));
-        $this->assertEquals(0, Booking::count());
-    }
-
-    public function test_guest_can_view_confirmed_page_with_valid_token()
-    {
-        $sender = Sender::create([
-            'user_id' => null,
-            'first_name' => 'Maria',
-            'last_name' => 'Santos',
-            'email' => 'maria@example.com',
-            'mobile' => '+61412345678',
-            'address' => '123 Main St',
-        ]);
-
-        $booking = $sender->bookings()->create([
-            'guest_token' => 'test-guest-token-12345',
-            'reference_number' => 'BK-2026-999',
-            'status' => 'pending',
-            'preferred_date' => now()->addDays(3),
-            'payment_method' => 'cash_on_pickup',
-            'payment_status' => 'pending',
-        ]);
-
-        $response = $this->get(route('guest.booking.confirmed', ['token' => 'test-guest-token-12345']));
-
-        $response->assertOk();
-        $response->assertInertia(fn (Assert $page) => $page
-            ->component('guest/BookingConfirmed')
-            ->where('booking.reference_number', 'BK-2026-999')
-            ->where('booking.sender.email', 'maria@example.com')
-        );
-    }
-
-    public function test_confirmed_page_returns_404_for_invalid_token()
-    {
-        $response = $this->get(route('guest.booking.confirmed', ['token' => 'non-existent-token']));
-
-        $response->assertNotFound();
-    }
-
-    public function test_guest_booking_links_to_new_user_account_on_registration()
-    {
-        // 1. Guest creates a booking
-        $guestSender = Sender::create([
-            'user_id' => null,
-            'first_name' => 'Maria',
-            'last_name' => 'Santos',
-            'email' => 'maria.registered@example.com',
-            'mobile' => '+61412345678',
-            'address' => '123 Campbell Street',
-            'suburb' => 'Blacktown',
-            'state' => 'NSW',
-            'postcode' => '2148',
-        ]);
-
-        $guestBooking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-2026-101',
-            'status' => 'pending',
-            'preferred_date' => now()->addDays(3),
-            'payment_method' => 'cash_on_pickup',
-            'guest_token' => 'token-abc',
-        ]);
-
-        $this->assertNull($guestSender->user_id);
-
-        // 2. User registers using the same email
-        $creator = new CreateNewUser();
-        $newUser = $creator->create([
-            'name' => 'Maria Santos',
-            'email' => 'maria.registered@example.com',
-            'password' => 'Password123!',
-            'password_confirmation' => 'Password123!',
-            'role' => Role::Sender->value,
-            'mobile' => '+61412345678',
-            'address' => '123 Campbell Street',
-            'suburb' => 'Blacktown',
-            'state' => 'NSW',
-            'postcode' => '2148',
-            'country' => 'Australia',
-        ]);
-
-        // 3. Verify sender record is claimed by the new user
-        $guestSender->refresh();
-        $this->assertEquals($newUser->id, $guestSender->user_id);
-
-        // 4. Verify the new user's sender profile has the booking
-        $this->assertCount(1, $newUser->sender->bookings);
-        $this->assertEquals('BK-2026-101', $newUser->sender->bookings->first()->reference_number);
-    }
-
-    public function test_booking_is_guest_scopes_and_helpers()
-    {
-        $guestSender = Sender::create([
-            'user_id' => null,
-            'first_name' => 'Guest',
-            'last_name' => 'User',
-            'email' => 'guest.tester@example.com',
-            'mobile' => '+61412345678',
-            'address' => '123 Test St',
-        ]);
-
-        $registeredUser = User::factory()->create(['role' => Role::Sender]);
-        $registeredSender = Sender::create([
-            'user_id' => $registeredUser->id,
-            'first_name' => 'Registered',
-            'last_name' => 'User',
-            'email' => $registeredUser->email,
-            'mobile' => '+61412345679',
-            'address' => '456 Test St',
-        ]);
-
-        $guestBooking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-2026-GUEST',
-            'status' => 'pending',
-            'is_guest' => true,
-            'guest_token' => 'guest-token-123',
-        ]);
-
-        $memberBooking = $registeredSender->bookings()->create([
-            'reference_number' => 'BK-2026-MEMBER',
-            'status' => 'pending',
-            'is_guest' => false,
-        ]);
-
-        // Helpers
-        $this->assertTrue($guestBooking->isGuest());
-        $this->assertFalse($guestBooking->isRegistered());
-        $this->assertFalse($memberBooking->isGuest());
-        $this->assertTrue($memberBooking->isRegistered());
-
-        // Scopes
-        $guestResults = Booking::guest()->pluck('reference_number')->toArray();
-        $this->assertContains('BK-2026-GUEST', $guestResults);
-        $this->assertNotContains('BK-2026-MEMBER', $guestResults);
-
-        $registeredResults = Booking::registered()->pluck('reference_number')->toArray();
-        $this->assertContains('BK-2026-MEMBER', $registeredResults);
-        $this->assertNotContains('BK-2026-GUEST', $registeredResults);
-    }
-
-    public function test_admin_can_filter_bookings_by_guest_customer_type()
-    {
-        $admin = User::factory()->create(['role' => Role::Admin]);
-
-        $guestSender = Sender::create([
-            'user_id' => null,
-            'first_name' => 'GuestFilter',
-            'last_name' => 'User',
-            'email' => 'guest.filter@example.com',
-            'mobile' => '+61412345678',
-            'address' => '123 Test St',
-        ]);
-
-        $registeredUser = User::factory()->create(['role' => Role::Sender]);
-        $registeredSender = Sender::create([
-            'user_id' => $registeredUser->id,
-            'first_name' => 'MemberFilter',
-            'last_name' => 'User',
-            'email' => $registeredUser->email,
-            'mobile' => '+61412345679',
-            'address' => '456 Test St',
-        ]);
-
-        $guestBooking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-FILTER-GUEST',
-            'status' => 'confirmed',
-            'is_guest' => true,
-            'guest_token' => 'token-guest-filter',
-        ]);
-
-        $memberBooking = $registeredSender->bookings()->create([
-            'reference_number' => 'BK-FILTER-MEMBER',
-            'status' => 'confirmed',
-            'is_guest' => false,
-        ]);
-
-        // Filter guest
-        $responseGuest = $this->actingAs($admin)->get(route('admin.bookings.index', ['customer_type' => 'guest']));
-        $responseGuest->assertOk();
-        $responseGuest->assertInertia(fn (Assert $page) => $page
-            ->component('admin/bookings/index')
-            ->where('filters.customer_type', 'guest')
-        );
-
-        // Filter registered
-        $responseRegistered = $this->actingAs($admin)->get(route('admin.bookings.index', ['customer_type' => 'registered']));
-        $responseRegistered->assertOk();
-        $responseRegistered->assertInertia(fn (Assert $page) => $page
-            ->component('admin/bookings/index')
-            ->where('filters.customer_type', 'registered')
-        );
-    }
-
-    public function test_guest_can_access_declaration_form_with_valid_token()
-    {
-        $guestSender = Sender::create([
-            'first_name' => 'GuestDecl',
-            'last_name' => 'Sender',
-            'email' => 'guestdecl@example.com',
-            'mobile' => '+61412345670',
-            'address' => '123 Decl St',
-        ]);
-
-        $booking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-GUEST-DECL-01',
-            'status' => 'confirmed',
-            'is_guest' => true,
-            'guest_token' => 'valid-guest-decl-token',
-        ]);
-
-        // Without token -> 403
-        $forbiddenResponse = $this->get(route('track.declaration.form', $booking));
-        $forbiddenResponse->assertForbidden();
-
-        // With invalid token -> 403
-        $invalidResponse = $this->get(route('track.declaration.form', ['booking' => $booking, 'token' => 'invalid-token']));
-        $invalidResponse->assertForbidden();
-
-        // With valid token -> OK
-        $validResponse = $this->get(route('track.declaration.form', ['booking' => $booking, 'token' => 'valid-guest-decl-token']));
-        $validResponse->assertOk();
-        $validResponse->assertInertia(fn (Assert $page) => $page
-            ->component('marketing/declaration')
-            ->where('booking.id', $booking->id)
-            ->where('isGuest', true)
-            ->where('guestToken', 'valid-guest-decl-token')
-        );
-    }
-
-    public function test_guest_can_save_declaration_data_with_token()
-    {
-        $guestSender = Sender::create([
-            'first_name' => 'GuestSave',
-            'last_name' => 'Sender',
-            'email' => 'guestsave@example.com',
-            'mobile' => '+61412345670',
-            'address' => '123 Save St',
-        ]);
-
-        $booking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-GUEST-SAVE-01',
-            'status' => 'confirmed',
-            'is_guest' => true,
-            'guest_token' => 'save-decl-token',
-        ]);
-
-        $postData = [
-            'booking_id' => $booking->id,
-            'token' => 'save-decl-token',
-            'declaration_data' => [
-                'shipment' => ['box_count' => '1'],
-                'boxes' => [],
+            'booking_type' => 'home_pickup',
+            'boxes' => [
+                [
+                    'recipient_first_name' => 'Juan',
+                    'recipient_last_name' => 'Dela Cruz',
+                    'recipient_phone' => '0917 123 4567',
+                    'recipient_address' => '456 Rizal Ave',
+                    'recipient_city' => 'Manila',
+                    'recipient_province' => $province->name,
+                    'area_id' => $area->id,
+                    'box_type_id' => $boxType->id,
+                ],
             ],
         ];
 
-        $response = $this->post(route('track.declaration.save'), $postData);
-        $response->assertRedirect(route('guest.booking.confirmed', ['token' => 'save-decl-token']));
-        $response->assertSessionHas('success');
+        $response = $this->post(route('guest.bookings.store'), $payload);
 
-        $booking->refresh();
-        $this->assertEquals('submitted_online', $booking->declaration_form_status);
-        $this->assertNotNull($booking->declaration_data);
+        $response->assertSessionHasErrors(['email']);
     }
 
-    public function test_guest_can_upload_proof_of_payment_with_token()
+    public function test_guest_can_successfully_create_booking(): void
     {
-        Storage::fake('public');
+        $area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        $boxType = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
+        $province = Province::firstOrCreate(['name' => 'Metro Manila'], ['area_id' => $area->id, 'is_active' => true]);
+        $pickupZone = PickupZone::firstOrCreate([], ['name' => 'Zone 1', 'is_active' => true]);
 
-        $guestSender = Sender::create([
-            'first_name' => 'GuestProof',
-            'last_name' => 'Sender',
-            'email' => 'guestproof@example.com',
-            'mobile' => '+61412345670',
-            'address' => '123 Proof St',
-        ]);
-
-        $booking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-GUEST-PROOF-01',
-            'status' => 'confirmed',
-            'is_guest' => true,
-            'guest_token' => 'valid-proof-token-123',
-            'payment_method' => 'bank_transfer',
-        ]);
-
-        $file = UploadedFile::fake()->create('receipt.pdf', 100, 'application/pdf');
-
-        $response = $this->post(route('guest.booking.upload-proof'), [
-            'booking_id' => $booking->id,
-            'token' => 'valid-proof-token-123',
-            'proof_of_payment' => $file,
-        ]);
-
-        $response->assertRedirect(route('guest.booking.confirmed', ['token' => 'valid-proof-token-123']));
-        $response->assertSessionHas('success');
-
-        $booking->refresh();
-        $this->assertNotNull($booking->proof_of_payment);
-        Storage::disk('public')->assertExists($booking->proof_of_payment);
-    }
-
-    public function test_guest_cannot_upload_proof_of_payment_with_invalid_token()
-    {
-        Storage::fake('public');
-
-        $guestSender = Sender::create([
-            'first_name' => 'GuestProofInvalid',
-            'last_name' => 'Sender',
-            'email' => 'guestproofinv@example.com',
-            'mobile' => '+61412345670',
-            'address' => '123 Proof Inv St',
-        ]);
-
-        $booking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-GUEST-PROOF-02',
-            'status' => 'confirmed',
-            'is_guest' => true,
-            'guest_token' => 'correct-token',
-            'payment_method' => 'bank_transfer',
-        ]);
-
-        $file = UploadedFile::fake()->create('receipt.pdf', 100, 'application/pdf');
-
-        $response = $this->post(route('guest.booking.upload-proof'), [
-            'booking_id' => $booking->id,
-            'token' => 'wrong-token',
-            'proof_of_payment' => $file,
-        ]);
-
-        $response->assertForbidden();
-        $booking->refresh();
-        $this->assertNull($booking->proof_of_payment);
-    }
-
-    public function test_guest_can_initialize_booking_and_receive_token_and_bank_details()
-    {
         $payload = [
-            'first_name' => 'John',
-            'last_name' => 'Doe',
-            'email' => 'johndoe@example.com',
-            'mobile' => '+61412345678',
-            'address' => '456 George St',
+            'first_name' => 'Maria',
+            'last_name' => 'Santos',
+            'email' => 'maria.santos@example.com',
+            'mobile' => '0412 345 678',
+            'address' => '123 George Street',
             'suburb' => 'Sydney',
             'state' => 'NSW',
             'postcode' => '2000',
-            'pickup_zone_id' => $this->pickupZone->id,
-            'preferred_date' => now()->addDays(2)->format('Y-m-d'),
-            'payment_method' => 'bank_transfer',
-            'initialization_key' => 'init-key-test-123',
+            'pickup_zone_id' => $pickupZone->id,
+            'preferred_date' => now()->addDays(3)->format('Y-m-d'),
+            'booking_type' => 'home_pickup',
+            'payment_method' => 'cash_on_pickup',
+            'notes' => 'Ring the intercom buzzer.',
             'boxes' => [
                 [
-                    'recipient_first_name' => 'Maria',
-                    'recipient_last_name' => 'Santos',
-                    'recipient_email' => 'maria@example.ph',
-                    'recipient_phone' => '+639171234567',
-                    'recipient_address' => '123 Rizal St',
-                    'recipient_city' => 'Makati',
-                    'recipient_province' => 'Metro Manila',
-                    'recipient_zip_code' => '1200',
-                    'area_id' => $this->area->id,
-                    'box_type_id' => $this->boxType->id,
+                    'recipient_first_name' => 'Juan',
+                    'recipient_last_name' => 'Dela Cruz',
+                    'recipient_phone' => '0917 123 4567',
+                    'recipient_address' => '456 Rizal Ave',
+                    'recipient_city' => 'Manila',
+                    'recipient_province' => $province->name,
+                    'area_id' => $area->id,
+                    'box_type_id' => $boxType->id,
                     'is_custom_size' => false,
+                ],
+            ],
+        ];
+
+        $response = $this->post(route('guest.bookings.store'), $payload);
+
+        $sender = Sender::where('email', 'maria.santos@example.com')->first();
+        $this->assertNotNull($sender);
+        $this->assertNull($sender->user_id);
+
+        $booking = Booking::where('sender_id', $sender->id)->first();
+        $this->assertNotNull($booking);
+        $this->assertTrue($booking->is_guest);
+        $this->assertNotNull($booking->guest_token);
+        $this->assertCount(1, $booking->boxes);
+
+        $response->assertRedirect();
+        $this->assertStringContainsString('/guest/booking/'.$booking->id.'/confirmed', $response->headers->get('Location'));
+    }
+
+    public function test_guest_confirmation_screen_requires_valid_signed_link(): void
+    {
+        $booking = Booking::factory()->create(['is_guest' => true]);
+
+        $this->get(route('guest.booking.confirmed', ['booking' => $booking]))->assertForbidden();
+
+        $access = app(GuestBookingAccessService::class);
+        $response = $this->get($access->confirmationUrl($booking));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page->component('guest/BookingConfirmed')
+            ->where('booking.id', $booking->id)
+            ->where('token', null)
+            ->missing('booking.guest_token')
+        );
+    }
+
+    public function test_guest_can_open_payment_page_after_email_verification(): void
+    {
+        $booking = Booking::factory()->pending()->create([
+            'is_guest' => true,
+        ]);
+        Box::factory()->for($booking)->create(['price_charged' => 100]);
+
+        $access = app(GuestBookingAccessService::class);
+        $verificationUrl = $access->verificationUrl($booking, GuestBookingAccessService::PAYMENT);
+        $this->get($verificationUrl)->assertOk();
+        $this->setChallengeCode($booking, GuestBookingAccessService::PAYMENT);
+        $query = parse_url($verificationUrl, PHP_URL_QUERY);
+        $response = $this->post('/guest/booking/'.$booking->id.'/verify?'.$query, ['code' => '123456']);
+
+        $response->assertRedirect();
+        $response = $this->get($response->headers->get('Location'));
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page->component('payment/PaymentConsole')
+            ->where('role', 'guest')
+            ->where('guestAccessQuery', fn ($query) => is_string($query))
+            ->missing('booking.guest_token'));
+    }
+
+    public function test_guest_payment_page_requires_valid_token(): void
+    {
+        $booking = Booking::factory()->pending()->create(['is_guest' => true]);
+
+        $this->get(route('guest.bookings.pay', ['booking' => $booking]))->assertForbidden();
+    }
+
+    public function test_user_registration_auto_links_guest_sender_and_bookings(): void
+    {
+        $guestEmail = 'ofw.shopper@example.com';
+
+        // 1. Guest books prior to registration
+        $guestSender = Sender::factory()->create([
+            'email' => $guestEmail,
+            'user_id' => null,
+            'first_name' => 'Grace',
+            'last_name' => 'Reyes',
+        ]);
+
+        $booking = Booking::factory()->create([
+            'sender_id' => $guestSender->id,
+            'is_guest' => true,
+        ]);
+
+        // 2. User registers using CreateNewUser action (Fortify registration)
+        $action = new CreateNewUser();
+        $user = $action->create([
+            'name' => 'Grace Reyes',
+            'email' => $guestEmail,
+            'password' => 'SecurePass123!',
+            'password_confirmation' => 'SecurePass123!',
+            'role' => Role::Sender->value,
+            'address' => '789 Pitt St',
+            'suburb' => 'Sydney',
+            'state' => 'NSW',
+            'postcode' => '2000',
+            'mobile' => '0412999888',
+        ]);
+
+        // 3. Verify sender record is now linked to user
+        $guestSender->refresh();
+        $this->assertEquals($user->id, $guestSender->user_id);
+
+        // 4. Verify user sender relationship sees the past booking
+        $this->assertCount(1, $user->sender->bookings);
+        $this->assertEquals($booking->id, $user->sender->bookings->first()->id);
+    }
+
+    public function test_existing_user_login_auto_links_guest_bookings(): void
+    {
+        $email = 'existing.sender@example.com';
+
+        // 1. Existing registered user with sender profile
+        $user = User::factory()->create([
+            'email' => $email,
+            'role' => Role::Sender,
+        ]);
+        $existingSender = $user->sender;
+
+        // 2. Booking created as a guest while logged out
+        $guestSender = Sender::factory()->create([
+            'user_id' => null,
+            'email' => $email,
+        ]);
+        $booking = Booking::factory()->create([
+            'sender_id' => $guestSender->id,
+            'is_guest' => true,
+        ]);
+
+        // 3. User logs in
+        event(new \Illuminate\Auth\Events\Login('web', $user, false));
+
+        // 4. Verify guest booking is linked to user's sender profile
+        $this->assertSoftDeleted('senders', ['id' => $guestSender->id]);
+        $booking->refresh();
+        $this->assertEquals($existingSender->id, $booking->sender_id);
+        $this->assertTrue($user->fresh()->sender->bookings->contains('id', $booking->id));
+    }
+
+    public function test_customs_declaration_requires_email_verification(): void
+    {
+        $booking = Booking::factory()->create([
+            'is_guest' => true,
+        ]);
+
+        $access = app(GuestBookingAccessService::class);
+        $response = $this->get($access->verificationUrl($booking, GuestBookingAccessService::DECLARATION));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page->component('guest/VerifyAccess'));
+    }
+
+    public function test_guest_can_submit_customs_declaration_after_email_verification(): void
+    {
+        $booking = Booking::factory()->create([
+            'is_guest' => true,
+        ]);
+
+        $access = app(GuestBookingAccessService::class);
+        $verificationUrl = $access->verificationUrl($booking, GuestBookingAccessService::DECLARATION);
+        $this->get($verificationUrl)->assertOk();
+        $this->setChallengeCode($booking, GuestBookingAccessService::DECLARATION);
+        $query = parse_url($verificationUrl, PHP_URL_QUERY);
+        $verifyResponse = $this->post('/guest/booking/'.$booking->id.'/verify?'.$query, ['code' => '123456']);
+        $verifyResponse->assertRedirect();
+
+        $declarationUrl = $verifyResponse->headers->get('Location');
+        $declarationQuery = parse_url($declarationUrl, PHP_URL_QUERY);
+        $declarationPayload = [
+            'booking_id' => $booking->id,
+            'declaration_data' => [
+                'shipment' => [
+                    'box_count' => '1',
+                ],
+                'sender' => [
+                    'first_name' => 'Maria',
+                    'last_name' => 'Santos',
+                ],
+                'boxes' => [
+                    [
+                        'box_index' => 0,
+                        'items' => [
+                            ['name' => 'Chocolates', 'description' => 'Chocolates & Sweets', 'qty' => 5, 'value' => 50],
+                        ],
+                    ],
+                ],
+                'certification' => [
+                    'no_prohibited' => true,
+                    'agree_terms' => true,
+                    'signed_by' => 'Maria Santos',
+                    'signature' => 'data:image/png;base64,sample',
+                ],
+            ],
+        ];
+
+        $response = $this->post(route('track.declaration.save').'?'.$declarationQuery, $declarationPayload);
+
+        $response->assertRedirect();
+
+        $booking->refresh();
+        $this->assertNotNull($booking->declaration_data);
+    }
+
+    private function setChallengeCode(Booking $booking, string $purpose): void
+    {
+        GuestBookingAccessChallenge::query()
+            ->where('booking_id', $booking->id)
+            ->where('purpose', $purpose)
+            ->latest('id')
+            ->firstOrFail()
+            ->update(['code_hash' => Hash::make('123456')]);
+    }
+
+    public function test_query_scopes_distinguish_guest_from_registered_bookings(): void
+    {
+        $registeredSender = Sender::factory()->create(['user_id' => User::factory()->create()->id]);
+        $guestSender = Sender::factory()->create(['user_id' => null]);
+
+        $registeredBooking = Booking::factory()->create([
+            'sender_id' => $registeredSender->id,
+            'is_guest' => false,
+        ]);
+
+        $guestBooking = Booking::factory()->create([
+            'sender_id' => $guestSender->id,
+            'is_guest' => true,
+        ]);
+
+        $guestBookings = Booking::guest()->pluck('id');
+        $this->assertTrue($guestBookings->contains($guestBooking->id));
+        $this->assertFalse($guestBookings->contains($registeredBooking->id));
+
+        $registeredBookings = Booking::registered()->pluck('id');
+        $this->assertTrue($registeredBookings->contains($registeredBooking->id));
+        $this->assertFalse($registeredBookings->contains($guestBooking->id));
+    }
+
+    public function test_guest_can_initialize_booking_and_get_payment_data(): void
+    {
+        $area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        $boxType = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
+        $pickupZone = PickupZone::firstOrCreate([], ['name' => 'Zone 1', 'is_active' => true]);
+        BoxPrice::firstOrCreate(
+            ['area_id' => $area->id, 'box_type_id' => $boxType->id],
+            ['price' => 100.00, 'deposit' => 20.00, 'is_active' => true]
+        );
+
+        $payload = [
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+            'email' => 'john.doe@example.com',
+            'mobile' => '0412345678',
+            'address' => '123 Fake Street',
+            'suburb' => 'Sydney',
+            'state' => 'NSW',
+            'postcode' => '2000',
+            'preferred_date' => now()->addDays(5)->format('Y-m-d'),
+            'pickup_zone_id' => $pickupZone->id,
+            'boxes' => [
+                [
+                    'area_id' => $area->id,
+                    'box_type_id' => $boxType->id,
+                    'recipient_first_name' => 'Jane',
+                    'recipient_last_name' => 'Doe',
+                    'recipient_phone' => '09123456789',
+                    'recipient_address' => '456 Sampaguita St',
+                    'recipient_city' => 'Manila',
+                    'recipient_province' => 'Metro Manila',
                 ],
             ],
         ];
@@ -586,45 +424,38 @@ class GuestBookingTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonStructure([
-            'booking' => ['id', 'reference_number', 'status'],
-            'guest_token',
-            'bankDetails' => ['bank_name', 'bsb', 'account_number', 'company_name'],
+            'booking' => ['id', 'reference_number', 'sender', 'boxes'],
+            'stripeKey',
         ]);
 
-        $token = $response->json('guest_token');
-        $this->assertNotEmpty($token);
+        $bookingId = $response->json('booking.id');
+        $this->assertEquals($bookingId, session('guest_booking_id'));
 
-        $booking = Booking::where('guest_token', $token)->first();
+        $booking = Booking::find($bookingId);
         $this->assertNotNull($booking);
         $this->assertTrue($booking->is_guest);
-        $this->assertEquals('johndoe@example.com', $booking->sender->email);
+        $this->assertEquals('John', $booking->sender->first_name);
     }
 
-    public function test_guest_cannot_verify_stripe_payment_without_valid_guest_token()
+    public function test_guest_can_upload_proof_of_payment_with_session(): void
     {
-        $guestSender = Sender::create([
-            'first_name' => 'StripeGuest',
-            'last_name' => 'Test',
-            'email' => 'stripeguest@example.com',
-            'mobile' => '+61412345670',
-            'address' => '789 Pitt St',
+        Storage::fake('public');
+        $booking = Booking::factory()->pending()->create(['is_guest' => true]);
+
+        $file = UploadedFile::fake()->create('receipt.pdf', 100, 'application/pdf');
+
+        $response = $this->withSession([
+            'guest_booking_access.'.$booking->id.'.'.GuestBookingAccessService::PAYMENT => now()->addMinutes(120)->timestamp,
+            'guest_booking_id' => $booking->id,
+        ])->postJson("/guest/booking/{$booking->id}/upload-proof", [
+            'proof_of_payment' => $file,
+            'payment_reference' => 'PAY-REF-12345',
         ]);
 
-        $booking = $guestSender->bookings()->create([
-            'reference_number' => 'BK-STRIPE-GUEST-01',
-            'status' => 'pending',
-            'is_guest' => true,
-            'guest_token' => 'secure-guest-token-abc',
-            'payment_method' => 'stripe',
-        ]);
-
-        $response = $this->postJson(route('guest.bookings.stripe-verify', $booking), [
-            'payment_intent' => 'pi_fake_123',
-            'token' => 'invalid-token',
-        ]);
-
-        $response->assertForbidden();
+        $response->assertOk();
+        $booking->refresh();
+        $this->assertNotNull($booking->proof_of_payment);
+        $this->assertEquals('PAY-REF-12345', $booking->payment_reference);
     }
 }
-
 

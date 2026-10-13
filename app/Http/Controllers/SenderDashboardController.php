@@ -390,4 +390,83 @@ class SenderDashboardController extends Controller
             ],
         ]);
     }
+
+    public function enquiries(Request $request)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        if (in_array($user->role, [Role::Admin, Role::SuperAdmin, Role::Warehouse])) {
+            return redirect()->route('admin.enquiries.index');
+        }
+
+        if ($user->role !== Role::Sender) {
+            return redirect()->route('dashboard');
+        }
+
+        $sender = $user->sender;
+
+        // Fetch all enquiries ordered chronologically so chat flows top to bottom
+        $enquiries = Enquiry::where('email', $user->email)
+            ->oldest()
+            ->get();
+
+        $activeBookings = $sender ? $sender->bookings()
+            ->with('boxes')
+            ->latest()
+            ->take(5)
+            ->get()
+            ->map(fn ($b) => [
+                'id' => $b->id,
+                'reference_number' => $b->reference_number ?? "BK-{$b->id}",
+                'status' => $b->status?->value ?? 'pending',
+                'boxes_count' => $b->boxes->count(),
+            ]) : [];
+
+        return Inertia::render('sender/Enquiries', [
+            'enquiries' => $enquiries,
+            'activeBookings' => $activeBookings,
+            'sender' => [
+                'name' => $sender ? trim("{$sender->first_name} {$sender->last_name}") : $user->name,
+                'email' => $user->email,
+                'mobile' => $sender?->mobile,
+            ],
+            'pageTitle' => 'Support Chat',
+            'breadcrumbs' => [
+                ['title' => 'Home', 'href' => route('dashboard')],
+                ['title' => 'My Enquiries', 'href' => route('sender.enquiries')],
+            ],
+        ]);
+    }
+
+    public function storeEnquiry(Request $request)
+    {
+        /** @var User $user */
+        $user = Auth::user();
+
+        if ($user->role !== Role::Sender) {
+            return redirect()->route('dashboard');
+        }
+
+        $validated = $request->validate([
+            'message' => ['required', 'string', 'max:5000'],
+        ]);
+
+        $sender = $user->sender;
+        $name = $sender ? trim("{$sender->first_name} {$sender->last_name}") : $user->name;
+        if (empty($name)) {
+            $name = $user->name ?: 'Customer';
+        }
+        $mobile = $sender?->mobile;
+
+        Enquiry::create([
+            'name' => $name,
+            'email' => $user->email,
+            'mobile' => $mobile,
+            'message' => trim($validated['message']),
+            'is_read' => false,
+        ]);
+
+        return redirect()->route('sender.enquiries')->with('success', 'Your message has been sent to support.');
+    }
 }

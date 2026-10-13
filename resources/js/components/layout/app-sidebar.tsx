@@ -22,6 +22,7 @@ import {
     Search,
     Banknote,
     Activity,
+    Tag,
 } from 'lucide-react';
 import AppLogo from '@/components/layout/app-logo';
 import { NavFooter } from '@/components/layout/nav-footer';
@@ -135,6 +136,11 @@ export function AppSidebar() {
                                     title: 'Commissions',
                                     href: '/admin/commissions',
                                     icon: Banknote,
+                                },
+                                {
+                                    title: 'Promotions',
+                                    href: '/admin/promotions',
+                                    icon: Tag,
                                 },
                                 {
                                     title: 'Financial Report',
@@ -339,6 +345,11 @@ export function AppSidebar() {
                                 icon: PlusCircle,
                             },
                             { title: 'Track Shipment', href: '/track', icon: Box },
+                            {
+                                title: 'My Enquiries',
+                                href: '/enquiries',
+                                icon: MessageSquare,
+                            },
                         ]}
                     />
                 )}

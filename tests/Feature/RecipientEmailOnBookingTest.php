@@ -7,7 +7,6 @@ use App\Models\Area;
 use App\Models\BoxPrice;
 use App\Models\BoxType;
 use App\Models\Recipient;
-use App\Models\Sender;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -20,19 +19,20 @@ class RecipientEmailOnBookingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
         Queue::fake(); // Prevent actual jobs from running
     }
 
     public function test_recipient_email_is_saved_to_recipient_table_upon_booking()
     {
         // Setup Areas
-        $manila = Area::create(['name' => 'Metro Manila', 'is_active' => true]);
+        $manila = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
 
         // Setup Box Types
-        $jumbo = BoxType::create(['name' => 'Jumbo', 'dimensions' => '24x24x24', 'is_active' => true]);
+        $jumbo = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
 
         // Setup Box Prices
-        BoxPrice::create(['area_id' => $manila->id, 'box_type_id' => $jumbo->id, 'price' => 100.00]);
+        BoxPrice::firstOrCreate(['area_id' => $manila->id, 'box_type_id' => $jumbo->id], ['price' => 100.00]);
 
         /** @var User $user */
         $user = User::factory()->create([
@@ -89,13 +89,13 @@ class RecipientEmailOnBookingTest extends TestCase
     public function test_recipient_email_is_saved_when_using_existing_recipient()
     {
         // Setup Areas
-        $manila = Area::create(['name' => 'Metro Manila', 'is_active' => true]);
+        $manila = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
 
         // Setup Box Types
-        $jumbo = BoxType::create(['name' => 'Jumbo', 'dimensions' => '24x24x24', 'is_active' => true]);
+        $jumbo = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
 
         // Setup Box Prices
-        BoxPrice::create(['area_id' => $manila->id, 'box_type_id' => $jumbo->id, 'price' => 100.00]);
+        BoxPrice::firstOrCreate(['area_id' => $manila->id, 'box_type_id' => $jumbo->id], ['price' => 100.00]);
 
         /** @var User $user */
         $user = User::factory()->create([
@@ -152,13 +152,13 @@ class RecipientEmailOnBookingTest extends TestCase
     public function test_cannot_modify_existing_recipient_when_selected()
     {
         // Setup Areas
-        $manila = Area::create(['name' => 'Metro Manila', 'is_active' => true]);
+        $manila = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
 
         // Setup Box Types
-        $jumbo = BoxType::create(['name' => 'Jumbo', 'dimensions' => '24x24x24', 'is_active' => true]);
+        $jumbo = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
 
         // Setup Box Prices
-        BoxPrice::create(['area_id' => $manila->id, 'box_type_id' => $jumbo->id, 'price' => 100.00]);
+        BoxPrice::firstOrCreate(['area_id' => $manila->id, 'box_type_id' => $jumbo->id], ['price' => 100.00]);
 
         /** @var User $user */
         $user = User::factory()->create([
@@ -204,8 +204,8 @@ class RecipientEmailOnBookingTest extends TestCase
                     'recipient_last_name' => 'Name',
                     'recipient_email' => 'modified@example.com',
                     'recipient_address' => '999 Modified St',
-                    'recipient_city' => 'Cebu',
-                    'recipient_province' => 'Cebu Province',
+                    'recipient_city' => 'Manila',
+                    'recipient_province' => 'Metro Manila',
                     'recipient_zip_code' => '6000',
                     'recipient_phone' => '+639999999999',
                 ],
@@ -232,5 +232,55 @@ class RecipientEmailOnBookingTest extends TestCase
             Recipient::where('email', 'modified@example.com')->first(),
             'A new recipient should not have been created with modified email'
         );
+    }
+
+    public function test_recipient_email_is_optional_upon_booking()
+    {
+        $manila = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        $jumbo = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
+        BoxPrice::firstOrCreate(['area_id' => $manila->id, 'box_type_id' => $jumbo->id], ['price' => 100.00]);
+
+        /** @var User $user */
+        $user = User::factory()->create([
+            'role' => Role::Sender,
+            'email_verified_at' => now(),
+        ]);
+
+        $payload = [
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+            'email' => 'john.doe@example.com',
+            'mobile' => '+61412345678',
+            'address' => '123 Test Street',
+            'suburb' => 'Test Suburb',
+            'state' => 'NSW',
+            'postcode' => '2000',
+            'preferred_date' => now()->addDays(3)->format('Y-m-d H:i:s'),
+            'payment_method' => 'stripe',
+            'boxes' => [
+                [
+                    'area_id' => $manila->id,
+                    'box_type_id' => $jumbo->id,
+                    'recipient_first_name' => 'Jane',
+                    'recipient_last_name' => 'NoEmail',
+                    'recipient_email' => null, // Optional email
+                    'recipient_address' => '456 Manila Ave',
+                    'recipient_city' => 'Manila',
+                    'recipient_province' => 'Metro Manila',
+                    'recipient_zip_code' => '1000',
+                    'recipient_phone' => '+639123456789',
+                ],
+            ],
+        ];
+
+        $response = $this->actingAs($user)->post(route('bookings.store'), $payload);
+
+        $response->assertSessionHasNoErrors();
+        $response->assertRedirect();
+
+        $this->assertDatabaseHas('recipients', [
+            'name' => 'Jane NoEmail',
+            'email' => null,
+        ]);
     }
 }

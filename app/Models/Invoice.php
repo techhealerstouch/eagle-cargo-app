@@ -41,6 +41,8 @@ class Invoice extends Model
         'booking_snapshot',
         'line_items_snapshot',
         'admin_team_snapshot',
+        'promotion_snapshot',
+        'discount_amount',
         'snapshot_taken_at',
         'booking_version_id',
         'sender_version_id',
@@ -62,6 +64,8 @@ class Invoice extends Model
             'booking_snapshot'    => 'array',
             'line_items_snapshot' => 'array',
             'admin_team_snapshot' => 'array',
+            'promotion_snapshot'  => 'array',
+            'discount_amount'     => 'decimal:2',
             'snapshot_taken_at'   => 'datetime',
         ];
     }
@@ -164,6 +168,10 @@ public static function generateForBooking(Booking $booking): self
 
         $basePrice += $oversizedSurcharge;
 
+        // Apply promotion discount before surcharge and VAT
+        $discountAmount = (float) ($booking->discount_amount ?? 0.00);
+        $basePrice = max(0.0, $basePrice - $discountAmount);
+
         $surchargeAmount = 0.0;
         if ($booking->payment_method === 'afterpay') {
             $surchargeAmount = round((float) $basePrice * 0.063, 2);
@@ -176,6 +184,8 @@ public static function generateForBooking(Booking $booking): self
 
         $this->updateQuietly([
             'amount'             => $totalPrice,
+            'discount_amount'    => $discountAmount,
+            'promotion_snapshot' => $booking->promotion ? $booking->promotion->toArray() : null,
             'surcharge_amount'   => $surchargeAmount,
             'vatable_revenue'    => $vatBreakdown['vatable_revenue'],
             'vat_amount'         => $vatBreakdown['vat_amount'],

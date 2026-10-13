@@ -5,7 +5,9 @@ namespace App\Http\Requests;
 use App\Rules\Phone;
 use App\Rules\ValidPickupDate;
 use App\Services\ReferenceDataService;
+use Illuminate\Contracts\Validation\Validator as ValidatorContract;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
@@ -70,6 +72,23 @@ class StoreGuestBookingRequest extends FormRequest
         return true;
     }
 
+    protected function failedValidation(ValidatorContract $validator): void
+    {
+        if ($this->filled('website')) {
+            if ($this->expectsJson()) {
+                throw new HttpResponseException(
+                    response()->json(['error' => 'Invalid submission'], 400)
+                );
+            }
+
+            throw new HttpResponseException(
+                redirect()->route('guest.book')
+            );
+        }
+
+        parent::failedValidation($validator);
+    }
+
     public function rules(): array
     {
         return [
@@ -79,7 +98,13 @@ class StoreGuestBookingRequest extends FormRequest
             // Guest Sender details
             'first_name' => ['required', 'string', 'max:255'],
             'last_name' => ['required', 'string', 'max:255'],
-            'email' => ['required', 'string', 'email', 'max:255'],
+            'email' => [
+                'required',
+                'string',
+                'email',
+                'max:255',
+                Rule::unique('users', 'email'),
+            ],
             'mobile' => [
                 'required',
                 'string',
@@ -190,6 +215,7 @@ class StoreGuestBookingRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'email.unique' => 'An account with this email already exists. Please log in to complete your booking, or use a different email address.',
             'mobile.regex' => 'The contact phone must be a valid Australian mobile number.',
             'boxes.*.recipient_phone.regex' => 'The receiver phone must be a valid Philippine mobile number.',
         ];

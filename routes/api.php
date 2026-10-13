@@ -25,6 +25,10 @@ Route::middleware(['throttle:public-tracking'])->group(function () {
     Route::get('/shipping-updates', [TrackingController::class, 'shippingUpdates']);
 });
 
+Route::middleware(['throttle:api'])->group(function () {
+    Route::post('/promotions/validate', [\App\Http\Controllers\Api\PromotionApiController::class, 'validateCode']);
+});
+
 // Authenticated API for mobile app integration
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     // Bookings
