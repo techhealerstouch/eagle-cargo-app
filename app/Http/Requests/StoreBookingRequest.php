@@ -143,7 +143,7 @@ class StoreBookingRequest extends FormRequest
             ],
             'boxes.*.recipient_first_name' => ['nullable', 'required_without:boxes.*.recipient_id', 'string', 'max:100'],
             'boxes.*.recipient_last_name' => ['nullable', 'required_without:boxes.*.recipient_id', 'string', 'max:100'],
-            'boxes.*.recipient_email' => ['nullable', 'required_without:boxes.*.recipient_id', 'string', 'email', 'max:255'],
+            'boxes.*.recipient_email' => ['nullable', 'string', 'email', 'max:255'],
             'boxes.*.recipient_address' => ['nullable', 'required_without:boxes.*.recipient_id', 'string', 'max:500'],
             'boxes.*.recipient_city' => ['nullable', 'required_without:boxes.*.recipient_id', 'string', 'max:100'],
             'boxes.*.recipient_province' => array_values(array_filter([

@@ -5,7 +5,15 @@ import AppLayout from '@/layouts/app-layout';
 import MarketingLayout from '@/layouts/marketing-layout';
 import type { Auth, BreadcrumbItem } from '@/types';
 
-export default function ShippingUpdates() {
+type ShippingUpdateData = {
+    id: number;
+    title: string;
+    body: string;
+    published_at: string;
+    type: string;
+};
+
+export default function ShippingUpdates({ updates = [] }: { updates?: ShippingUpdateData[] }) {
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Home', href: '/dashboard' },
         { title: 'Shipping Updates', href: '/shipping-updates' },
@@ -31,77 +39,44 @@ export default function ShippingUpdates() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
-                    {/* Placeholder content for now */}
-                    <article className="card">
-                        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-brand-secondary">
-                            <Calendar className="size-4" />
-                            March 2026
+                    {updates.length === 0 ? (
+                        <div className="col-span-1 md:col-span-2 py-12 text-center text-brand-text-mid">
+                            No shipping updates available at the moment.
                         </div>
-                        <h3 className="mb-3 font-serif text-2xl font-bold">
-                            Easter Holiday Cut-off Dates
-                        </h3>
-                        <p className="mb-4 line-clamp-3 text-brand-text-mid">
-                            To ensure your boxes arrive in the Philippines
-                            before the holy week restrictions take place, please
-                            schedule your sea cargo collections before March
-                            25th.
-                        </p>
-                        <a
-                            href="#"
-                            className="text-sm font-semibold text-brand-primary hover:underline"
-                        >
-                            Read full update →
-                        </a>
-                    </article>
+                    ) : (
+                        updates.map((update) => {
+                            const date = new Date(update.published_at);
+                            const formattedDate = new Intl.DateTimeFormat('en-US', {
+                                month: 'long',
+                                year: 'numeric',
+                                day: 'numeric',
+                            }).format(date);
 
-                    <article className="card">
-                        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-brand-secondary">
-                            <Calendar className="size-4" />
-                            February 2026
-                        </div>
-                        <h3 className="mb-3 font-serif text-2xl font-bold">
-                            Container Vessel Arrival: LBB-V12
-                        </h3>
-                        <p className="mb-4 line-clamp-3 text-brand-text-mid">
-                            Great news! Container LBB-V12 has cleared Manila
-                            customs early. For recipients in Metro Manila,
-                            expect deliveries to begin dispatching this weekend.
-                        </p>
-                        <a
-                            href="#"
-                            className="text-sm font-semibold text-brand-primary hover:underline"
-                        >
-                            Read full update →
-                        </a>
-                    </article>
-
-                    <article className="card">
-                        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-brand-secondary">
-                            <Calendar className="size-4" />
-                            January 2026
-                        </div>
-                        <h3 className="mb-3 font-serif text-2xl font-bold">
-                            New Expansion to Mindanao Regions
-                        </h3>
-                        <p className="mb-4 line-clamp-3 text-brand-text-mid">
-                            We are proud to announce enhanced direct delivery to
-                            major cities in Mindanao, cutting down our previous
-                            transit times by almost a week.
-                        </p>
-                        <a
-                            href="#"
-                            className="text-sm font-semibold text-brand-primary hover:underline"
-                        >
-                            Read full update →
-                        </a>
-                    </article>
+                            return (
+                                <article key={update.id} className="card">
+                                    <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-brand-secondary">
+                                        <Calendar className="size-4" />
+                                        {formattedDate}
+                                    </div>
+                                    <h3 className="mb-3 font-serif text-2xl font-bold">
+                                        {update.title}
+                                    </h3>
+                                    <div 
+                                        className="mb-4 text-brand-text-mid prose prose-sm max-w-none prose-p:mb-2 prose-p:last:mb-0 line-clamp-3"
+                                        dangerouslySetInnerHTML={{ __html: update.body }}
+                                    />
+                                    <a
+                                        href={`#update-${update.id}`}
+                                        className="text-sm font-semibold text-brand-primary hover:underline"
+                                    >
+                                        Read full update →
+                                    </a>
+                                </article>
+                            );
+                        })
+                    )}
                 </div>
             </div>
         </Layout>
     );
 }
-
-
-
-
-

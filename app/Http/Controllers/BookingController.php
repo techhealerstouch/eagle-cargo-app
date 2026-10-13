@@ -433,7 +433,20 @@ class BookingController extends Controller
                 'payment_method' => $booking->payment_method ?? 'bank_transfer',
             ]);
 
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.',
+                ]);
+            }
+
             return redirect()->back()->with('success', 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.');
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'error' => 'Please provide a proof file or transaction reference number.',
+            ], 422);
         }
 
         return redirect()->back()->with('error', 'Please provide a proof file or transaction reference number.');
@@ -493,7 +506,20 @@ class BookingController extends Controller
                 'payment_method' => $booking->payment_method ?? 'bank_transfer',
             ]);
 
+            if ($request->wantsJson()) {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.',
+                ]);
+            }
+
             return redirect()->back()->with('success', 'Proof of payment details submitted successfully. Our team will review and confirm it shortly.');
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'error' => 'Please provide a proof file or transaction reference number.',
+            ], 422);
         }
 
         return redirect()->back()->with('error', 'Please provide a proof file or transaction reference number.');

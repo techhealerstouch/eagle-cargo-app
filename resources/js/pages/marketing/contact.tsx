@@ -100,6 +100,27 @@ export default function Contact({ contactInfo }: ContactProps) {
                     </p>
                 </div>
 
+                                {auth?.user && (
+                    <div className="mb-8 rounded-2xl border border-brand-rust/30 bg-gradient-to-r from-brand-rust/10 via-brand-rust/5 to-transparent p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-3.5">
+                            <div className="size-11 rounded-xl bg-brand-rust text-white flex items-center justify-center shrink-0 shadow-xs">
+                                <MessageSquare className="size-5" />
+                            </div>
+                            <div>
+                                <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Prefer a live chat experience?</h2>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Use your direct Support Chat in the Sender Portal without re-filling forms.</p>
+                            </div>
+                        </div>
+                        <Link
+                            href="/enquiries"
+                            className="px-5 py-2.5 rounded-xl bg-brand-rust text-white text-xs font-semibold hover:bg-brand-rust/90 transition-all shrink-0 shadow-sm inline-flex items-center gap-1.5"
+                        >
+                            <span>Open Support Chat</span>
+                            <span>&rarr;</span>
+                        </Link>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
                     {/* Left Column: Contact Channels & Quick Booking */}
                     <div className="space-y-6 lg:col-span-5">

@@ -234,6 +234,9 @@ Route::inertia('/about', 'marketing/about')->name('about');
 Route::inertia('/services', 'marketing/services')->name('services');
 Route::inertia('/faq', 'marketing/faq')->name('faq');
 Route::get('/contact', function (\App\Services\SettingsService $settingsService) {
+    if (\Illuminate\Support\Facades\Auth::check() && \Illuminate\Support\Facades\Auth::user()->role === \App\Enums\Role::Sender) {
+        return redirect()->route('sender.enquiries');
+    }
     $general = $settingsService->getGeneralSettings();
     $invoice = $settingsService->getInvoiceSettings();
 
@@ -248,7 +251,15 @@ Route::get('/contact', function (\App\Services\SettingsService $settingsService)
 })->name('contact');
 Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
 Route::inertia('/our-story', 'marketing/community-story')->name('our-story');
-Route::inertia('/shipping-updates', 'marketing/shipping-updates')->name('shipping-updates');
+Route::get('/shipping-updates', function () {
+    $updates = \App\Models\ShippingUpdate::where('is_published', true)
+        ->orderBy('published_at', 'desc')
+        ->get(['id', 'title', 'body', 'published_at', 'type']);
+
+    return inertia('marketing/shipping-updates', [
+        'updates' => $updates,
+    ]);
+})->name('shipping-updates');
 
 // Declaration routes (accessible by authenticated owners or guests with secure token)
 Route::get('/declaration-form/blank', [BookingController::class, 'downloadBlankDeclaration'])->name('declaration.blank');
@@ -284,6 +295,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('/dashboard', [SenderDashboardController::class, 'index'])->name('dashboard');
     Route::get('/bookings', [SenderDashboardController::class, 'bookings'])->name('sender.bookings');
+    Route::get('/enquiries', [SenderDashboardController::class, 'enquiries'])->name('sender.enquiries');
+    Route::post('/enquiries', [SenderDashboardController::class, 'storeEnquiry'])->middleware('throttle:forms')->name('sender.enquiries.store');
+    Route::get('/enquiries/{enquiry}', function ($enquiry) {
+        if (\Illuminate\Support\Facades\Auth::check() && in_array(\Illuminate\Support\Facades\Auth::user()->role, [\App\Enums\Role::Admin, \App\Enums\Role::SuperAdmin, \App\Enums\Role::Warehouse])) {
+            return redirect()->route('admin.enquiries.show', $enquiry);
+        }
+        return redirect()->route('sender.enquiries');
+    });
     Route::get('/calendar', [SenderCalendarController::class, 'index'])->name('sender.calendar');
     Route::get('/calendar/export.ics', [SenderCalendarController::class, 'exportIcs'])->name('sender.calendar.export-ics');
     Route::get('/calendar/{event}/export.ics', [SenderCalendarController::class, 'exportSingleIcs'])->name('sender.calendar.export-single-ics');

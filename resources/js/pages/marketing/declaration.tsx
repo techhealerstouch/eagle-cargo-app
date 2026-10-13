@@ -33,7 +33,8 @@ interface Props {
     booking: Booking;
     declarationSettings: DeclarationSettings;
     isGuest?: boolean;
-    guestToken?: string;
+    guestToken?: string | null;
+    guestAccessQuery?: string | null;
 }
 
 const ALL_COUNTRIES = COUNTRIES.map(c => c.name).sort();
@@ -268,6 +269,7 @@ export default function DeclarationForm({
     declarationSettings,
     isGuest = false,
     guestToken,
+    guestAccessQuery = null,
 }: Props) {
     const { auth } = usePage<SharedData>().props;
     const isUserGuest = isGuest || !auth?.user;
@@ -756,7 +758,7 @@ export default function DeclarationForm({
             token: guestToken || '',
         }));
 
-        post(declarationRoutes.save().url, {
+        post(`${declarationRoutes.save().url}${guestAccessQuery || ""}`, {
             onError: () => toast.error('Submission failed. Please check your details and try again.'),
             onFinish: () => {
                 transform((payload) => payload);

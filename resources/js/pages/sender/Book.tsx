@@ -7,7 +7,6 @@ import Heading from '@/components/common/heading';
 import PaymentFlow from '@/components/payment/PaymentFlow';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
-import LocationPickerMap from '@/components/ui/LocationPickerMap';
 import PhoneInput from '@/components/ui/PhoneInput';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAutoSave } from '@/hooks/use-auto-save';
@@ -321,7 +320,6 @@ export default function Book(props?: PageProps) {
   const [currentStep, setCurrentStep] = useState(1);
   const [isEditingSender, setIsEditingSender] = useState(isGuest || !sender || !sender.address);
   const [agreeTerms, setAgreeTerms] = useState(false);
-  const [, setIsLocating] = useState(false);
   const [draftId, setDraftId] = useState<number | null>(draftBooking?.id || null);
   const [savingDraft, setSavingDraft] = useState(false);
   const [initializingPayment, setInitializingPayment] = useState(false);
@@ -355,6 +353,8 @@ export default function Book(props?: PageProps) {
   const [promoError, setPromoError] = useState<string | null>(null);
   const [discountAmount, setDiscountAmount] = useState(0);
   const [promoSuccessMessage, setPromoSuccessMessage] = useState<string | null>(null);
+  const [isRegisteredEmail, setIsRegisteredEmail] = useState(false);
+  const [checkingEmail, setCheckingEmail] = useState(false);
   const hasAppliedDraftSource = useRef(false);
   const hasAppliedQueryDefaults = useRef(false);
   const hasAppliedCloneSource = useRef(false);
@@ -736,6 +736,30 @@ export default function Book(props?: PageProps) {
       }
     ],
   });
+
+  useEffect(() => {
+    if (!isGuest || !data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+      setIsRegisteredEmail(false);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setCheckingEmail(true);
+        const res = await fetch(`/api/users/check-email?email=${encodeURIComponent(data.email)}`);
+        if (res.ok) {
+          const json = await res.json();
+          setIsRegisteredEmail(json.available === false);
+        }
+      } catch {
+        // Ignore network failure
+      } finally {
+        setCheckingEmail(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [data.email, isGuest]);
 
   const detectedZoneId = useMemo(() => {
     if (!data.suburb) return '';
@@ -1596,44 +1620,6 @@ export default function Book(props?: PageProps) {
     setData('boxes', newBoxes);
   };
 
-  const getCurrentLocation = (type: 'sender' | 'recipient') => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser');
-
-      return;
-    }
-
-    setIsLocating(true);
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          const coordsString = ` [GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}]`;
-
-          if (type === 'sender') {
-            setData((currentData: any) => ({
-              ...currentData,
-              notes: (currentData.notes || '') + (currentData.notes ? '\n' : '') + `Pickup GPS Coordinates: ${latitude}, ${longitude}`
-            }));
-            alert(`Location captured! Coordinates added to notes.`);
-          } else if (type === 'recipient') {
-            updatePrimaryRecipient('recipient_landmarks', (data.boxes?.[0]?.recipient_landmarks || '') + coordsString);
-          }
-        } catch (error) {
-          console.error('Error getting address from coordinates', error);
-        } finally {
-          setIsLocating(false);
-        }
-      },
-      (error) => {
-        setIsLocating(false);
-        alert(`Unable to retrieve your location: ${error.message}`);
-      },
-      { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-    );
-  };
-
   const applySavedRecipient = (recId: string) => {
     const rec = savedRecipients?.find((r: any) => r.id.toString() === recId) as any;
 
@@ -2029,6 +2015,9 @@ field = 'recipient mobile number';
       if (data.email && !emailRegex.test(data.email)) {
         setError('email', 'Please enter a valid email address');
         hasErrors = true;
+      } else if (isGuest && isRegisteredEmail) {
+        setError('email', 'An account with this email already exists. Please log in to complete your booking.');
+        hasErrors = true;
       }
 
       // If there are errors on sender fields, expand the edit form so the
@@ -2046,7 +2035,6 @@ if (step === 2) {
             const recipientRequired: Record<string, string> = {
                 recipient_first_name: 'Receiver First Name',
                 recipient_last_name: 'Receiver Last Name',
-                recipient_email: 'Receiver Email',
                 recipient_address: 'Receiver Address',
                 recipient_city: 'City',
                 recipient_province: 'Province',
@@ -2543,9 +2531,54 @@ if (step === 2) {
                           <PhoneInput value={data.secondary_mobile || ''} onChange={val => setData('secondary_mobile', val)} defaultCountryCode={senderCountryCode} />
                         </Field>
                         <div className="md:col-span-2">
-                          <Field label="Email Address" required error={errors.email}>
-                            <input title="Email Address" placeholder="e.g. maria.santos@gmail.com" className={baseInputClass} type="email" value={data.email || ''} onChange={e => setData('email', e.target.value)} />
+                          <Field
+                            label="Email Address"
+                            required
+                            error={errors.email || (isGuest && isRegisteredEmail ? 'An account with this email already exists. Please log in to complete your booking.' : undefined)}
+                          >
+                            <div className="relative">
+                              <input
+                                title="Email Address"
+                                placeholder="e.g. maria.santos@gmail.com"
+                                className={cn(
+                                  baseInputClass,
+                                  isGuest && isRegisteredEmail && 'border-amber-500 dark:border-amber-500 focus:border-amber-600 focus:ring-amber-100 dark:focus:ring-amber-950/40'
+                                )}
+                                type="email"
+                                value={data.email || ''}
+                                onChange={e => {
+                                  setData('email', e.target.value);
+                                  if (isRegisteredEmail) setIsRegisteredEmail(false);
+                                }}
+                              />
+                              {checkingEmail && (
+                                <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-zinc-400">
+                                  <Loader2 className="size-3.5 animate-spin" />
+                                </div>
+                              )}
+                            </div>
                           </Field>
+
+                          {isGuest && isRegisteredEmail && (
+                            <div className="mt-2.5 p-3.5 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/80 dark:bg-amber-950/30 flex items-start gap-3 animate-in fade-in duration-200">
+                              <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                              <div className="text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
+                                <p className="font-bold">Existing Account Found</p>
+                                <p>
+                                  An account already exists for <span className="font-semibold">{data.email}</span>. To protect your account and use your saved recipients, please log in.
+                                </p>
+                                <div className="pt-0.5">
+                                  <a
+                                    href={`/login?email=${encodeURIComponent(data.email)}`}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs transition-colors shadow-2xs"
+                                  >
+                                    <span>Log In to Your Account</span>
+                                    <ChevronRight className="size-3.5" />
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -2975,49 +3008,6 @@ if (step === 2) {
                     />
                   </Field>
 
-                  <div className="mt-4 mb-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">Pin Delivery Location on Map</p>
-                    {!data.boxes[0].recipient_id ? (
-                      <>
-                        <p className="text-xs text-muted-foreground mb-2">Click on the map or use <strong>"Use My Location"</strong> to auto-fill the address fields below.</p>
-                        <LocationPickerMap
-                          initialCenter={data.boxes[0].recipient_latitude && data.boxes[0].recipient_longitude ? [data.boxes[0].recipient_latitude, data.boxes[0].recipient_longitude] : [14.5995, 120.9842]}
-                          onLocationSelect={(lat, lng, address) => {
-                            setData((currentData: any) => {
-                              const newBoxes = currentData.boxes.map((box: any) => {
-                                const newBox = {
-                                  ...box,
-                                  recipient_latitude: lat,
-                                  recipient_longitude: lng,
-                                  ...(address ? {
-                                    recipient_address: address.address || '',
-                                    recipient_city: address.city || address.suburb || '',
-                                    recipient_province: address.province || address.state || '',
-                                    recipient_zip_code: address.postcode || '',
-                                  } : {}),
-                                };
-                                if (address) {
-                                  newBox.area_id = resolveDestinationAreaId(
-                                    newBox.recipient_province,
-                                    newBox.recipient_city,
-                                  );
-                                }
-                                return newBox;
-                              });
-                              return { ...currentData, boxes: newBoxes };
-                            });
-                          }}
-                        />
-                      </>
-                    ) : (
-                      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                          Location data is from saved contact. To update, please edit the contact in your saved recipients list.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Field label="City" required error={errors[`boxes.0.recipient_city` as keyof typeof errors]}>
                       <input
@@ -3073,7 +3063,7 @@ if (step === 2) {
                       />
                     </Field>
                     <div className="md:col-span-2">
-                      <Field label="Receiver Email" required error={errors[`boxes.0.recipient_email` as keyof typeof errors]}>
+                      <Field label="Receiver Email" hint="Optional" error={errors[`boxes.0.recipient_email` as keyof typeof errors]}>
                         <input
                           title="Receiver Email"
                           className={baseInputClass}
@@ -3092,26 +3082,14 @@ if (step === 2) {
                     error={errors[`boxes.0.recipient_landmarks` as keyof typeof errors]}
                     hint={data.boxes[0].recipient_id ? "Landmarks are from saved contact" : "Beside the church, yellow gate, etc."}
                   >
-                    <div className="relative">
-                      <input
-                        title="Receiver Landmarks"
-                        className={baseInputClass}
-                        placeholder="Help the driver find the location..."
-                        value={data.boxes[0].recipient_landmarks || ''}
-                        disabled={!!data.boxes[0].recipient_id}
-                        onChange={e => updatePrimaryRecipient('recipient_landmarks', e.target.value)}
-                      />
-                      {!data.boxes[0].recipient_id && (
-                        <button
-                          type="button"
-                          onClick={() => getCurrentLocation('recipient')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-sky-600 transition-colors"
-                          title="Capture GPS Coordinates"
-                        >
-                          <MapPinned className="size-4" />
-                        </button>
-                      )}
-                    </div>
+                    <input
+                      title="Receiver Landmarks"
+                      className={baseInputClass}
+                      placeholder="Help the driver find the location..."
+                      value={data.boxes[0].recipient_landmarks || ''}
+                      disabled={!!data.boxes[0].recipient_id}
+                      onChange={e => updatePrimaryRecipient('recipient_landmarks', e.target.value)}
+                    />
                   </Field>
                 </section>
 

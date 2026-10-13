@@ -8,6 +8,7 @@ use App\Jobs\SendBookingConfirmationMail;
 use App\Models\Booking;
 use App\Models\User;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
+use App\Services\GuestBookingAccessService;
 use App\Services\SettingsService;
 use App\Services\TrackingAnalyticsService;
 use App\Services\TrackingStepService;
@@ -28,16 +29,20 @@ class TrackingController extends Controller
 
     private TrackingAnalyticsService $analyticsService;
 
+    private GuestBookingAccessService $guestAccess;
+
     public function __construct(
         TrackingRepositoryInterface $trackingRepo,
         TrackingStepService $trackingStepService,
         SettingsService $settingsService,
         TrackingAnalyticsService $analyticsService,
+        GuestBookingAccessService $guestAccess,
     ) {
         $this->trackingRepo = $trackingRepo;
         $this->trackingStepService = $trackingStepService;
         $this->settingsService = $settingsService;
         $this->analyticsService = $analyticsService;
+        $this->guestAccess = $guestAccess;
     }
 
     /**
@@ -100,7 +105,15 @@ class TrackingController extends Controller
         ]);
 
         $booking = Booking::findOrFail($request->booking_id);
-        $this->assertBookingOwnership($booking, $request->input('token'));
+        if (! Auth::check() && $booking->is_guest) {
+            $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::DECLARATION);
+
+            if (! $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::DECLARATION)) {
+                abort(403, 'Email verification is required before uploading the declaration.');
+            }
+        } else {
+            $this->assertBookingOwnership($booking, $request->input('token'));
+        }
 
         if ($request->hasFile('declaration_form')) {
             $this->trackingRepo->uploadDeclaration(
@@ -116,16 +129,32 @@ class TrackingController extends Controller
 
     public function showDeclarationForm(Request $request, Booking $booking)
     {
-        $token = $request->query('token');
-        $this->assertBookingOwnership($booking, $token);
+        $isGuest = $booking->is_guest || empty($booking->sender?->user_id);
+        if ($isGuest && ! Auth::check()) {
+            $this->guestAccess->authorize($request, $booking, GuestBookingAccessService::DECLARATION);
+
+            if (! $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::DECLARATION)) {
+                abort(403, 'Email verification is required before completing the declaration.');
+            }
+
+            // Extend verification session so guest has 2 hours (120 minutes) to fill and submit the declaration
+            $this->guestAccess->markVerified($request, $booking, GuestBookingAccessService::DECLARATION, 120);
+        } else {
+            $this->assertBookingOwnership($booking);
+        }
 
         $booking->load(['sender', 'boxes.recipient', 'boxes.boxType']);
+        $guestToken = $booking->guest_token;
+        if ($isGuest) {
+            $booking->makeHidden('guest_token');
+        }
 
         return inertia('marketing/declaration', [
             'booking' => $booking,
             'declarationSettings' => $this->settingsService->getDeclarationSettings(),
-            'isGuest' => empty($booking->sender?->user_id),
-            'guestToken' => $token,
+            'isGuest' => $isGuest,
+            'guestToken' => $isGuest ? $guestToken : null,
+            'guestAccessQuery' => $isGuest ? '?'.$request->getQueryString() : null,
         ]);
     }
 
@@ -138,7 +167,12 @@ class TrackingController extends Controller
         ]);
 
         $booking = Booking::findOrFail($request->booking_id);
-        $this->assertBookingOwnership($booking, $request->input('token'));
+        $token = $request->input('token');
+        if (! Auth::check() && $booking->is_guest) {
+            $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::DECLARATION);
+        } else {
+            $this->assertBookingOwnership($booking, $token);
+        }
 
         $this->trackingRepo->saveDeclarationData(
             $booking->id,
@@ -179,15 +213,21 @@ class TrackingController extends Controller
     {
         $user = Auth::user();
         $token = $request->query('token');
+        $isValidGuest = false;
+
+        if (! $user && $booking->is_guest) {
+            $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::DECLARATION);
+            $isValidGuest = $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::DECLARATION);
+        }
 
         $isAdmin = $user && in_array($user->role, [Role::Admin, Role::SuperAdmin], true);
         $isOwnerSender = $user
             && $user->role === Role::Sender
             && $booking->sender_id === $user->sender?->id;
         $isOperational = $this->isAssignedOperationalUser($booking);
-        $isValidGuest = $token && ! empty($booking->guest_token) && hash_equals($booking->guest_token, $token);
+        $hasToken = $token && ! empty($booking->guest_token) && hash_equals($booking->guest_token, $token);
 
-        if (! $isAdmin && ! $isOwnerSender && ! $isOperational && ! $isValidGuest) {
+        if (! $isAdmin && ! $isOwnerSender && ! $isOperational && ! $isValidGuest && ! $hasToken) {
             abort(403);
         }
 
