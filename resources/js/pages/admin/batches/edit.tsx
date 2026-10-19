@@ -1,8 +1,9 @@
-import { Head, useForm, Link, usePage } from '@inertiajs/react';
+import { Head, useForm, Link, usePage, router } from '@inertiajs/react';
 import {
     Save, ArrowLeft, Ship, MapPin, CalendarClock, RefreshCw, RotateCcw,
-    Container, AlertTriangle, ShieldCheck, CheckCircle2,
-    Package, Clock, Anchor, Box, ChevronRight, ChevronLeft, Info, Sparkles, Activity
+    Container, AlertTriangle, ShieldCheck, CheckCircle2, Warehouse,
+    Package, Clock, Anchor, Box, ChevronRight, ChevronLeft, Info, Sparkles, Activity,
+    Loader2
 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import Heading from '@/components/common/heading';
@@ -15,6 +16,13 @@ import { ORIGIN_PORTS, DESTINATION_PORTS } from '@/lib/ports';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { BreadcrumbItem } from '@/types';
+
+export interface TrackingPhaseOption {
+    value: string;
+    label: string;
+    group: string;
+    order: number;
+}
 
 interface BatchPayload {
     id: number;
@@ -35,6 +43,8 @@ interface BatchPayload {
     status: string;
     override_note?: string | null;
     current_box_count?: number;
+    latest_tracking_phase?: string | null;
+    latest_tracking_phase_order?: number | null;
     warnings?: string[];
 }
 
@@ -65,9 +75,19 @@ function toDateTimeLocal(value: string | null): string {
     return local.toISOString().slice(0, 16);
 }
 
-export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
+export default function BatchesEdit({
+    batch,
+    trackingPhases = [],
+}: {
+    batch: BatchPayload;
+    trackingPhases?: TrackingPhaseOption[];
+}) {
     const { return_url } = usePage<any>().props;
     const [currentStep, setCurrentStep] = useState(0);
+
+    const [selectedTrackingPhase, setSelectedTrackingPhase] = useState<string>('');
+    const [trackingDescription, setTrackingDescription] = useState<string>('');
+    const [isUpdatingTracking, setIsUpdatingTracking] = useState<boolean>(false);
 
     const { data, setData, put, processing, errors, transform } = useForm({
         batch_number: batch.batch_number,
@@ -86,9 +106,20 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
         eta_at: toDateTimeLocal(batch.eta_at),
         status: batch.status || 'open',
         override_note: batch.override_note || '',
+        tracking_phase: '',
+        tracking_description: '',
     });
 
-    const STAGE_KEYS = ['open', 'loading', 'ready_to_close', 'sailed', 'arrived', 'delivered'];
+    const STAGE_KEYS = [
+        'open',
+        'loading',
+        'ready_to_close',
+        'sailed',
+        'arrived',
+        'under_customs_clearance',
+        'released_by_boc',
+        'received_at_warehouse',
+    ];
     const originalStatusIndex = STAGE_KEYS.indexOf(batch.status || 'open');
     const newStatusIndex = STAGE_KEYS.indexOf(data.status);
     const isBackward = newStatusIndex !== -1 && originalStatusIndex !== -1 && newStatusIndex < originalStatusIndex;
@@ -208,8 +239,10 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
             { key: 'loading', label: 'Loading', icon: Container },
             { key: 'ready_to_close', label: 'Ready', icon: ShieldCheck },
             { key: 'sailed', label: 'Sailed', icon: Ship },
-            { key: 'arrived', label: 'Arrived', icon: MapPin },
-            { key: 'delivered', label: 'Delivered', icon: CheckCircle2 },
+            { key: 'arrived', label: 'Arrived Port', icon: MapPin },
+            { key: 'under_customs_clearance', label: 'Under BOC', icon: ShieldCheck },
+            { key: 'released_by_boc', label: 'Released BOC', icon: CheckCircle2 },
+            { key: 'received_at_warehouse', label: 'Manila Hub', icon: Warehouse },
         ];
 
         const currentIndex = stages.findIndex((s) => s.key === data.status);
@@ -227,12 +260,85 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
             open: { label: 'Start Loading', target: 'loading', color: 'bg-sky-600 hover:bg-sky-700' },
             loading: { label: 'Mark Ready to Close', target: 'ready_to_close', color: 'bg-amber-600 hover:bg-amber-700' },
             ready_to_close: { label: 'Confirm Sailed', target: 'sailed', color: 'bg-indigo-600 hover:bg-indigo-700' },
-            sailed: { label: 'Confirm Arrival', target: 'arrived', color: 'bg-purple-600 hover:bg-purple-700' },
-            arrived: { label: 'Confirm Delivered', target: 'delivered', color: 'bg-emerald-600 hover:bg-emerald-700' },
+            sailed: { label: 'Confirm Port Arrival', target: 'arrived', color: 'bg-teal-600 hover:bg-teal-700' },
+            arrived: { label: 'Submit to BOC Clearance', target: 'under_customs_clearance', color: 'bg-amber-600 hover:bg-amber-700' },
+            under_customs_clearance: { label: 'Mark Released by BOC', target: 'released_by_boc', color: 'bg-indigo-600 hover:bg-indigo-700' },
+            released_by_boc: { label: 'Receive & Unload at Manila Warehouse', target: 'received_at_warehouse', color: 'bg-emerald-600 hover:bg-emerald-700' },
         };
 
         return map[data.status] || null;
     })();
+
+    const currentPhaseOption = trackingPhases.find((p) => p.value === batch.latest_tracking_phase);
+    const currentPhaseOrder = batch.latest_tracking_phase_order ?? currentPhaseOption?.order ?? (batch.status === 'sailed' ? 5 : batch.status === 'arrived' ? 6 : -1);
+
+    const availableTrackingPhases = trackingPhases.filter(
+        (phase) => phase.order > currentPhaseOrder && phase.value !== 'delivered'
+    );
+
+    const nextTrackingPhase = availableTrackingPhases[0] || null;
+
+    const containerMilestoneSteps = [
+        {
+            key: 'in_transit_sea',
+            label: trackingPhases.find((p) => p.value === 'in_transit_sea')?.label || 'Shipping to Philippines',
+            icon: Ship,
+            order: trackingPhases.find((p) => p.value === 'in_transit_sea')?.order ?? 5,
+        },
+        {
+            key: 'arrived_manila_port',
+            label: trackingPhases.find((p) => p.value === 'arrived_manila_port')?.label || 'Arrived in Philippines',
+            icon: MapPin,
+            order: trackingPhases.find((p) => p.value === 'arrived_manila_port')?.order ?? 6,
+        },
+        {
+            key: 'under_customs_clearance',
+            label: trackingPhases.find((p) => p.value === 'under_customs_clearance')?.label || 'Under BOC Clearance',
+            icon: ShieldCheck,
+            order: trackingPhases.find((p) => p.value === 'under_customs_clearance')?.order ?? 7,
+        },
+        {
+            key: 'released_by_boc',
+            label: trackingPhases.find((p) => p.value === 'released_by_boc')?.label || 'Released by BOC',
+            icon: CheckCircle2,
+            order: trackingPhases.find((p) => p.value === 'released_by_boc')?.order ?? 8,
+        },
+        {
+            key: 'received_manila_warehouse',
+            label: trackingPhases.find((p) => p.value === 'received_manila_warehouse')?.label || 'Received at Manila Warehouse',
+            icon: Package,
+            order: trackingPhases.find((p) => p.value === 'received_manila_warehouse')?.order ?? 9,
+        },
+    ];
+
+    const handleUpdateTracking = (phaseKey: string, customDesc?: string) => {
+        if (!phaseKey || isUpdatingTracking) return;
+
+        setIsUpdatingTracking(true);
+        router.post(
+            `/admin/batches/${batch.id}/tracking-phase`,
+            {
+                tracking_phase: phaseKey,
+                description: (customDesc ?? trackingDescription).trim() || null,
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    const matched = trackingPhases.find((p) => p.value === phaseKey);
+                    toast.success(`Updated container milestone to "${matched?.label || phaseKey}".`);
+                    setSelectedTrackingPhase('');
+                    setTrackingDescription('');
+                },
+                onError: (errs: any) => {
+                    const message = (Object.values(errs)[0] as string) || 'Failed to update tracking phase.';
+                    toast.error(message);
+                },
+                onFinish: () => {
+                    setIsUpdatingTracking(false);
+                },
+            }
+        );
+    };
 
     const timeline = getStatusTimeline();
 
@@ -392,8 +498,8 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                             </div>
 
                                             {/* Status Progress Pipeline */}
-                                            <div className="grid grid-cols-6 gap-2 relative py-4">
-                                                <div className="absolute top-9 left-4 right-4 h-0.5 bg-zinc-200 -z-0" />
+                                            <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 relative py-4">
+                                                <div className="hidden sm:block absolute top-9 left-4 right-4 h-0.5 bg-zinc-200 -z-0" />
                                                 {timeline.map((stage) => (
                                                     <div key={stage.key} className="relative z-10 flex flex-col items-center gap-2">
                                                         <div
@@ -410,7 +516,7 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                         </div>
                                                         <span
                                                             className={cn(
-                                                                'text-[10px] font-semibold tracking-tight text-center',
+                                                                'text-[10px] font-semibold tracking-tight text-center leading-tight',
                                                                 stage.isActive ? 'text-sky-900 font-bold' : 'text-zinc-500'
                                                             )}
                                                         >
@@ -439,14 +545,16 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                             title="Select status"
                                                             value={data.status}
                                                             onChange={(e) => setData('status', e.target.value)}
-                                                            className="flex h-11 w-full md:w-44 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-900 shadow-sm focus:ring-2 focus:ring-sky-100 outline-none"
+                                                            className="flex h-11 w-full md:w-56 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-900 shadow-sm focus:ring-2 focus:ring-sky-100 outline-none"
                                                         >
                                                             <option value="open">Open</option>
                                                             <option value="loading">Loading</option>
                                                             <option value="ready_to_close" disabled={isBatchEmpty}>Ready to Close</option>
                                                             <option value="sailed" disabled={isBatchEmpty}>Sailed</option>
-                                                            <option value="arrived" disabled={isBatchEmpty}>Arrived</option>
-                                                            <option value="delivered" disabled={isBatchEmpty}>Delivered</option>
+                                                            <option value="arrived" disabled={isBatchEmpty}>Arrived at Port</option>
+                                                            <option value="under_customs_clearance" disabled={isBatchEmpty}>Under BOC Clearance</option>
+                                                            <option value="released_by_boc" disabled={isBatchEmpty}>Released by BOC</option>
+                                                            <option value="received_at_warehouse" disabled={isBatchEmpty}>Received at Manila Warehouse (Unloaded)</option>
                                                         </select>
 
                                                         {nextAction && data.status === batch.status && (
@@ -465,6 +573,18 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                     </div>
                                                 </div>
 
+                                                {/* Optional Audit / Tracking Description Note for Box History */}
+                                                <div className="pt-2 border-t border-zinc-200/60">
+                                                    <Input
+                                                        type="text"
+                                                        maxLength={500}
+                                                        placeholder="Optional audit / tracking note for all boxes (e.g. 'Cleared BOC inspection with no hold')..."
+                                                        value={data.tracking_description}
+                                                        onChange={(e) => setData('tracking_description', e.target.value)}
+                                                        className="text-xs h-10 bg-white border-zinc-200"
+                                                    />
+                                                </div>
+
                                                 {data.status === 'ready_to_close' && (
                                                     <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
                                                         <AlertTriangle className="size-4.5 text-amber-600 mt-0.5 shrink-0" />
@@ -477,13 +597,25 @@ export default function BatchesEdit({ batch }: { batch: BatchPayload }) {
                                                     </div>
                                                 )}
 
-                                                {(data.status === 'open' || data.status === 'loading') && ['ready_to_close', 'sailed', 'arrived', 'delivered'].includes(batch.status) && (
+                                                {(data.status === 'open' || data.status === 'loading') && ['ready_to_close', 'sailed', 'arrived', 'under_customs_clearance', 'released_by_boc', 'received_at_warehouse', 'delivered'].includes(batch.status) && (
                                                     <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-4">
                                                         <RotateCcw className="size-4.5 text-sky-600 mt-0.5 shrink-0" />
                                                         <div>
                                                             <p className="text-xs font-bold text-sky-900">Reopening Batch</p>
                                                             <p className="text-[11px] text-sky-800 mt-0.5 leading-relaxed">
                                                                 Setting status to <strong className="font-semibold">{data.status === 'open' ? 'Open' : 'Loading'}</strong> will reopen this batch for box modifications and reset sailing/arrival timestamps.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {data.status === 'received_at_warehouse' && (
+                                                    <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+                                                        <CheckCircle2 className="size-4.5 text-emerald-600 mt-0.5 shrink-0" />
+                                                        <div>
+                                                            <p className="text-xs font-bold text-emerald-900">Batch Destination & Unloading Complete</p>
+                                                            <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                                                                Setting this status completes the container's journey and marks all boxes as <strong className="font-semibold">Received at Manila Warehouse (Unloaded)</strong> ready for provincial sorting and courier dispatch.
                                                             </p>
                                                         </div>
                                                     </div>

@@ -30,6 +30,9 @@ yarn-error.log
 /.github
 /.agents
 /skills-lock.json
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
 
 **/caddy
 frankenphp

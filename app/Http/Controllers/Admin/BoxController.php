@@ -2,30 +2,24 @@
 
 namespace App\Http\Controllers\Admin;
 
-use Maatwebsite\Excel\Facades\Excel;
-
-use App\Services\AuditLogService;
-
-use App\Imports\BoxesImport;
-
-use App\Exports\BoxesExport;
-
 use App\Enums\BatchStatus;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
-use App\Enums\RunsheetStatus;
-use App\Enums\TrackingPhase;
+use App\Exports\BoxesExport;
 use App\Http\Controllers\Controller;
+use App\Services\DeveloperAccess;
 use App\Http\Requests\Admin\StoreBoxRequest;
 use App\Http\Requests\Admin\UpdateBoxRequest;
+use App\Imports\BoxesImport;
 use App\Models\Area;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
-use App\Models\BoxUpdate;
 use App\Repositories\Contracts\BoxRepositoryInterface;
+use App\Services\AuditLogService;
+use App\Services\BatchService;
 use App\Services\TrackingCacheService;
 use App\Services\TrackingStepService;
 use Illuminate\Http\Request;
@@ -33,6 +27,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
+use Maatwebsite\Excel\Facades\Excel;
 
 class BoxController extends Controller
 {
@@ -40,7 +35,7 @@ class BoxController extends Controller
     {
         $query = Box::with(['booking.sender', 'recipient', 'boxType', 'batch', 'latestUpdate']);
 
-        if ($request->boolean('trashed') && Auth::user()?->role === Role::SuperAdmin) {
+        if ($request->boolean('trashed') && app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
             $query = Box::onlyTrashed()->with(['booking.sender', 'recipient', 'boxType', 'batch', 'latestUpdate']);
         }
 
@@ -67,13 +62,13 @@ class BoxController extends Controller
             BatchStatus::Loading,
         ])->latest()->get();
 
-        $filterBatches = Batch::latest()->get(['id', 'batch_number']);
-
         $areas = Area::where('is_active', true)->orderBy('name')->get(['id', 'name']);
+
+        $filterBatches = Batch::latest()->get(['id', 'batch_number']);
 
         return Inertia::render('admin/boxes/index', [
             'boxes' => $boxes,
-            'filters' => $request->only(['search', 'status', 'area_id', 'batch_id', 'payment_status', 'declaration_form_status', 'sort', 'direction', 'trashed']),
+            'filters' => $request->only(['search', 'status', 'area_id', 'batch_id', 'sort', 'direction', 'trashed']),
             'activeBatches' => $activeBatches,
             'filterBatches' => $filterBatches,
             'areas' => $areas,
@@ -93,13 +88,18 @@ class BoxController extends Controller
     {
         Box::create($request->validated());
 
-        return redirect()->route('admin.boxes.index')->with('success', 'Box registered successfully.');
+        return redirect($this->adminReturnUrl('admin.boxes.index'))->with('success', 'Box registered successfully.');
     }
 
     public function show(Box $box)
     {
+        $box->load(['booking.sender', 'booking.boxes', 'recipient', 'boxType', 'batch', 'trackingLogs', 'latestUpdate', 'updates.updater']);
+        if (empty($box->tracking_step_key) && ! empty($box->latestUpdate?->tracking_step_key)) {
+            $box->tracking_step_key = $box->latestUpdate->tracking_step_key;
+        }
+
         return Inertia::render('admin/boxes/show', [
-            'box' => $box->load(['booking.sender', 'booking.boxes', 'recipient', 'boxType', 'trackingLogs']),
+            'box' => $box,
         ]);
     }
 
@@ -107,8 +107,13 @@ class BoxController extends Controller
     {
         $bookings = Booking::with('sender')->latest()->get();
 
+        $box->load(['booking.sender', 'latestUpdate']);
+        if (empty($box->tracking_step_key) && ! empty($box->latestUpdate?->tracking_step_key)) {
+            $box->tracking_step_key = $box->latestUpdate->tracking_step_key;
+        }
+
         return Inertia::render('admin/boxes/edit', [
-            'box' => $box->load(['booking.sender', 'latestUpdate']),
+            'box' => $box,
             'bookings' => $bookings,
         ]);
     }
@@ -119,31 +124,31 @@ class BoxController extends Controller
         $overrideReason = $validated['admin_delivery_override_reason'] ?? null;
         unset($validated['admin_delivery_override_reason']);
 
+        if (! $request->boolean('update_eta') && ! $request->boolean('update_eta_date') && ! $request->filled('eta_date')) {
+            unset($validated['eta_date']);
+        }
+        if (! $request->boolean('update_eta') && ! $request->boolean('update_eta_message') && ! $request->filled('eta_message')) {
+            unset($validated['eta_message']);
+        }
+        if (! $request->boolean('update_estimate_delivery') && ! $request->filled('estimate_delivery_date')) {
+            unset($validated['estimate_delivery_date']);
+        }
+        if (! $request->boolean('update_estimate_delivery') && ! $request->filled('estimate_delivery_message')) {
+            unset($validated['estimate_delivery_message']);
+        }
+        unset($validated['update_eta']);
+        unset($validated['update_eta_date']);
+        unset($validated['update_eta_message']);
+        unset($validated['update_estimate_delivery']);
+
         $newStatus = $validated['status'] ?? null;
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         // Do not unset tracking_step_key so it gets saved to the boxes table
+        $this->assertTrackingStepCanBeApplied($box, $trackingStepKey);
 
-        $stepService = app(TrackingStepService::class);
-        if ($trackingStepKey) {
-            if (! $stepService->isValidStepKey($trackingStepKey)) {
-                throw ValidationException::withMessages([
-                    'tracking_step_key' => "The selected tracking step key [{$trackingStepKey}] is invalid.",
-                ]);
-            }
-
-            $newOrder = $stepService->getStepOrder($trackingStepKey);
-            $currentOrder = $this->resolveBoxJourneyOrder($box, $stepService);
-
-            if ($currentOrder !== null && $newOrder !== null && $newOrder < $currentOrder && blank($overrideReason)) {
-                throw ValidationException::withMessages([
-                    'tracking_step_key' => "Cannot select a tracking step that regresses journey progression (from step order {$currentOrder} to {$newOrder}).",
-                ]);
-            }
-        }
-
-        $currentStatusValue = $box->status instanceof BoxStatus ? $box->status->value : $box->status;
-        $statusChanged = $newStatus && $currentStatusValue !== $newStatus;
-        $stepChanged = $trackingStepKey && $box->tracking_step_key !== $trackingStepKey;
+        $currentStatusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+        $statusChanged = $newStatus && $currentStatusVal !== $newStatus;
+        $stepChanged = $trackingStepKey && $trackingStepKey !== $box->tracking_step_key;
 
         if ($statusChanged || $stepChanged) {
             if ($newStatus === BoxStatus::Delivered->value && $this->requiresDeliveryOverride($box) && blank($overrideReason)) {
@@ -153,33 +158,23 @@ class BoxController extends Controller
             }
 
             unset($validated['status']);
-            $notes = !empty($validated['courier_notes']) ? $validated['courier_notes'] : 'Status updated by Admin';
+            $box->update($validated);
 
-            try {
-                DB::transaction(function () use ($box, $boxRepo, $validated, $newStatus, $currentStatusValue, $notes, $overrideReason, $trackingStepKey) {
-                    $box->update($validated);
-
-                    $boxRepo->updateStatus(
-                        $box,
-                        $newStatus ?? $currentStatusValue,
-                        $notes,
-                        Auth::id(),
-                        deliveryOverrideReason: $overrideReason,
-                        bypassValidation: !blank($overrideReason),
-                        trackingStepKey: $trackingStepKey
-                    );
-                });
-            } catch (\RuntimeException $e) {
-                return redirect()->back()->withInput()->with('error', $e->getMessage());
-            } catch (\InvalidArgumentException $e) {
-                return redirect()->back()->withInput()->with('error', $e->getMessage());
-            }
+            $boxRepo->updateStatus(
+                $box,
+                $newStatus ?? $currentStatusVal,
+                'Status updated by Admin',
+                Auth::id(),
+                deliveryOverrideReason: $overrideReason,
+                trackingStepKey: $trackingStepKey
+            );
         } else {
             $box->update($validated);
         }
 
-        $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.boxes.index') ?? session('admin_return_url') ?? route('admin.boxes.index');
-        return redirect($returnUrl)->with('success', 'Box updated successfully.');
+        app(TrackingCacheService::class)->forgetBox($box);
+
+        return redirect($this->adminReturnUrl('admin.boxes.index'))->with('success', 'Box updated successfully.');
     }
 
     public function bulkUpdateStatus(Request $request, BoxRepositoryInterface $boxRepo)
@@ -189,27 +184,18 @@ class BoxController extends Controller
             'ids.*' => 'integer|exists:boxes,id',
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
-            'status' => 'nullable|string', // The new status to set
-            'tracking_step_key' => [
-                'nullable',
-                'string',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        $stepService = app(TrackingStepService::class);
-                        if (! $stepService->isValidStepKey($value)) {
-                            $fail("The selected tracking step key [{$value}] is invalid.");
-                        }
-                    }
-                },
-            ],
+            'status' => 'nullable|string', // Optional to allow ETA-only updates
+            'tracking_step_key' => 'nullable|string',
             'filter_status' => 'nullable|string', // The status filter applied to the view
             'area_id' => 'nullable|exists:areas,id',
-            'batch_id' => 'nullable|string',
             'courier_notes' => 'nullable|string|max:2000',
             'update_eta' => 'nullable|boolean',
+            'update_eta_date' => 'nullable|boolean',
+            'update_eta_message' => 'nullable|boolean',
             'eta_date' => 'nullable|date',
             'eta_message' => 'nullable|string|max:255',
         ]);
+
 
         $requestForFilters = clone $request;
         if ($request->has('filter_status')) {
@@ -230,54 +216,50 @@ class BoxController extends Controller
         $updated = 0;
         $userId = Auth::id();
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
-        $stepService = app(TrackingStepService::class);
-        $newOrder = $trackingStepKey ? $stepService->getStepOrder($trackingStepKey) : null;
 
         $updates = [];
-        if ($request->boolean('update_eta')) {
+        if ($request->boolean('update_eta') || $request->boolean('update_eta_date') || ($request->has('eta_date') && $request->filled('eta_date'))) {
             $updates['eta_date'] = $validated['eta_date'] ?? null;
+        }
+        if ($request->boolean('update_eta') || $request->boolean('update_eta_message') || ($request->has('eta_message') && $request->filled('eta_message'))) {
             $updates['eta_message'] = $validated['eta_message'] ?? null;
         }
 
         foreach ($boxes as $box) {
             try {
-                if ($newOrder !== null) {
-                    $currentOrder = $this->resolveBoxJourneyOrder($box, $stepService);
-                    if ($currentOrder !== null && $newOrder < $currentOrder) {
-                        continue;
-                    }
-                }
-
-                if (!empty($updates)) {
+                if (! empty($updates)) {
                     $box->update($updates);
-                    app(\App\Services\TrackingCacheService::class)->forgetBox($box);
+                    app(TrackingCacheService::class)->forgetBox($box);
                 }
 
-                if ($request->filled('status')) {
-                    $isDelivered = $validated['status'] === BoxStatus::Delivered->value;
+                $currentStatusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
+                $targetStatus = $request->filled('status') ? $validated['status'] : $currentStatusVal;
+
+                if ($request->filled('status') || $request->filled('tracking_step_key')) {
+                    $this->assertTrackingStepCanBeApplied($box, $trackingStepKey);
                     $boxRepo->updateStatus(
                         $box,
-                        $validated['status'],
+                        $targetStatus,
                         ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
                         $userId,
-                        deliveryOverrideReason: $isDelivered ? 'Bulk updated by Admin' : null,
-                        bypassValidation: $isDelivered,
                         trackingStepKey: $trackingStepKey
                     );
                 }
+                app(TrackingCacheService::class)->forgetBox($box);
                 $updated++;
             } catch (\Exception $e) {
                 // skip invalid transitions if any
             }
         }
 
-        return redirect()->back()->with('success', "{$updated} boxes status updated successfully.");
+        return redirect($this->adminReturnUrl('admin.boxes.index'))->with('success', "{$updated} boxes status updated successfully.");
     }
 
-    public function bulkAssignToBatch(Request $request, BoxRepositoryInterface $boxRepo)
+    public function bulkAssignToBatch(Request $request, BoxRepositoryInterface $boxRepo, BatchService $batchService)
     {
         $validated = $request->validate([
             'ids' => 'required_without:select_all|array',
+            'ids.*' => 'integer|exists:boxes,id',
             'select_all' => 'nullable|boolean',
             'search' => 'nullable|string',
             'status' => 'nullable|string',
@@ -293,93 +275,172 @@ class BoxController extends Controller
             $boxes = Box::whereIn('id', $validated['ids'])->get();
         }
 
-        $targetBatchId = (int) $validated['batch_id'];
-        $batch = Batch::findOrFail($targetBatchId);
+        $batch = Batch::findOrFail($validated['batch_id']);
 
-        $failedBoxes = [];
         $eligibleBoxes = [];
+        $skippedReasons = [];
 
+        foreach ($boxes as $box) {
+            if ($box->booking->status === BookingStatus::Cancelled) {
+                $skippedReasons[] = "{$box->tracking_number} (Cancelled)";
+                continue;
+            }
+
+            if (in_array($box->booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
+                $skippedReasons[] = "{$box->tracking_number} (Booking Not Confirmed)";
+                continue;
+            }
+
+            if (!in_array($box->booking->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected])) {
+                $skippedReasons[] = "{$box->tracking_number} (Not Paid)";
+                continue;
+            }
+
+            if ($box->booking->needsDeclaration()) {
+                $skippedReasons[] = "{$box->tracking_number} (Missing Declaration)";
+                continue;
+            }
+
+            // Skip boxes that are already in this same batch
+            if ($box->batch_id === $batch->id) {
+                $skippedReasons[] = "{$box->tracking_number} (Already in this batch)";
+                continue;
+            }
+
+            $eligibleBoxes[] = $box;
+        }
+
+        if (empty($eligibleBoxes)) {
+            $msg = 'Cannot assign boxes to batch. None of the selected box(es) are eligible: '.implode(', ', $skippedReasons);
+
+            return redirect()->back()->with('error', $msg);
+        }
+
+        // For capacity check, only count boxes NOT already in a batch (transfers don't add net new boxes to the system)
+        $freshBoxes = array_filter($eligibleBoxes, fn ($box) => $box->batch_id === null);
+        $capacityError = $batchService->checkCapacity($batch, count($freshBoxes));
+        if ($capacityError) {
+            return redirect()->back()->with('error', $capacityError);
+        }
+
+        $userId = Auth::id();
+        $affectedBatchIds = [$batch->id];
+        $now = now();
+
+        // Status ordering: statuses below LoadedToContainer will be advanced
         $statusesBelowLoaded = [
             BoxStatus::Pending->value,
             BoxStatus::Collected->value,
             BoxStatus::ReceivedByWarehouse->value,
         ];
 
-        foreach ($boxes as $box) {
-            $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
-
-            if ($box->booking?->status === BookingStatus::Cancelled) {
-                $failedBoxes[] = "{$box->tracking_number} (Cancelled)";
-            } elseif (!in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)) {
-                $failedBoxes[] = "{$box->tracking_number} (Not Paid)";
-            } elseif ($box->booking?->needsDeclaration()) {
-                $failedBoxes[] = "{$box->tracking_number} (Missing Declaration)";
-            } elseif ($box->batch_id === $targetBatchId && !in_array($statusVal, $statusesBelowLoaded, true)) {
-                $failedBoxes[] = "{$box->tracking_number} (Already loaded in this Batch)";
-            } else {
-                $eligibleBoxes[] = $box;
-            }
-        }
-
-        if (count($eligibleBoxes) === 0) {
-            $msg = "Cannot assign boxes to batch. All selected boxes are ineligible: " . implode(', ', $failedBoxes);
-            return redirect()->back()->with('error', $msg);
-        }
-
-        $freshCount = 0;
-        $preservedCount = 0;
-        $userId = Auth::id();
+        // Separate boxes that need status advancement from those that keep their status
+        $advanceIds = [];
+        $keepStatusIds = [];
+        $trackingLogs = [];
 
         foreach ($eligibleBoxes as $box) {
-            try {
-                $statusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
-                $box->update(['batch_id' => $targetBatchId]);
+            $oldBatchId = $box->batch_id;
+            if ($oldBatchId && !in_array($oldBatchId, $affectedBatchIds, true)) {
+                $affectedBatchIds[] = $oldBatchId;
+            }
 
-                if (in_array($statusVal, $statusesBelowLoaded, true)) {
-                    $boxRepo->updateStatus(
-                        $box,
-                        BoxStatus::LoadedToContainer->value,
-                        "Assigned to batch: {$batch->batch_number}",
-                        $userId,
-                        bypassValidation: true,
-                        trackingStepKey: 'loading_container'
-                    );
-                    $freshCount++;
-                } else {
-                    // Preserved progress for boxes already at or beyond LoadedToContainer (transfers/reassignments)
-                    $latestUpdate = $box->updates()->latest('id')->first();
-                    $latestPhase = $latestUpdate?->tracking_phase?->value;
+            $currentStatus = $box->status instanceof BoxStatus ? $box->status->value : $box->status;
+            $isTransfer = $oldBatchId !== null;
+            $needsAdvance = in_array($currentStatus, $statusesBelowLoaded, true);
 
-                    BoxUpdate::create([
-                        'box_id' => $box->id,
-                        'status' => $statusVal,
-                        'tracking_step_key' => $box->tracking_step_key,
-                        'description' => "Transferred to batch: {$batch->batch_number}",
-                        'location' => 'In-Transit',
-                        'tracking_phase' => $latestPhase,
-                        'updated_by' => $userId,
-                    ]);
-
-                    app(TrackingCacheService::class)->forgetBox($box->refresh());
-                    $preservedCount++;
-                }
-            } catch (\Exception $e) {
-                $failedBoxes[] = "{$box->tracking_number} (" . $e->getMessage() . ")";
+            if ($needsAdvance) {
+                // Box is below LoadedToContainer — advance it
+                $advanceIds[] = $box->id;
+                $trackingLogs[] = [
+                    'box_id' => $box->id,
+                    'status' => BoxStatus::LoadedToContainer->value,
+                    'tracking_step_key' => null,
+                    'description' => ($isTransfer ? "Transferred" : "Assigned") . " to batch: {$batch->batch_number}",
+                    'location' => 'Warehouse',
+                    'tracking_phase' => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
+                    'updated_by' => $userId,
+                    'is_admin_override' => true,
+                    'steps_bypassed' => 0,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            } else {
+                // Box is already at or beyond LoadedToContainer — keep current status
+                $keepStatusIds[] = $box->id;
+                $trackingLogs[] = [
+                    'box_id' => $box->id,
+                    'status' => $currentStatus,
+                    'tracking_step_key' => null,
+                    'description' => ($isTransfer ? "Transferred" : "Assigned") . " to batch: {$batch->batch_number}",
+                    'location' => $isTransfer ? 'In-Transit' : 'Warehouse',
+                    'tracking_phase' => null,
+                    'updated_by' => $userId,
+                    'is_admin_override' => true,
+                    'steps_bypassed' => 0,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
             }
         }
 
-        $totalAssigned = $freshCount + $preservedCount;
-        $msg = "{$totalAssigned} " . ($totalAssigned === 1 ? 'box' : 'boxes') . " assigned to batch successfully.";
-        if ($preservedCount > 0) {
-            $msg .= " ({$preservedCount} with preserved shipping progress)";
+        $allEligibleIds = array_merge($advanceIds, $keepStatusIds);
+
+        DB::transaction(function () use ($allEligibleIds, $advanceIds, $batch, $trackingLogs) {
+            // Bulk update batch_id for ALL eligible boxes
+            Box::whereIn('id', $allEligibleIds)->update(['batch_id' => $batch->id]);
+
+            // Only advance status for boxes that are below LoadedToContainer
+            if (!empty($advanceIds)) {
+                Box::whereIn('id', $advanceIds)->update(['status' => BoxStatus::LoadedToContainer->value]);
+            }
+
+            // Batch-insert tracking logs
+            foreach (array_chunk($trackingLogs, 500) as $chunk) {
+                \App\Models\BoxUpdate::insert($chunk);
+            }
+        });
+
+        // Clear tracking cache for all affected boxes
+        $trackingCacheService = app(TrackingCacheService::class);
+        foreach ($eligibleBoxes as $box) {
+            $box->batch_id = $batch->id;
+            if (in_array($box->id, $advanceIds, true)) {
+                $box->status = BoxStatus::LoadedToContainer;
+            }
+            $trackingCacheService->forgetBox($box);
         }
 
-        if (count($failedBoxes) > 0) {
-            $msg .= " The following " . count($failedBoxes) . " box(es) were skipped: " . implode(', ', $failedBoxes);
-            return redirect()->back()->with('warning', $msg);
+        // Refresh counts on all affected batches (old + new)
+        foreach ($affectedBatchIds as $bId) {
+            $batchService->refreshAndEvaluateById($bId);
         }
 
-        return redirect()->back()->with('success', $msg);
+        if ($batch->status === BatchStatus::Open) {
+            $batchService->update($batch, ['status' => BatchStatus::Loading->value]);
+        }
+
+        $count = count($allEligibleIds);
+        $keepStatusCount = count($keepStatusIds);
+
+        if (count($skippedReasons) > 0 || $keepStatusCount > 0) {
+            $parts = ["{$count} box(es) assigned to batch {$batch->batch_number}."];
+
+            if ($keepStatusCount > 0) {
+                $parts[] = "{$keepStatusCount} box(es) already at or beyond 'Loaded to Container' — status preserved.";
+            }
+
+            if (count($skippedReasons) > 0) {
+                $skippedCount = count($skippedReasons);
+                $parts[] = "{$skippedCount} box(es) were ineligible and left unassigned: ".implode(', ', $skippedReasons);
+            }
+
+            $flashType = count($skippedReasons) > 0 ? 'warning' : 'success';
+
+            return redirect($this->adminReturnUrl('admin.boxes.index'))->with($flashType, implode(' ', $parts));
+        }
+
+        return redirect($this->adminReturnUrl('admin.boxes.index'))->with('success', "{$count} box(es) assigned to batch {$batch->batch_number} successfully.");
     }
 
     public function bulkDestroy(Request $request)
@@ -416,10 +477,11 @@ class BoxController extends Controller
         $message = "{$deleted} boxes deleted successfully.";
         if ($skipped > 0) {
             $message .= " {$skipped} boxes skipped because they are not pending or cancelled.";
-            return redirect()->back()->with('warning', $message);
+
+            return redirect($this->adminReturnUrl('admin.boxes.index'))->with('warning', $message);
         }
 
-        return redirect()->back()->with('success', $message);
+        return redirect($this->adminReturnUrl('admin.boxes.index'))->with('success', $message);
     }
 
     public function updateStatus(Request $request, Box $box, BoxRepositoryInterface $boxRepo)
@@ -434,22 +496,13 @@ class BoxController extends Controller
                     $fail("Invalid box status: {$value}");
                 }
             }],
-            'tracking_step_key' => [
-                'nullable',
-                'string',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        $stepService = app(TrackingStepService::class);
-                        if (! $stepService->isValidStepKey($value)) {
-                            $fail("The selected tracking step key [{$value}] is invalid.");
-                        }
-                    }
-                },
-            ],
+            'tracking_step_key' => 'nullable|string',
             'courier_notes' => 'nullable|string|max:2000',
             'admin_delivery_override_reason' => 'nullable|string|min:10|max:1000',
             'delivery_proof' => ['nullable', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:5120'],
             'update_eta' => 'nullable|boolean',
+            'update_eta_date' => 'nullable|boolean',
+            'update_eta_message' => 'nullable|boolean',
             'eta_date' => 'nullable|date',
             'eta_message' => 'nullable|string|max:255',
             'update_estimate_delivery' => 'nullable|boolean',
@@ -460,16 +513,7 @@ class BoxController extends Controller
         $newStatus = $validated['status'];
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         $overrideReason = $validated['admin_delivery_override_reason'] ?? null;
-
-        $stepService = app(TrackingStepService::class);
-        if ($trackingStepKey) {
-            $newOrder = $stepService->getStepOrder($trackingStepKey);
-            $currentOrder = $this->resolveBoxJourneyOrder($box, $stepService);
-
-            if ($currentOrder !== null && $newOrder !== null && $newOrder < $currentOrder && blank($overrideReason)) {
-                return redirect()->back()->withInput()->with('error', "Cannot select a tracking step that regresses journey progression (from step order {$currentOrder} to {$newOrder}).");
-            }
-        }
+        $this->assertTrackingStepCanBeApplied($box, $trackingStepKey);
 
         $isDelivered = $newStatus === BoxStatus::Delivered->value;
         $isCollected = $newStatus === BoxStatus::Collected->value;
@@ -488,18 +532,22 @@ class BoxController extends Controller
         }
 
         $updates = [];
-        if ($request->boolean('update_eta')) {
+        if ($request->boolean('update_eta') || $request->boolean('update_eta_date') || ($request->has('eta_date') && $request->filled('eta_date'))) {
             $updates['eta_date'] = $validated['eta_date'] ?? null;
+        }
+        if ($request->boolean('update_eta') || $request->boolean('update_eta_message') || ($request->has('eta_message') && $request->filled('eta_message'))) {
             $updates['eta_message'] = $validated['eta_message'] ?? null;
         }
-        if ($request->boolean('update_estimate_delivery')) {
+        if ($request->boolean('update_estimate_delivery') || ($request->has('estimate_delivery_date') && $request->filled('estimate_delivery_date'))) {
             $updates['estimate_delivery_date'] = $validated['estimate_delivery_date'] ?? null;
+        }
+        if ($request->boolean('update_estimate_delivery') || ($request->has('estimate_delivery_message') && $request->filled('estimate_delivery_message'))) {
             $updates['estimate_delivery_message'] = $validated['estimate_delivery_message'] ?? null;
         }
 
-        if (!empty($updates)) {
+        if (! empty($updates)) {
             $box->update($updates);
-            app(\App\Services\TrackingCacheService::class)->forgetBox($box);
+            app(TrackingCacheService::class)->forgetBox($box);
         }
 
         try {
@@ -511,7 +559,6 @@ class BoxController extends Controller
                 deliveryProof: $isDelivered ? $request->file('delivery_proof') : null,
                 deliveryOverrideReason: $overrideReason,
                 pickupProof: $isCollected ? $request->file('delivery_proof') : null,
-                bypassValidation: !blank($overrideReason),
                 trackingStepKey: $trackingStepKey
             );
         } catch (\RuntimeException $e) {
@@ -528,7 +575,7 @@ class BoxController extends Controller
         $status = $box->status instanceof BoxStatus ? $box->status->value : $box->status;
         $canDelete = in_array($status, [BoxStatus::Pending->value, BoxStatus::Cancelled->value], true);
 
-        if (Auth::user()?->role === Role::SuperAdmin) {
+        if (app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
             $canDelete = true;
         }
 
@@ -538,12 +585,12 @@ class BoxController extends Controller
 
         $box->delete();
 
-        return redirect()->back()->with('success', 'Box archived successfully.');
+        return redirect($this->adminReturnUrl('admin.boxes.index'))->with('success', 'Box archived successfully.');
     }
 
     public function restore($id)
     {
-        if (Auth::user()?->role !== Role::SuperAdmin) {
+        if (! app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
             abort(403, 'Unauthorized');
         }
 
@@ -551,6 +598,56 @@ class BoxController extends Controller
         $box->restore();
 
         return redirect()->back()->with('success', 'Box restored successfully.');
+    }
+
+    public function exportExcel(Request $request)
+    {
+        $query = Box::with(['booking.sender', 'recipient', 'boxType', 'batch']);
+
+        if ($request->filled('ids')) {
+            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
+            $query->whereIn('id', array_filter($ids));
+        } else {
+            $query = $this->applyFilters($query, $request);
+        }
+
+        $boxes = $query->get();
+
+        app(AuditLogService::class)->logExportEvent('excel', 'Boxes list exported as Excel (.xlsx)', [
+            'count' => $boxes->count(),
+        ]);
+
+        return Excel::download(new BoxesExport($boxes), 'boxes_export_'.now()->format('Ymd_His').'.xlsx');
+    }
+
+    public function downloadImportTemplate()
+    {
+        return Excel::download(new BoxesExport(null, true), 'boxes_import_template.xlsx');
+    }
+
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $import = new BoxesImport;
+        Excel::import($import, $request->file('file'));
+
+        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
+        if (! empty($import->failures)) {
+            $failedCount = count($import->failures);
+            $message .= " {$failedCount} rows had errors and were skipped.";
+        }
+
+        return back()->with([
+            'success' => $message,
+            'import_result' => [
+                'created' => $import->createdCount,
+                'updated' => $import->updatedCount,
+                'failures' => $import->failures,
+            ],
+        ]);
     }
 
     private function applyFilters($query, Request $request)
@@ -578,14 +675,6 @@ class BoxController extends Controller
             $query->where('status', $request->status);
         }
 
-        if ($request->filled('batch_id')) {
-            if ($request->batch_id === 'unassigned') {
-                $query->whereNull('batch_id');
-            } else {
-                $query->where('batch_id', $request->batch_id);
-            }
-        }
-
         if ($request->filled('area_id')) {
             $query->whereHas('recipient', function ($rq) use ($request) {
                 $rq->where('area_id', $request->area_id);
@@ -594,12 +683,22 @@ class BoxController extends Controller
 
         if ($request->filled('payment_status')) {
             $query->whereHas('booking', function ($bq) use ($request) {
-                if ($request->payment_status === 'paid') {
-                    $bq->whereIn('payment_status', ['paid', 'cash_collected']);
-                } elseif ($request->payment_status === 'unpaid') {
-                    $bq->whereIn('payment_status', ['pending', 'cash_on_pickup']);
+                if ($request->payment_status === 'unpaid') {
+                    $bq->whereIn('payment_status', [
+                        PaymentStatus::Pending->value,
+                        PaymentStatus::CashOnPickup->value,
+                        PaymentStatus::BalancePending->value,
+                    ]);
                 } elseif ($request->payment_status === 'partial') {
-                    $bq->whereIn('payment_status', ['partially_paid', 'balance_pending']);
+                    $bq->whereIn('payment_status', [
+                        PaymentStatus::PartiallyPaid->value,
+                        PaymentStatus::BalancePending->value,
+                    ]);
+                } elseif ($request->payment_status === 'paid') {
+                    $bq->whereIn('payment_status', [
+                        PaymentStatus::Paid->value,
+                        PaymentStatus::CashCollected->value,
+                    ]);
                 } else {
                     $bq->where('payment_status', $request->payment_status);
                 }
@@ -610,10 +709,23 @@ class BoxController extends Controller
             $query->whereHas('booking', function ($bq) use ($request) {
                 if ($request->declaration_form_status === 'submitted') {
                     $bq->whereIn('declaration_form_status', ['submitted_online', 'physical_copy_received']);
+                } elseif ($request->declaration_form_status === 'missing') {
+                    $bq->where(function ($q) {
+                        $q->where('declaration_form_status', 'missing')
+                            ->orWhereNull('declaration_form_status');
+                    })->whereNull('declaration_form_path');
                 } else {
                     $bq->where('declaration_form_status', $request->declaration_form_status);
                 }
             });
+        }
+
+        if ($request->filled('batch_id')) {
+            if ($request->batch_id === 'unassigned') {
+                $query->whereNull('batch_id');
+            } else {
+                $query->where('batch_id', $request->batch_id);
+            }
         }
 
         $sortableColumns = ['tracking_number', 'serial_number', 'status', 'created_at'];
@@ -628,90 +740,31 @@ class BoxController extends Controller
         return blank($box->delivery_proof_path);
     }
 
-    /**
-     * Resolve the current journey step order of a box.
-     */
-    protected function resolveBoxJourneyOrder(Box $box, TrackingStepService $stepService): ?int
+    private function assertTrackingStepCanBeApplied(Box $box, ?string $trackingStepKey): void
     {
-        // 1. From current tracking_step_key
-        if ($box->tracking_step_key) {
-            $order = $stepService->getStepOrder($box->tracking_step_key);
-            if ($order !== null) {
-                return $order;
-            }
+        if (blank($trackingStepKey)) {
+            return;
         }
 
-        // 2. From latest update's tracking_step_key
-        $latestUpdate = $box->updates()->latest('id')->first();
-        if ($latestUpdate?->tracking_step_key) {
-            $order = $stepService->getStepOrder($latestUpdate->tracking_step_key);
-            if ($order !== null) {
-                return $order;
-            }
+        $service = app(TrackingStepService::class);
+        $steps = $service->getSteps();
+        $selectedStep = collect($steps)->firstWhere('key', $trackingStepKey);
+
+        if (! is_array($selectedStep)) {
+            throw ValidationException::withMessages([
+                'tracking_step_key' => 'The selected tracking step is not configured.',
+            ]);
         }
 
-        // 3. From current lifecycle status
-        $statusValue = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
-        $allSteps = $stepService->getSteps();
-        $matchingStep = collect($allSteps)->first(fn ($s) => ($s['system_status'] ?? '') === $statusValue);
+        $currentKey = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key;
+        $currentStep = $currentKey
+            ? collect($steps)->firstWhere('key', $currentKey)
+            : $service->getStepBySystemStatus($box->status instanceof BoxStatus ? $box->status->value : (string) $box->status);
 
-        return $matchingStep ? (int) $matchingStep['order'] : null;
-    }
-
-
-
-    public function exportExcel(Request $request)
-    {
-        $query = Box::with(['booking.sender', 'recipient', 'boxType', 'batch']);
-
-        if ($request->filled('ids')) {
-            $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
-            $query->whereIn('id', array_filter($ids));
-        } else {
-            $query = $this->applyFilters($query, $request);
+        if (is_array($currentStep) && (int) $selectedStep['order'] < (int) $currentStep['order']) {
+            throw ValidationException::withMessages([
+                'tracking_step_key' => 'A tracking step cannot move backward from the box\'s current journey position.',
+            ]);
         }
-
-        $boxes = $query->get();
-
-        app(AuditLogService::class)->logExportEvent('excel', 'Boxes list exported as Excel (.xlsx)', [
-            'count' => $boxes->count(),
-        ]);
-
-        return Excel::download(new BoxesExport($boxes), 'boxes_export_'.now()->format('Ymd_His').'.xlsx');
     }
-
-
-
-    public function downloadImportTemplate()
-    {
-        return Excel::download(new BoxesExport(null, true), 'boxes_import_template.xlsx');
-    }
-
-
-
-    public function importExcel(Request $request)
-    {
-        $request->validate([
-            'file' => 'required|file|mimes:xlsx,xls|max:10240',
-        ]);
-
-        $import = new BoxesImport;
-        Excel::import($import, $request->file('file'));
-
-        $message = "Import completed: {$import->createdCount} created, {$import->updatedCount} updated.";
-        if (! empty($import->failures)) {
-            $failedCount = count($import->failures);
-            $message .= " {$failedCount} rows had errors and were skipped.";
-        }
-
-        return back()->with([
-            'success' => $message,
-            'import_result' => [
-                'created' => $import->createdCount,
-                'updated' => $import->updatedCount,
-                'failures' => $import->failures,
-            ],
-        ]);
-    }
-
 }

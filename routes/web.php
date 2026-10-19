@@ -268,6 +268,7 @@ Route::get('/track/declaration/{booking}/view', [TrackingController::class, 'vie
 Route::post('/track/declaration', [TrackingController::class, 'saveDeclarationData'])->middleware('throttle:forms')->name('track.declaration.save');
 Route::post('/track/upload-declaration', [TrackingController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('track.upload-declaration');
 Route::post('/track/declaration/resend-email', [TrackingController::class, 'resendDeclarationEmail'])->middleware('throttle:declaration-resend')->name('track.declaration.resend-email');
+Route::post('/track/declaration/{booking}/resend-email', [TrackingController::class, 'resendDeclarationEmail'])->middleware('throttle:declaration-resend');
 Route::post('/track/declaration/{booking}/verify-email', [TrackingController::class, 'verifyEmailToAccessDeclaration'])->middleware('throttle:forms')->name('track.declaration.verify-email');
 
 Route::middleware(['auth', 'verified'])->group(function () {
@@ -374,6 +375,7 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::post('runsheets/{runsheet}/reorder', [RunsheetController::class, 'reorder'])->middleware('throttle:admin-mutations')->name('runsheets.reorder');
 
         Route::post('batches/bulk-update-status', [BatchController::class, 'bulkUpdateStatus'])->middleware('throttle:admin-mutations')->name('batches.bulk-update-status');
+        Route::post('batches/bulk-update-tracking-phase', [BatchController::class, 'bulkUpdateBatchesTrackingPhase'])->middleware('throttle:admin-mutations')->name('batches.bulkUpdateBatchesTrackingPhase');
         Route::delete('batches/bulk-destroy', [BatchController::class, 'bulkDestroy'])->middleware('throttle:admin-mutations')->name('batches.bulk-destroy');
         Route::get('batches/check-unique', [BatchController::class, 'checkUnique'])->name('batches.check-unique');
         Route::resource('batches', BatchController::class);

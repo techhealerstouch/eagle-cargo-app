@@ -91,7 +91,7 @@ class BatchLifecycleNotification extends Notification implements ShouldQueue
             BatchStatus::ReadyToClose => 'Batch Ready to Close',
             BatchStatus::Sailed => 'Batch Sailed',
             BatchStatus::Arrived => 'Batch Arrived',
-            BatchStatus::Delivered => 'Batch Delivered',
+            BatchStatus::ReceivedAtWarehouse => 'Batch Received at Warehouse',
             default => 'Batch Status Updated',
         };
     }

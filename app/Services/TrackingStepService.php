@@ -261,7 +261,7 @@ class TrackingStepService
                 'order' => 9,
                 'icon' => 'warehouse',
                 'allowed_roles' => ['warehouse', 'admin', 'super_admin'],
-                'system_status' => 'arrived',
+                'system_status' => 'unloaded_manila',
                 'description' => 'Box received at Manila regional warehouse for local hub distribution.',
                 'is_public' => true,
                 'notify_sms' => false,

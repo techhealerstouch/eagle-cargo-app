@@ -387,6 +387,10 @@ export default function BoxesIndex({
                                 <CheckCircle className="size-3.5" />
                                 Delivered
                             </TabsTrigger>
+                            <TabsTrigger value="cancelled" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
+                                <Ban className="size-3.5" />
+                                Cancelled
+                            </TabsTrigger>
                             {auth?.user?.role === 'super_admin' && (
                                 <TabsTrigger value="trashed" className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-all data-[state=active]:bg-white data-[state=active]:text-zinc-900 data-[state=active]:shadow-2xs gap-1.5">
                                     <AlertTriangle className="size-3.5" />

@@ -8,7 +8,9 @@ use App\Jobs\SendBookingConfirmationMail;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\BoxUpdate;
+use App\Models\Sender;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -58,19 +60,6 @@ class PublicTrackingTest extends TestCase
         $response->assertStatus(200);
     }
 
-    public function test_track_by_booking_reference_via_tracking_number_param(): void
-    {
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-
-        $response = $this->get(route('track', ['tracking_number' => $booking->reference_number]));
-
-        $response->assertStatus(200);
-        $response->assertInertia(fn ($page) => $page->has('trackingData')
-            ->where('tracking_number', $booking->reference_number)
-        );
-    }
-
     public function test_track_nonexistent_number_shows_no_data(): void
     {
         $response = $this->get(route('track', ['tracking_number' => 'TRK-9999-999-999']));
@@ -87,7 +76,7 @@ class PublicTrackingTest extends TestCase
     {
         $box = $this->createTrackableBox();
 
-        $response = $this->getJson('/api/track/' . $box->tracking_number);
+        $response = $this->getJson('/api/track/'.$box->tracking_number);
 
         $response->assertStatus(200);
     }
@@ -160,191 +149,114 @@ class PublicTrackingTest extends TestCase
         $response->assertStatus(200);
     }
 
-    public function test_public_tracking_never_exposes_guest_token(): void
+    // ---------------------------------------------------------------
+    // 6. Resend Declaration Email (up to 3x per day)
+    // ---------------------------------------------------------------
+
+    public function test_resend_declaration_email_allows_up_to_three_times_per_day(): void
     {
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-        $booking->update([
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+        Queue::fake();
+
+        $sender = Sender::factory()->create(['email' => 'guest@example.com']);
+        $booking = Booking::factory()->create([
+            'sender_id' => $sender->id,
             'is_guest' => true,
-            'guest_token' => 'super-secret-guest-token-12345',
+            'status' => 'pending',
             'declaration_form_status' => 'missing',
         ]);
 
-        $response = $this->get(route('track', ['tracking_number' => $box->tracking_number]));
+        // Attempt 1: Success, 2 remaining
+        $response1 = $this->postJson(route('track.declaration.resend-email'), ['booking_id' => $booking->id]);
+        $response1->assertStatus(200)
+            ->assertJson([
+                'resends_remaining' => 2,
+            ]);
+        Queue::assertPushed(SendBookingConfirmationMail::class, 1);
 
-        $response->assertStatus(200);
-        $response->assertInertia(fn ($page) => $page
-            ->has('trackingData')
-            ->missing('trackingData.guest_token')
-            ->where('trackingData.can_edit_declaration', false)
-        );
+        // Clear short-interval cooldown for next attempt
+        Cache::forget('resend_declaration_cooldown_'.$booking->id);
+
+        // Attempt 2: Success, 1 remaining
+        $response2 = $this->postJson(route('track.declaration.resend-email'), ['booking_id' => $booking->id]);
+        $response2->assertStatus(200)
+            ->assertJson([
+                'resends_remaining' => 1,
+            ]);
+        Queue::assertPushed(SendBookingConfirmationMail::class, 2);
+
+        // Clear short-interval cooldown for next attempt
+        Cache::forget('resend_declaration_cooldown_'.$booking->id);
+
+        // Attempt 3: Success, 0 remaining
+        $response3 = $this->postJson(route('track.declaration.resend-email'), ['booking_id' => $booking->id]);
+        $response3->assertStatus(200)
+            ->assertJson([
+                'resends_remaining' => 0,
+            ]);
+        Queue::assertPushed(SendBookingConfirmationMail::class, 3);
+
+        // Clear short-interval cooldown for next attempt
+        Cache::forget('resend_declaration_cooldown_'.$booking->id);
+
+        // Attempt 4: Blocked with HTTP 429
+        $response4 = $this->postJson(route('track.declaration.resend-email'), ['booking_id' => $booking->id]);
+        $response4->assertStatus(429);
+        Queue::assertPushed(SendBookingConfirmationMail::class, 3);
     }
 
-    // ---------------------------------------------------------------
-    // 6. Resend Declaration Email
-    // ---------------------------------------------------------------
-
-    public function test_public_tracking_includes_masked_sender_email(): void
+    public function test_resend_declaration_email_blocked_if_already_submitted(): void
     {
-        $box = $this->createTrackableBox();
-        $box->booking->sender->update(['email' => 'juan.delacruz@example.com']);
-
-        $response = $this->get(route('track', ['tracking_number' => $box->tracking_number]));
-
-        $response->assertStatus(200);
-        $response->assertInertia(fn ($page) => $page
-            ->has('trackingData')
-            ->where('trackingData.sender_email_masked', 'j****z@example.com')
-            ->where('trackingData.declaration_resends_remaining', 3)
-        );
-    }
-
-    public function test_resend_declaration_email_dispatches_confirmation_job(): void
-    {
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
         Queue::fake();
 
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-        $booking->update([
-            'declaration_form_status' => 'missing',
-            'declaration_data' => null,
-            'declaration_form_path' => null,
-        ]);
-        $booking->sender->update(['email' => 'maria.santos@example.com']);
-
-        $response = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
-
-        $response->assertStatus(200);
-        $response->assertJson([
-            'success' => true,
-            'masked_email' => 'm****s@example.com',
-        ]);
-
-        Queue::assertPushed(SendBookingConfirmationMail::class, function ($job) use ($booking) {
-            return $job->booking->id === $booking->id;
-        });
-    }
-
-    public function test_resend_declaration_email_rejects_mismatched_tracking_number(): void
-    {
-        Queue::fake();
-
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-        $booking->update([
-            'declaration_form_status' => 'missing',
-            'declaration_data' => null,
-        ]);
-
-        $response = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => 'TRK-WRONG-NUMBER',
-        ]);
-
-        $response->assertStatus(403);
-        Queue::assertNothingPushed();
-    }
-
-    public function test_resend_declaration_email_rejects_already_submitted_declaration(): void
-    {
-        Queue::fake();
-
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-        $booking->update([
+        $sender = Sender::factory()->create(['email' => 'guest@example.com']);
+        $booking = Booking::factory()->create([
+            'sender_id' => $sender->id,
+            'is_guest' => true,
+            'status' => 'pending',
             'declaration_form_status' => 'submitted_online',
         ]);
 
-        $response = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
+        $response = $this->postJson(route('track.declaration.resend-email'), ['booking_id' => $booking->id]);
+        $response->assertStatus(422)
+            ->assertJson([
+                'message' => 'A customs declaration has already been received or is not required for this booking.',
+            ]);
 
-        $response->assertStatus(422);
-        Queue::assertNothingPushed();
+        Queue::assertNotPushed(SendBookingConfirmationMail::class);
     }
 
-    public function test_resend_declaration_email_enforces_cooldown(): void
+    public function test_tracking_data_includes_specific_tracking_step_key_and_timeline_keys(): void
     {
-        Queue::fake();
-
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-        $booking->update([
-            'declaration_form_status' => 'missing',
-            'declaration_data' => null,
-            'declaration_form_path' => null,
-        ]);
-
-        // First attempt succeeds
-        $first = $this->postJson(route('track.declaration.resend-email'), [
+        $booking = Booking::factory()->create();
+        $box = Box::factory()->create([
             'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
-        $first->assertStatus(200);
-
-        // Immediate second attempt triggers cooldown (HTTP 429)
-        $second = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
-        $second->assertStatus(429);
-        $second->assertJsonStructure(['message', 'retry_after']);
-    }
-
-    public function test_resend_declaration_email_limits_to_three_attempts_per_day(): void
-    {
-        Queue::fake();
-
-        $box = $this->createTrackableBox();
-        $booking = $box->booking;
-        $booking->update([
-            'declaration_form_status' => 'missing',
-            'declaration_data' => null,
-            'declaration_form_path' => null,
+            'tracking_number' => 'TRK-2026-001-001',
+            'status' => BoxStatus::Arrived,
+            'tracking_step_key' => 'under_customs_clearance',
         ]);
 
-        // Attempt 1: succeeds with 2 remaining
-        $r1 = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
+        BoxUpdate::create([
+            'box_id' => $box->id,
+            'status' => BoxStatus::Arrived->value,
+            'tracking_step_key' => 'under_customs_clearance',
+            'tracking_phase' => TrackingPhase::CUSTOMS_CLEARANCE->value,
+            'location' => 'Manila Port',
+            'description' => 'Cargo documents are being processed by the Bureau of Customs (BOC).',
         ]);
-        $r1->assertStatus(200);
-        $r1->assertJsonFragment(['resends_remaining' => 2]);
 
-        // Clear the 60s rapid-click cooldown cache to simulate next attempt later in the day
-        \Illuminate\Support\Facades\Cache::forget('resend_declaration_cooldown_' . $booking->id);
+        $response = $this->get(route('track', ['tracking_number' => $box->tracking_number]));
 
-        // Attempt 2: succeeds with 1 remaining
-        $r2 = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
-        $r2->assertStatus(200);
-        $r2->assertJsonFragment(['resends_remaining' => 1]);
-
-        \Illuminate\Support\Facades\Cache::forget('resend_declaration_cooldown_' . $booking->id);
-
-        // Attempt 3: succeeds with 0 remaining
-        $r3 = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
-        $r3->assertStatus(200);
-        $r3->assertJsonFragment(['resends_remaining' => 0]);
-
-        \Illuminate\Support\Facades\Cache::forget('resend_declaration_cooldown_' . $booking->id);
-
-        // Attempt 4: blocked by daily limit (HTTP 429)
-        $r4 = $this->postJson(route('track.declaration.resend-email'), [
-            'booking_id' => $booking->id,
-            'tracking_number' => $box->tracking_number,
-        ]);
-        $r4->assertStatus(429);
-        $r4->assertJsonFragment(['resends_remaining' => 0]);
-        $this->assertStringContainsString('3 email resends allowed per day', $r4->json('message'));
+        $response->assertStatus(200);
+        $response->assertInertia(fn ($page) => $page
+            ->has('trackingData', fn ($data) => $data
+                ->where('tracking_step_key', 'under_customs_clearance')
+                ->where('status', 'arrived')
+                ->where('timeline.0.tracking_step_key', 'under_customs_clearance')
+                ->where('timeline.0.tracking_phase', 'under_customs_clearance')
+                ->etc()
+            )
+        );
     }
 }

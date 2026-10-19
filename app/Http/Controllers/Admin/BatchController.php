@@ -10,6 +10,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\TrackingPhase;
 use App\Http\Controllers\Controller;
+use App\Services\DeveloperAccess;
 use App\Http\Requests\Admin\StoreBatchRequest;
 use App\Http\Resources\Admin\BatchResource;
 use App\Models\Batch;
@@ -18,7 +19,6 @@ use App\Models\BoxUpdate;
 use App\Services\BatchService;
 use App\Services\TrackingStepService;
 use BackedEnum;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -89,12 +89,12 @@ class BatchController extends Controller
     {
         $batchService->create($request->validated());
 
-        return redirect()->route('admin.batches.index')->with('success', 'Batch created successfully.');
+        return redirect($this->adminReturnUrl('admin.batches.index'))->with('success', 'Batch created successfully.');
     }
 
     public function show(Batch $batch, TrackingStepService $trackingStepService)
     {
-        if (!$batch->is_read) {
+        if (! $batch->is_read) {
             $batch->update(['is_read' => true]);
         }
 
@@ -108,41 +108,67 @@ class BatchController extends Controller
         ]);
     }
 
-    public function edit(Batch $batch)
+    public function edit(Batch $batch, TrackingStepService $trackingStepService)
     {
+        $batch->load(['boxes']);
+        $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
+
         return Inertia::render('admin/batches/edit', [
-            'batch' => $batch,
+            'batch' => new BatchResource($batch),
+            'trackingPhases' => $this->trackingPhaseOptionsForUser($trackingSteps, request()->user()),
         ]);
     }
 
-    public function update(StoreBatchRequest $request, Batch $batch, BatchService $batchService): RedirectResponse
-    {
+    public function update(
+        StoreBatchRequest $request,
+        Batch $batch,
+        BatchService $batchService,
+        TrackingStepService $trackingStepService,
+    ): RedirectResponse {
+        $validated = $request->validated();
+        $trackingPhase = $validated['tracking_phase'] ?? null;
+        $trackingDescription = $validated['tracking_description'] ?? null;
+        unset($validated['tracking_phase'], $validated['tracking_description']);
+
         try {
-            $updatedBatch = $batchService->update($batch, $request->validated());
+            DB::transaction(function () use ($batch, $validated, $trackingPhase, $trackingDescription, $batchService, $trackingStepService, $request) {
+                $batchService->update($batch, $validated);
 
-            $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.batches.index') ?? session('admin_return_url') ?? route('admin.batches.index');
+                if (! empty($trackingPhase)) {
+                    $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
+                    $trackingStep = $trackingSteps->firstWhere('key', $trackingPhase);
 
-            $requestedStatus = $request->validated('status');
-            if ($requestedStatus === BatchStatus::ReadyToClose->value && $updatedBatch->status === BatchStatus::Loading) {
-                return redirect($returnUrl)->with('warning', 'Batch updated, but status reverted to Loading because manifest thresholds (capacity/cutoff) were not met.');
-            }
-
+                    if ($trackingPhase !== TrackingPhase::DELIVERED->value && $this->userCanApplyTrackingStep($request->user(), $trackingStep)) {
+                        $batchService->bulkUpdateTrackingPhase(
+                            $batch,
+                            $trackingPhase,
+                            $request->user()?->id,
+                            $trackingDescription,
+                            $trackingStep['system_status'] ?? null,
+                        );
+                    }
+                }
+            });
         } catch (\InvalidArgumentException $exception) {
             return back()->withErrors(['status' => $exception->getMessage()]);
         }
 
-        return redirect($returnUrl)->with('success', 'Batch updated successfully.');
+        return redirect($this->adminReturnUrl('admin.batches.index'))->with('success', 'Batch updated successfully.');
     }
 
-    public function confirmManifest(Batch $batch, BatchService $batchService): RedirectResponse
+    public function confirmManifest(Request $request, Batch $batch, BatchService $batchService): RedirectResponse
     {
+        $validated = $request->validate([
+            'eta_at' => 'nullable|date',
+        ]);
+
         try {
-            $sailedBatch = $batchService->confirmManifest($batch);
+            $sailedBatch = $batchService->confirmManifest($batch, $validated['eta_at'] ?? null);
         } catch (\InvalidArgumentException $exception) {
             return back()->withErrors(['status' => $exception->getMessage()]);
         }
 
-        return redirect()->route('admin.batches.index')->with(
+        return redirect($this->adminReturnUrl('admin.batches.index'))->with(
             'success',
             sprintf('Batch %s has sailed.', $sailedBatch->batch_number),
         );
@@ -162,36 +188,25 @@ class BatchController extends Controller
         );
     }
 
-    public function reopen(Batch $batch, BatchService $batchService): RedirectResponse
-    {
-        try {
-            $reopenedBatch = $batchService->update($batch, ['status' => BatchStatus::Open->value]);
-        } catch (\InvalidArgumentException $exception) {
-            return back()->withErrors(['status' => $exception->getMessage()]);
-        }
-
-        return back()->with(
-            'success',
-            sprintf('Batch %s has been reopened to %s status.', $reopenedBatch->batch_number, $reopenedBatch->status->label()),
-        );
-    }
-
     /**
      * Search for boxes available to load into this batch.
      */
     public function availableBoxes(Request $request, Batch $batch)
     {
         $query = Box::whereIn('status', [
-            BoxStatus::Pending,
-            BoxStatus::Collected,
-            BoxStatus::ReceivedByWarehouse,
-            BoxStatus::Arrived
-        ])
-            ->where(function($q) use ($batch) {
+                BoxStatus::Pending,
+                BoxStatus::Collected,
+                BoxStatus::ReceivedByWarehouse,
+                BoxStatus::Arrived,
+            ])
+            ->where(function ($q) use ($batch) {
                 $q->whereNull('batch_id')
-                  ->orWhere('batch_id', '!=', $batch->id);
+                    ->orWhere('batch_id', '!=', $batch->id);
             })
-            ->with(['booking.sender', 'booking.invoice', 'recipient', 'boxType']);
+            ->whereHas('booking', function ($bq) {
+                $bq->whereNotIn('status', [BookingStatus::Cancelled, BookingStatus::Pending, BookingStatus::Draft]);
+            })
+            ->with(['booking.sender', 'booking.invoice', 'recipient', 'boxType', 'batch']);
 
         if ($request->filled('search')) {
             $search = $request->search;
@@ -248,15 +263,15 @@ class BatchController extends Controller
         }
 
         $boxes = Box::where(function ($q) use ($boxIds, $trackingNumbers) {
-            if (!empty($boxIds)) {
+            if (! empty($boxIds)) {
                 $q->whereIn('id', $boxIds);
             }
-            if (!empty($trackingNumbers)) {
+            if (! empty($trackingNumbers)) {
                 $q->orWhereIn('tracking_number', $trackingNumbers);
             }
         })->get();
 
-        // Hybrid capacity check: check if adding these boxes would exceed capacity
+        // Hybrid capacity check: warn if adding these boxes would exceed capacity, but do not block
         $capacityWarning = $batchService->checkCapacity($batch, count($boxes));
 
         $loaded = 0;
@@ -264,10 +279,10 @@ class BatchController extends Controller
         $skippedReasons = [];
 
         // Identify missing tracking numbers
-        if (!empty($trackingNumbers)) {
+        if (! empty($trackingNumbers)) {
             $foundTrackingNumbers = $boxes->pluck('tracking_number')->toArray();
             foreach ($trackingNumbers as $tn) {
-                if (!in_array($tn, $foundTrackingNumbers)) {
+                if (! in_array($tn, $foundTrackingNumbers)) {
                     $skipped++;
                     $skippedReasons[] = "{$tn}: Tracking number not found";
                 }
@@ -291,26 +306,28 @@ class BatchController extends Controller
                     continue;
                 }
 
-                if ($box->booking->status === BookingStatus::Cancelled) {
+                if (in_array($box->booking->status, [BookingStatus::Cancelled, BookingStatus::Pending, BookingStatus::Draft])) {
                     $skipped++;
-                    $skippedReasons[] = "{$box->tracking_number}: booking is cancelled";
+                    $skippedReasons[] = "{$box->tracking_number}: booking is {$box->booking->status->value} (must be confirmed)";
+
                     continue;
                 }
 
-                $isPaid = $box->booking->payment_status === PaymentStatus::Paid 
-                    || $box->booking->payment_status === PaymentStatus::CashCollected 
-                    || $box->booking->payment_method === 'cash_on_pickup'
-                    || $box->booking->invoice?->status === InvoiceStatus::Paid;
+                $isPaid = $box->booking->payment_status === PaymentStatus::Paid
+                    || $box->booking->payment_status === PaymentStatus::CashCollected
+                    || ($box->booking->invoice && $box->booking->invoice->status === InvoiceStatus::Paid);
 
-                if (!$isPaid) {
+                if (! $isPaid) {
                     $skipped++;
-                    $skippedReasons[] = "{$box->tracking_number}: payment is not paid or cash on pickup";
+                    $skippedReasons[] = "{$box->tracking_number}: payment is not settled";
+
                     continue;
                 }
 
                 if ($box->booking->needsDeclaration()) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: customs declaration is missing";
+
                     continue;
                 }
 
@@ -318,12 +335,14 @@ class BatchController extends Controller
                 if (! $invoice || $invoice->status === InvoiceStatus::Voided) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: no valid invoice generated";
+
                     continue;
                 }
 
                 if (! $box->recipient_id) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: no recipient assigned";
+
                     continue;
                 }
 
@@ -331,24 +350,28 @@ class BatchController extends Controller
                 if (! $recipient->city || ! $recipient->province) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: incomplete recipient address";
+
                     continue;
                 }
 
                 if (! $recipient->phone_number) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: missing recipient phone number";
+
                     continue;
                 }
 
                 if ($box->price_charged === null || (float) $box->price_charged <= 0) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: missing or zero price";
+
                     continue;
                 }
 
                 if ($recipient->sender_id !== $box->booking->sender_id) {
                     $skipped++;
                     $skippedReasons[] = "{$box->tracking_number}: recipient does not belong to booking sender";
+
                     continue;
                 }
 
@@ -405,9 +428,6 @@ class BatchController extends Controller
         BatchService $batchService,
         TrackingStepService $trackingStepService,
     ): RedirectResponse {
-        if (in_array($batch->status, [\App\Enums\BatchStatus::Open, \App\Enums\BatchStatus::Loading], true)) {
-            return back()->with('error', 'Tracking phase cannot be updated for batches that are still Open or Loading.');
-        }
         $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
 
         $validated = $request->validate([
@@ -427,6 +447,10 @@ class BatchController extends Controller
 
         if (! $this->userCanApplyTrackingStep($request->user(), $trackingStep)) {
             abort(403, 'Unauthorized tracking phase.');
+        }
+
+        if (in_array($batch->status, [BatchStatus::Open, BatchStatus::Loading], true)) {
+            return back()->with('error', 'Cannot apply tracking updates to a batch that is still open or loading.');
         }
 
         $latestTrackingPhase = $this->latestTrackingPhaseForBatch($batch);
@@ -469,58 +493,184 @@ class BatchController extends Controller
     public function bulkUpdateStatus(Request $request, BatchService $batchService)
     {
         $validated = $request->validate([
-            'ids' => 'required|array',
+            'ids' => 'required_without:select_all|array',
             'ids.*' => 'exists:batches,id',
-            'status' => 'required|string',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string|max:255',
+            'status_filter' => 'nullable|string|in:all,open,loading,ready_to_close,sailed,arrived,under_customs_clearance,released_by_boc,received_at_warehouse',
+            'status' => 'required|string|in:open,loading,ready_to_close,sailed,arrived,under_customs_clearance,released_by_boc,received_at_warehouse',
         ]);
 
-        $batches = Batch::findMany($validated['ids']);
+        $batches = $this->bulkBatchSelection($request, $validated);
         $updated = 0;
-        $reverted = 0;
+        $skipped = 0;
 
         foreach ($batches as $batch) {
             try {
-                $updatedBatch = $batchService->update($batch, ['status' => $validated['status']]);
-
-                if ($validated['status'] === BatchStatus::ReadyToClose->value && $updatedBatch->status === BatchStatus::Loading) {
-                    $reverted++;
-                } else {
-                    $updated++;
-                }
+                $batchService->update($batch, ['status' => $validated['status']]);
+                $updated++;
             } catch (\Exception $e) {
-                // Skip if transition is not allowed
+                $skipped++;
             }
         }
 
+        $result = [
+            'requested' => $batches->count(),
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'reasons' => $skipped > 0 ? ['invalid_transition' => $skipped] : [],
+        ];
         $message = "{$updated} batches updated successfully.";
-
-        if ($reverted > 0) {
-            $message .= " {$reverted} batch(es) reverted to Loading because manifest thresholds were not met.";
-
-            return redirect()->back()->with('warning', $message);
+        if ($skipped > 0) {
+            $message .= " {$skipped} batches skipped.";
         }
 
-        return redirect()->back()->with('success', $message);
+        $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+        return redirect($returnUrl)->with('success', $message)->with('bulk_result', $result);
+    }
+
+    public function bulkUpdateBatchesTrackingPhase(
+        Request $request,
+        BatchService $batchService,
+        TrackingStepService $trackingStepService,
+    ): RedirectResponse {
+        $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
+
+        $validated = $request->validate([
+            'ids' => 'required_without:select_all|array',
+            'ids.*' => 'exists:batches,id',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string|max:255',
+            'status_filter' => 'nullable|string|in:all,open,loading,ready_to_close,sailed,arrived,under_customs_clearance,released_by_boc,received_at_warehouse',
+            'tracking_phase' => [
+                'required',
+                'string',
+                Rule::in($trackingSteps->pluck('key')->all()),
+            ],
+            'description' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        if ($validated['tracking_phase'] === TrackingPhase::DELIVERED->value) {
+            return back()->with('error', 'Delivered status must be manually updated 1 by 1 because this requires proof of delivery.');
+        }
+
+        $trackingStep = $trackingSteps->firstWhere('key', $validated['tracking_phase']);
+
+        if (! $this->userCanApplyTrackingStep($request->user(), $trackingStep)) {
+            abort(403, 'Unauthorized tracking phase.');
+        }
+
+        $batches = $this->bulkBatchSelection($request, $validated);
+        $updatedBatches = 0;
+        $totalBoxesUpdated = 0;
+        $skipped = 0;
+
+        foreach ($batches as $batch) {
+            if (in_array($batch->status, [BatchStatus::Open, BatchStatus::Loading], true)) {
+                $skipped++;
+                continue;
+            }
+
+            $latestTrackingPhase = $this->latestTrackingPhaseForBatch($batch);
+            $latestOrder = $this->trackingStepOrder($trackingSteps, $latestTrackingPhase);
+            $selectedOrder = $this->trackingStepOrder($trackingSteps, $validated['tracking_phase']);
+
+            if ($latestOrder !== null && $selectedOrder !== null && $selectedOrder <= $latestOrder) {
+                $skipped++;
+                continue;
+            }
+
+            try {
+                $updatedBoxes = $batchService->bulkUpdateTrackingPhase(
+                    $batch,
+                    $validated['tracking_phase'],
+                    $request->user()?->id,
+                    $validated['description'] ?? null,
+                    $trackingStep['system_status'] ?? null,
+                );
+
+                if ($updatedBoxes > 0) {
+                    $updatedBatches++;
+                    $totalBoxesUpdated += $updatedBoxes;
+                } else {
+                    $skipped++;
+                }
+            } catch (\Exception $e) {
+                $skipped++;
+            }
+        }
+
+        $message = sprintf(
+            'Updated tracking phase to "%s" for %d batch(es) (%d boxes total).',
+            str_replace('_', ' ', (string) $validated['tracking_phase']),
+            $updatedBatches,
+            $totalBoxesUpdated,
+        );
+        if ($skipped > 0) {
+            $message .= " {$skipped} batch(es) skipped.";
+        }
+
+        $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+        return redirect($returnUrl)->with('success', $message);
     }
 
     public function bulkDestroy(Request $request)
     {
         $validated = $request->validate([
-            'ids' => 'required|array',
+            'ids' => 'required_without:select_all|array',
             'ids.*' => 'exists:batches,id',
+            'select_all' => 'nullable|boolean',
+            'search' => 'nullable|string|max:255',
+            'status_filter' => 'nullable|string|in:all,open,loading,ready_to_close,sailed,arrived,delivered',
         ]);
 
-        $batches = Batch::findMany($validated['ids']);
+        $batches = $this->bulkBatchSelection($request, $validated);
         $deleted = 0;
+        $skipped = 0;
 
         foreach ($batches as $batch) {
             if (! $batch->boxes()->exists()) {
                 $batch->delete();
                 $deleted++;
+            } else {
+                $skipped++;
             }
         }
 
-        return redirect()->back()->with('success', "{$deleted} batches deleted (only empty batches can be deleted).");
+        $result = [
+            'requested' => $batches->count(),
+            'deleted' => $deleted,
+            'skipped' => $skipped,
+            'reasons' => $skipped > 0 ? ['assigned_boxes' => $skipped] : [],
+        ];
+        $message = "{$deleted} batches deleted (only empty batches can be deleted).";
+        if ($skipped > 0) {
+            $message .= " {$skipped} batches skipped because they have assigned boxes.";
+        }
+
+        $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+        return redirect($returnUrl)->with('success', $message)->with('bulk_result', $result);
+    }
+
+    private function bulkBatchSelection(Request $request, array $validated)
+    {
+        if (! $request->boolean('select_all')) {
+            return Batch::whereIn('id', $validated['ids'] ?? [])->get();
+        }
+
+        return Batch::query()
+            ->when($request->filled('search'), function ($query) use ($request) {
+                $search = $request->string('search')->toString();
+                $query->where(function ($searchQuery) use ($search) {
+                    $searchQuery->where('batch_number', 'like', "%{$search}%")
+                        ->orWhere('voyage_number', 'like', "%{$search}%")
+                        ->orWhere('container_number', 'like', "%{$search}%");
+                });
+            })
+            ->when($request->filled('status_filter') && $request->status_filter !== 'all', function ($query) use ($request) {
+                $query->where('status', $request->status_filter);
+            })
+            ->get();
     }
 
     public function destroy(Batch $batch): RedirectResponse
@@ -531,7 +681,8 @@ class BatchController extends Controller
 
         $batch->delete();
 
-        return redirect()->back()->with('success', 'Batch deleted successfully.');
+        $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+        return redirect($returnUrl)->with('success', 'Batch deleted successfully.');
     }
 
     private function trackingPhaseOptionsForUser(\Illuminate\Support\Collection $trackingSteps, mixed $user): \Illuminate\Support\Collection
@@ -603,7 +754,7 @@ class BatchController extends Controller
 
         $role = $this->userRoleValue($user);
 
-        if (in_array($role, [Role::Admin->value, Role::SuperAdmin->value], true)) {
+        if (app(DeveloperAccess::class)->isDeveloperOrAdmin($user)) {
             return true;
         }
 

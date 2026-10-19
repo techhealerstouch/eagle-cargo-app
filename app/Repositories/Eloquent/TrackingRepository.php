@@ -3,12 +3,15 @@
 namespace App\Repositories\Eloquent;
 
 use App\Enums\BoxStatus;
+use App\Enums\Role;
+use App\Enums\TrackingPhase;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Models\User;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
 use App\Services\TrackingCacheService;
+use App\Services\TrackingStepService;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
@@ -31,6 +34,9 @@ class TrackingRepository implements TrackingRepositoryInterface
 
         if ($data && ! empty($data['booking_id'])) {
             $booking = Booking::with('sender')->find($data['booking_id']);
+            $maxAttempts = 3;
+            $data['declaration_resends_max'] = $maxAttempts;
+
             if ($booking) {
                 $data['declaration_resends_remaining'] = $this->getRemainingDeclarationResends($booking);
 
@@ -38,7 +44,6 @@ class TrackingRepository implements TrackingRepositoryInterface
                     $data['sender_email_masked'] = $this->maskEmail($booking->sender?->email);
                 }
             } else {
-                $maxAttempts = app()->environment('local') ? 10 : 3;
                 $data['declaration_resends_remaining'] = $maxAttempts;
             }
         }
@@ -59,6 +64,8 @@ class TrackingRepository implements TrackingRepositoryInterface
             },
         ];
 
+        $cleanNumber = ltrim(trim($trackingNumber), '#');
+
         // 1. Try finding by Box tracking_number first
         $box = Box::with(array_merge($boxWithRelations, [
             'booking.boxes.updates' => function ($q) {
@@ -70,7 +77,10 @@ class TrackingRepository implements TrackingRepositoryInterface
                 $q->orderBy('sequence_order', 'asc');
             },
         ]))
-            ->where('tracking_number', $trackingNumber)
+            ->where(function ($q) use ($trackingNumber, $cleanNumber) {
+                $q->where('tracking_number', $trackingNumber)
+                    ->orWhere('tracking_number', $cleanNumber);
+            })
             ->first();
 
         if ($box && $box->booking) {
@@ -87,7 +97,12 @@ class TrackingRepository implements TrackingRepositoryInterface
             'boxes.recipient.area.milestones' => function ($q) {
                 $q->orderBy('sequence_order', 'asc');
             },
-        ])->where('reference_number', $trackingNumber)->first();
+        ])
+            ->where(function ($q) use ($trackingNumber, $cleanNumber) {
+                $q->where('reference_number', $trackingNumber)
+                    ->orWhere('reference_number', $cleanNumber);
+            })
+            ->first();
 
         if ($booking && $booking->boxes && $booking->boxes->count() > 0) {
             $box = $booking->boxes->first();
@@ -103,11 +118,16 @@ class TrackingRepository implements TrackingRepositoryInterface
         /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('public');
 
+        $latestUpdate = $b->updates->first();
+        $activeStepKey = $b->tracking_step_key ?: $latestUpdate?->tracking_step_key ?: $latestUpdate?->tracking_phase?->value;
+
         return [
             'id' => $b->id,
             'tracking_number' => $b->tracking_number,
             'status' => $b->status,
-            'status_label' => $this->resolveStatusLabel($b->updates->first(), $b->status),
+            'status_label' => $this->resolveStatusLabel($latestUpdate, $b->status, $activeStepKey),
+            'tracking_step_key' => $activeStepKey,
+            'tracking_phase' => $latestUpdate?->tracking_phase?->value ?: (TrackingPhase::tryFrom((string) $activeStepKey)?->value),
             'current_milestone_id' => $b->updates->whereNotNull('area_milestone_id')->first()?->area_milestone_id,
             'area_milestones' => $b->recipient?->area?->milestones->map(function ($m) {
                 return [
@@ -153,6 +173,7 @@ class TrackingRepository implements TrackingRepositoryInterface
                 return [
                     'status' => $update->status,
                     'status_label' => $this->resolveStatusLabel($update, $update->status),
+                    'tracking_step_key' => $update->tracking_step_key,
                     'tracking_phase' => $update->tracking_phase?->value,
                     'location' => $update->location,
                     'description' => $update->description,
@@ -183,6 +204,9 @@ class TrackingRepository implements TrackingRepositoryInterface
         $primaryEtaDate = $primaryBox->eta_date ?: $primaryBox->estimate_delivery_date;
         $primaryEtaMessage = $primaryBox->eta_message ?: $primaryBox->estimate_delivery_message ?: ($primaryEtaDate ? 'Your box is expected to be delivered on or before this date' : null);
 
+        $latestUpdate = $primaryBox->updates->first();
+        $activeStepKey = $primaryBox->tracking_step_key ?: $latestUpdate?->tracking_step_key ?: $latestUpdate?->tracking_phase?->value;
+
         return [
             'booking_id' => $booking->id,
             'booking_reference' => $booking->reference_number,
@@ -193,7 +217,9 @@ class TrackingRepository implements TrackingRepositoryInterface
             'tracking_number' => $primaryBox->tracking_number,
             'recipient_name' => $primaryBox->recipient?->name,
             'status' => $primaryBox->status,
-            'status_label' => $this->resolveStatusLabel($primaryBox->updates->first(), $primaryBox->status),
+            'status_label' => $this->resolveStatusLabel($latestUpdate, $primaryBox->status, $activeStepKey),
+            'tracking_step_key' => $activeStepKey,
+            'tracking_phase' => $latestUpdate?->tracking_phase?->value ?: (TrackingPhase::tryFrom((string) $activeStepKey)?->value),
             'current_milestone_id' => $primaryBox->updates->whereNotNull('area_milestone_id')->first()?->area_milestone_id,
             'area_milestones' => $primaryBox->recipient?->area?->milestones->map(function ($m) {
                 return [
@@ -212,6 +238,16 @@ class TrackingRepository implements TrackingRepositoryInterface
             'shipped_at' => $booking->shipped_at,
             'payment_status' => $booking->payment_status,
             'declaration_form_status' => $booking->declaration_form_status,
+            'can_edit_declaration' => (function () use ($booking) {
+                /** @var User|null $user */
+                $user = Auth::user();
+                if (! $user) {
+                    return false;
+                }
+                $isAdmin = in_array($user->role, [Role::Admin, Role::SuperAdmin], true);
+                $isOwner = $user->role === Role::Sender && $booking->sender_id === $user->sender?->id;
+                return $isAdmin || $isOwner;
+            })(),
             'eta_date' => $primaryEtaDate,
             'eta_message' => $primaryEtaMessage,
             'estimate_delivery_date' => $primaryEtaDate,
@@ -240,7 +276,8 @@ class TrackingRepository implements TrackingRepositoryInterface
             'timeline' => $primaryBox->updates ? $primaryBox->updates->map(function ($update) {
                 return [
                     'status' => $update->status,
-                    'status_label' => $this->resolveStatusLabel($update, $update->status),
+                    'status_label' => $this->resolveStatusLabel($update, $update->status, $update->tracking_step_key),
+                    'tracking_step_key' => $update->tracking_step_key,
                     'tracking_phase' => $update->tracking_phase?->value,
                     'location' => $update->location,
                     'description' => $update->description,
@@ -255,8 +292,19 @@ class TrackingRepository implements TrackingRepositoryInterface
         ];
     }
 
-    private function resolveStatusLabel(?BoxUpdate $update, mixed $boxStatus): ?string
+    private function resolveStatusLabel(?BoxUpdate $update, mixed $boxStatus, ?string $trackingStepKey = null): ?string
     {
+        if ($trackingStepKey) {
+            $step = app(TrackingStepService::class)->getStep($trackingStepKey);
+            if ($step && ! empty($step['label'])) {
+                return $step['label'];
+            }
+            $phase = TrackingPhase::tryFrom($trackingStepKey);
+            if ($phase) {
+                return $phase->label();
+            }
+        }
+
         if ($update?->tracking_phase) {
             return $update->tracking_phase->label();
         }
@@ -385,7 +433,7 @@ class TrackingRepository implements TrackingRepositoryInterface
         $rateLimitUserKey = 'declaration_resend_daily:' . $userKey;
         $rateLimitBookingKey = 'declaration_resend_daily:booking:' . $booking->id;
 
-        $maxAttempts = app()->environment('local') ? 10 : 3;
+        $maxAttempts = 3;
 
         $userRemaining = RateLimiter::remaining($rateLimitUserKey, $maxAttempts);
         $bookingRemaining = RateLimiter::remaining($rateLimitBookingKey, $maxAttempts);

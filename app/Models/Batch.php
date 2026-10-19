@@ -38,6 +38,7 @@ class Batch extends Model
         'eta_at',
         'arrived_at',
         'delivered_at',
+        'unloaded_at',
         'status',
         'override_note',
     ];
@@ -56,6 +57,7 @@ class Batch extends Model
         'eta_at' => 'datetime',
         'arrived_at' => 'datetime',
         'delivered_at' => 'datetime',
+        'unloaded_at' => 'datetime',
         'status' => BatchStatus::class,
     ];
 

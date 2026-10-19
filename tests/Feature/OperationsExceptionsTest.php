@@ -21,6 +21,7 @@ use App\Models\Runsheet;
 use App\Models\User;
 use App\Services\DataIntegrityService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class OperationsExceptionsTest extends TestCase
@@ -129,9 +130,12 @@ class OperationsExceptionsTest extends TestCase
 
     public function test_admin_can_filter_operations_exceptions(): void
     {
+        /** @var User $admin */
         $admin = User::factory()->create(['role' => Role::SuperAdmin]);
         $box = $this->boxWithStatus(BoxStatus::Damaged);
         $heldBox = $this->boxWithStatus(BoxStatus::Held);
+
+        app(DataIntegrityService::class)->performAudit();
 
         $response = $this->actingAs($admin)->get(route('admin.data-integrity.index', [
             'type' => 'damaged_box',
@@ -273,6 +277,7 @@ class OperationsExceptionsTest extends TestCase
             'amount' => 75,
             'payment_method' => 'cash',
             'paid_at' => now(),
+            'confirmed_at' => now(),
         ]);
 
         $results = $service->performAudit();
@@ -418,7 +423,7 @@ class OperationsExceptionsTest extends TestCase
 
         // Re-set to Paid after Payment::create because PaymentObserver resets it.
         // This simulates the real-world data inconsistency we're trying to catch.
-        \Illuminate\Support\Facades\DB::table('bookings')
+        DB::table('bookings')
             ->where('id', $paidBooking->id)
             ->update(['payment_status' => PaymentStatus::Paid->value]);
 
@@ -439,6 +444,110 @@ class OperationsExceptionsTest extends TestCase
         $this->assertFalse($warning->is_resolved);
     }
 
+    public function test_audit_flags_and_cleans_up_port_dwell_overrun(): void
+    {
+        $service = app(DataIntegrityService::class);
+
+        $batch = Batch::factory()->create([
+            'status' => BatchStatus::Arrived,
+            'arrived_at' => now()->subDays(8),
+        ]);
+
+        $results = $service->performAudit();
+        $this->assertSame(1, $results['port_dwell_overrun']);
+        $this->assertDatabaseHas('data_integrity_warnings', [
+            'type' => 'port_dwell_overrun',
+            'record_id' => $batch->id,
+            'is_resolved' => false,
+        ]);
+
+        // Self-healing: Mark batch received at warehouse
+        $batch->update(['status' => BatchStatus::ReceivedAtWarehouse]);
+        $service->cleanupResolvedWarnings();
+
+        $warning = DataIntegrityWarning::where('type', 'port_dwell_overrun')
+            ->where('record_id', $batch->id)
+            ->firstOrFail();
+        $this->assertTrue($warning->is_resolved);
+    }
+
+    public function test_audit_flags_and_cleans_up_orphan_runsheet_stop(): void
+    {
+        $service = app(DataIntegrityService::class);
+
+        $booking = Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+        $box = Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::Pending,
+        ]);
+
+        $runsheet = Runsheet::factory()->create([
+            'type' => RunsheetType::Pickup,
+            'status' => RunsheetStatus::Completed,
+        ]);
+        $runsheet->bookings()->attach($booking->id);
+
+        $results = $service->performAudit();
+        $this->assertSame(1, $results['orphan_runsheet_stop']);
+        $this->assertDatabaseHas('data_integrity_warnings', [
+            'type' => 'orphan_runsheet_stop',
+            'record_id' => $runsheet->id,
+            'is_resolved' => false,
+        ]);
+
+        // Self-healing: Collect the box
+        $box->update(['status' => BoxStatus::Collected]);
+        $service->cleanupResolvedWarnings();
+
+        $warning = DataIntegrityWarning::where('type', 'orphan_runsheet_stop')
+            ->where('record_id', $runsheet->id)
+            ->firstOrFail();
+        $this->assertTrue($warning->is_resolved);
+    }
+
+    public function test_audit_flags_and_cleans_up_payment_overcollection(): void
+    {
+        $service = app(DataIntegrityService::class);
+
+        $booking = Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'payment_status' => PaymentStatus::Paid,
+        ]);
+        $invoice = Invoice::create([
+            'booking_id' => $booking->id,
+            'invoice_number' => 'INV-OVERCOLLECT-TEST',
+            'amount' => 100,
+            'status' => 'paid',
+        ]);
+        Payment::create([
+            'invoice_id' => $invoice->id,
+            'amount' => 150,
+            'is_cash_payment' => true,
+            'confirmed_at' => now(),
+            'paid_at' => now(),
+        ]);
+
+        $results = $service->performAudit();
+        $this->assertSame(1, $results['payment_overcollection']);
+        $this->assertDatabaseHas('data_integrity_warnings', [
+            'type' => 'payment_overcollection',
+            'record_id' => $invoice->id,
+            'is_resolved' => false,
+        ]);
+
+        // Self-healing: Adjust invoice amount or payment
+        $invoice->update(['amount' => 150]);
+        $service->cleanupResolvedWarnings();
+
+        $warning = DataIntegrityWarning::where('type', 'payment_overcollection')
+            ->where('record_id', $invoice->id)
+            ->firstOrFail();
+        $this->assertTrue($warning->is_resolved);
+    }
+
     private function boxWithStatus(BoxStatus $status, array $overrides = []): Box
     {
         $booking = Booking::factory()->create([
@@ -454,6 +563,8 @@ class OperationsExceptionsTest extends TestCase
 
     private function scan(Box $box, TrackingPhase $phase, \DateTimeInterface $createdAt): void
     {
+        BoxUpdate::where('box_id', $box->id)->delete();
+
         BoxUpdate::unguarded(fn () => BoxUpdate::create([
             'box_id' => $box->id,
             'status' => $box->status->value,
@@ -462,5 +573,12 @@ class OperationsExceptionsTest extends TestCase
             'created_at' => $createdAt,
             'updated_at' => $createdAt,
         ]));
+
+        DB::table('boxes')
+            ->where('id', $box->id)
+            ->update([
+                'created_at' => $createdAt,
+                'updated_at' => $createdAt,
+            ]);
     }
 }

@@ -9,7 +9,14 @@ enum BatchStatus: string
     case ReadyToClose = 'ready_to_close';
     case Sailed = 'sailed';
     case Arrived = 'arrived';
-    case Delivered = 'delivered';
+    case UnderCustomsClearance = 'under_customs_clearance';
+    case ReleasedByBoc = 'released_by_boc';
+    case ReceivedAtWarehouse = 'received_at_warehouse';
+
+    public function isTerminal(): bool
+    {
+        return $this === self::ReceivedAtWarehouse;
+    }
 
     public function canTransitionTo(self $next): bool
     {
@@ -18,8 +25,10 @@ enum BatchStatus: string
             self::Loading => in_array($next, [self::Open, self::ReadyToClose], true),
             self::ReadyToClose => in_array($next, [self::Open, self::Loading, self::Sailed], true),
             self::Sailed => in_array($next, [self::Open, self::Loading, self::Arrived], true),
-            self::Arrived => in_array($next, [self::Open, self::Loading, self::Delivered], true),
-            self::Delivered => in_array($next, [self::Open, self::Loading], true),
+            self::Arrived => in_array($next, [self::Open, self::Loading, self::UnderCustomsClearance, self::ReleasedByBoc, self::ReceivedAtWarehouse], true),
+            self::UnderCustomsClearance => in_array($next, [self::Open, self::Loading, self::ReleasedByBoc, self::ReceivedAtWarehouse], true),
+            self::ReleasedByBoc => in_array($next, [self::Open, self::Loading, self::ReceivedAtWarehouse], true),
+            self::ReceivedAtWarehouse => in_array($next, [self::Open, self::Loading], true),
         };
     }
 
@@ -30,8 +39,10 @@ enum BatchStatus: string
             self::Loading => 'Loading',
             self::ReadyToClose => 'Ready to Close',
             self::Sailed => 'Sailed',
-            self::Arrived => 'Arrived',
-            self::Delivered => 'Delivered',
+            self::Arrived => 'Arrived at Port',
+            self::UnderCustomsClearance => 'Under BOC Clearance',
+            self::ReleasedByBoc => 'Released by BOC',
+            self::ReceivedAtWarehouse => 'Received at Manila Warehouse',
         };
     }
 }

@@ -27,9 +27,8 @@ export interface StatusTheme {
 
 export function getStatusTheme(status: string, customLabel?: string): StatusTheme {
     const s = (status || '').toLowerCase().replace(/_/g, ' ');
-    const c = (customLabel || '').toLowerCase().replace(/_/g, ' ');
 
-    if (s === 'delivered' || c.includes('delivered')) {
+    if (s === 'delivered') {
         return {
             label: customLabel || 'Delivered',
             bgLight: 'bg-emerald-50 dark:bg-emerald-950/30',
@@ -43,7 +42,7 @@ export function getStatusTheme(status: string, customLabel?: string): StatusThem
         };
     }
 
-    if (s.includes('out for delivery') || s.includes('dispatched') || c.includes('out for delivery') || c.includes('dispatched')) {
+    if (s.includes('out for delivery') || s.includes('dispatched')) {
         return {
             label: customLabel || 'Out for Delivery',
             bgLight: 'bg-amber-50 dark:bg-amber-950/30',
@@ -58,22 +57,22 @@ export function getStatusTheme(status: string, customLabel?: string): StatusThem
     }
 
     if (
+        s.includes('manila warehouse') ||
+        s.includes('received at manila') ||
         s.includes('sorting') ||
-        c.includes('sorting') ||
-        c.includes('sorting facility') ||
-        s.includes('hub') ||
-        c.includes('hub')
+        s.includes('local hub') ||
+        s.includes('scheduling')
     ) {
         return {
-            label: customLabel || 'At Sorting Facility',
-            bgLight: 'bg-purple-50 dark:bg-purple-950/30',
-            textLight: 'text-purple-600 dark:text-purple-400',
-            borderLight: 'border-purple-200/60 dark:border-purple-800/50',
-            ringColor: 'ring-purple-400/40',
-            dotBg: 'bg-purple-500',
-            gradient: 'from-purple-500 to-indigo-600',
-            badge: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20',
-            icon: ArrowDownUp,
+            label: customLabel || 'At Regional Facility',
+            bgLight: 'bg-indigo-50 dark:bg-indigo-950/30',
+            textLight: 'text-indigo-600 dark:text-indigo-400',
+            borderLight: 'border-indigo-200/60 dark:border-indigo-800/50',
+            ringColor: 'ring-indigo-400/40',
+            dotBg: 'bg-indigo-500',
+            gradient: 'from-indigo-500 to-purple-600',
+            badge: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20',
+            icon: Warehouse,
         };
     }
 
@@ -119,6 +118,27 @@ export function getStatusTheme(status: string, customLabel?: string): StatusThem
         };
     }
 
+    if (
+        s.includes('pending') ||
+        s.includes('draft') ||
+        s.includes('confirmed') ||
+        s.includes('booked') ||
+        s.includes('registered') ||
+        s.includes('awaiting')
+    ) {
+        return {
+            label: customLabel && !customLabel.toLowerCase().includes('statuses.box') ? customLabel : 'Pending Confirmation',
+            bgLight: 'bg-amber-50 dark:bg-amber-950/30',
+            textLight: 'text-amber-700 dark:text-amber-400',
+            borderLight: 'border-amber-200/60 dark:border-amber-800/50',
+            ringColor: 'ring-amber-400/40',
+            dotBg: 'bg-amber-500',
+            gradient: 'from-amber-500 to-orange-600',
+            badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20',
+            icon: Clock,
+        };
+    }
+
     if (s.includes('cancelled') || s.includes('damaged') || s.includes('held')) {
         return {
             label: customLabel || 'Exception',
@@ -161,21 +181,10 @@ export function groupTimelineByPhase(timeline: any[]): TimelinePhaseGroup[] {
     const destinationItems: any[] = [];
 
     timeline.forEach((item) => {
-        const rawPhase = (item.tracking_phase || item.tracking_step_key || '').toLowerCase();
+        const rawPhase = (item.tracking_phase || '').toLowerCase();
         const rawStatus = (item.status_label || item.status || '').toLowerCase().replace(/_/g, ' ');
 
         if (
-            rawPhase === 'sorting' ||
-            rawPhase === 'received_at_sorting_hub' ||
-            rawPhase === 'out_for_delivery' ||
-            rawPhase === 'delivered' ||
-            rawStatus.includes('sorting') ||
-            rawStatus.includes('hub') ||
-            rawStatus.includes('out for delivery') ||
-            rawStatus.includes('delivered')
-        ) {
-            destinationItems.push(item);
-        } else if (
             rawPhase === 'picked_up' ||
             rawPhase === 'received_by_branch' ||
             rawPhase === 'loading_container' ||
@@ -278,10 +287,6 @@ export function getFriendlyStepDescription(
 
     if (key.includes('loaded') || key.includes('container')) {
         return 'Box safely loaded into sea freight container and prepped for port departure.';
-    }
-
-    if (key.includes('sorting') || key.includes('facility') || key.includes('hub')) {
-        return 'Box is being processed and sorted at the regional distribution facility.';
     }
 
     if (key.includes('shipping to philippines') || key.includes('transit') || key.includes('sea')) {

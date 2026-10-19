@@ -15,35 +15,43 @@ interface DeclarationAlertProps {
     bookingId: number;
     canEdit?: boolean;
     canSubmit?: boolean;
-    trackingNumber?: string;
     bookingReference?: string;
     isGuest?: boolean;
+    trackingNumber?: string;
     senderEmailMasked?: string | null;
     resendsRemaining?: number;
+    resendsMax?: number;
 }
 
 export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
     bookingId,
-    canEdit: propCanEdit,
-    canSubmit,
-    trackingNumber,
+    canEdit = false,
+    canSubmit = false,
     bookingReference,
-    isGuest,
+    trackingNumber,
     senderEmailMasked,
-    resendsRemaining = 3,
+    resendsRemaining,
+    resendsMax = 3,
 }) => {
-    const canEdit = propCanEdit ?? canSubmit ?? false;
-    const resolvedTrackingNumber = trackingNumber || bookingReference;
+    const isUserAllowedToEdit = canEdit || canSubmit;
     const [helpOpen, setHelpOpen] = useState(false);
     const [isResending, setIsResending] = useState(false);
     const [cooldown, setCooldown] = useState(0);
-    const [remainingAttempts, setRemainingAttempts] = useState<number>(resendsRemaining);
+    const resolvedMax = Math.max(resendsMax, resendsRemaining ?? 3);
+    const [remainingAttempts, setRemainingAttempts] = useState<number>(resendsRemaining ?? resolvedMax);
+    const [maxAttempts, setMaxAttempts] = useState<number>(resolvedMax);
 
     useEffect(() => {
         if (resendsRemaining !== undefined) {
             setRemainingAttempts(resendsRemaining);
         }
     }, [resendsRemaining]);
+
+    useEffect(() => {
+        if (resendsMax !== undefined) {
+            setMaxAttempts(resendsMax);
+        }
+    }, [resendsMax]);
 
     useEffect(() => {
         if (cooldown <= 0) return;
@@ -57,7 +65,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
         if (isResending || cooldown > 0) return;
 
         if (remainingAttempts <= 0) {
-            toast.error('You have reached the maximum of 3 email resends allowed per day. Please check your spam folder or contact support.');
+            toast.error(`You have reached the maximum of ${maxAttempts} email resends allowed per day. Please check your spam folder or contact support.`);
             return;
         }
 
@@ -78,7 +86,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                 },
                 body: JSON.stringify({
                     booking_id: bookingId,
-                    tracking_number: resolvedTrackingNumber,
+                    tracking_number: trackingNumber || bookingReference,
                 }),
             });
 
@@ -86,6 +94,9 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
 
             if (data.resends_remaining !== undefined) {
                 setRemainingAttempts(data.resends_remaining);
+            }
+            if (data.resends_max !== undefined) {
+                setMaxAttempts(data.resends_max);
             }
 
             if (response.ok) {
@@ -117,7 +128,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                 {/* Left Side: Icon & Details */}
                 <div className="flex items-start gap-4">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20 shadow-xs">
-                        {canEdit ? <FileText className="size-5" /> : <ShieldAlert className="size-5" />}
+                        {isUserAllowedToEdit ? <FileText className="size-5" /> : <ShieldAlert className="size-5" />}
                     </div>
 
                     <div className="space-y-1.5">
@@ -125,7 +136,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                             <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 tracking-tight">
                                 Customs Declaration Required
                             </h3>
-                            {!canEdit ? (
+                            {!isUserAllowedToEdit ? (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300 border border-amber-500/25">
                                     <Lock className="size-2.5" /> Sender Protected
                                 </span>
@@ -137,17 +148,17 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                         </div>
 
                         <p className="text-xs text-zinc-600 dark:text-zinc-400 max-w-2xl leading-relaxed">
-                            {canEdit
+                            {isUserAllowedToEdit
                                 ? 'Please submit your itemized packing list on or before pickup to ensure smooth customs clearance and avoid transit delays.'
                                 : 'Philippine customs requires an itemized declaration before pickup. For cargo security, only the verified sender can submit this form.'}
                         </p>
 
-                        {!canEdit && (
+                        {!isUserAllowedToEdit && (
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 pt-0.5 text-[11px] text-amber-900/90 dark:text-amber-300/90 font-medium">
                                 <span className="inline-flex items-center gap-1.5">
                                     <Mail className="size-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
                                     <span>
-                                        <strong>No account needed</strong> — a secure 1-click link was sent to{' '}
+
                                         {senderEmailMasked ? (
                                             <strong className="underline decoration-amber-400/50 underline-offset-2">
                                                 {senderEmailMasked}
@@ -186,7 +197,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                                 <div className="space-y-1">
                                                     <p className="font-semibold text-zinc-900 dark:text-zinc-100">Check the sender's email inbox</p>
                                                     <p className="text-zinc-500 dark:text-zinc-400">
-                                                        Search for <strong>"Eagle Express Cargo"</strong> or <strong>"Booking Confirmation"</strong>. Check the spam or junk folder if you can't find it.
+                                                        Search for <strong>"Love Balikbayan Cargo"</strong> or <strong>"Booking Confirmation"</strong>. Check the spam or junk folder if you can't find it.
                                                     </p>
                                                     {senderEmailMasked && (
                                                         <div className="inline-flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20 font-medium">
@@ -256,7 +267,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                                         ) : (
                                                             <>
                                                                 <Send className="size-3.5" />
-                                                                <span>Resend Declaration Link ({remainingAttempts} of 3 left)</span>
+                                                                <span>Resend Declaration Link ({remainingAttempts} of {maxAttempts} left)</span>
                                                             </>
                                                         )}
                                                     </button>
@@ -267,7 +278,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                                         className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-zinc-200 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-4 h-9 text-xs font-bold cursor-not-allowed border border-zinc-300/40 dark:border-zinc-700/40"
                                                     >
                                                         <Lock className="size-3.5" />
-                                                        <span>Daily Limit Reached (0 of 3 left)</span>
+                                                        <span>Daily Limit Reached (0 of {maxAttempts} left)</span>
                                                     </button>
                                                 )}
                                             </div>
@@ -300,7 +311,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                     </button>
                                 ) : (
                                     <span className="text-zinc-500 dark:text-zinc-400 font-normal">
-                                        Daily resend limit reached (0/3 left)
+                                        Daily resend limit reached (0/{maxAttempts} left)
                                     </span>
                                 )}
                             </div>
@@ -310,7 +321,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
 
                 {/* Right Side: Actions */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-amber-200/50 dark:border-amber-900/30">
-                    {canEdit ? (
+                    {isUserAllowedToEdit ? (
                         <Link
                             href={`/track/declaration/${bookingId}`}
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white px-6 h-11 text-xs font-bold uppercase tracking-wider transition-all active:scale-95 shadow-sm group w-full sm:w-auto"
@@ -340,7 +351,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                     ) : (
                                         <>
                                             <RotateCw className="size-3.5" />
-                                            <span>Resend Email Link ({remainingAttempts}/3)</span>
+                                            <span>Resend Email Link ({remainingAttempts} left)</span>
                                         </>
                                     )}
                                 </button>
@@ -349,10 +360,10 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                     type="button"
                                     disabled
                                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-zinc-200/80 dark:bg-zinc-800/80 text-zinc-500 dark:text-zinc-400 px-4 h-11 text-xs font-bold uppercase tracking-wider cursor-not-allowed shadow-none border border-zinc-300/40 dark:border-zinc-700/40 w-full sm:w-auto"
-                                    title="You have reached the maximum of 3 email resends for today."
+                                    title={`You have reached the maximum of ${maxAttempts} email resends for today.`}
                                 >
                                     <Lock className="size-3.5" />
-                                    <span>Daily Limit Reached (0/3)</span>
+                                    <span>Daily Limit Reached</span>
                                 </button>
                             )}
 
@@ -370,4 +381,3 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
         </div>
     );
 };
-

@@ -72,29 +72,39 @@ class BatchService
         });
     }
 
-    public function confirmManifest(Batch $batch): Batch
+    public function confirmManifest(Batch $batch, ?string $etaAt = null): Batch
     {
-        return DB::transaction(function () use ($batch): Batch {
+        return DB::transaction(function () use ($batch, $etaAt): Batch {
             $batch = $this->refreshAndEvaluate($batch);
+
+            if ((int) ($batch->current_box_count ?? 0) <= 0 && ! $batch->boxes()->exists()) {
+                throw new \InvalidArgumentException('Cannot confirm manifest or sail an empty batch with no boxes.');
+            }
 
             if ($batch->status !== BatchStatus::ReadyToClose) {
                 throw new \InvalidArgumentException('Batch is not yet ready to close.');
             }
 
-            if ($batch->current_box_count == 0) {
-                throw new \InvalidArgumentException('Cannot manifest an empty batch.');
-            }
-
-            return $this->batchRepository->update($batch, [
+            $updates = [
                 'status' => BatchStatus::Sailed,
                 'sailed_at' => now(),
-            ]);
+            ];
+
+            if ($etaAt) {
+                $updates['eta_at'] = \Carbon\Carbon::parse($etaAt);
+            }
+
+            return $this->batchRepository->update($batch, $updates);
         });
     }
 
     public function confirmArrival(Batch $batch): Batch
     {
         return DB::transaction(function () use ($batch): Batch {
+            if ((int) ($batch->current_box_count ?? 0) <= 0 && ! $batch->boxes()->exists()) {
+                throw new \InvalidArgumentException('Cannot confirm arrival for an empty batch with no boxes.');
+            }
+
             $this->assertValidTransition($batch, BatchStatus::Arrived);
 
             return $this->batchRepository->update($batch, [
@@ -115,18 +125,6 @@ class BatchService
             ? $trackingPhase
             : TrackingPhase::from((string) $trackingPhase);
 
-        $targetStatusForBatch = $this->getTargetBatchStatusForTrackingPhase($trackingPhase);
-        if ($targetStatusForBatch && $batch->status !== $targetStatusForBatch) {
-            if (! $batch->status->canTransitionTo($targetStatusForBatch)) {
-                throw new \InvalidArgumentException(sprintf(
-                    'Cannot apply "%s" because the batch cannot transition from %s to %s.',
-                    $trackingPhase->label(),
-                    $batch->status->label(),
-                    $targetStatusForBatch->label(),
-                ));
-            }
-        }
-
         $targetStatus = $systemStatus instanceof BoxStatus
             ? $systemStatus
             : ($systemStatus ? BoxStatus::tryFrom((string) $systemStatus) : $this->resolveSystemStatusForTrackingPhase($trackingPhase));
@@ -136,6 +134,19 @@ class BatchService
                 'Tracking phase "%s" has an invalid system status.',
                 $trackingPhase->label(),
             ));
+        }
+
+        $targetBatchStatus = $this->getTargetBatchStatusForTrackingPhase($trackingPhase);
+
+        if ($targetBatchStatus && $batch->status !== $targetBatchStatus) {
+            if (! $batch->status->canTransitionTo($targetBatchStatus)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Cannot apply tracking phase "%s" because the batch status "%s" cannot transition to "%s". Please update the batch status sequentially.',
+                    $trackingPhase->label(),
+                    $batch->status->label(),
+                    $targetBatchStatus->label()
+                ));
+            }
         }
 
         $updated = DB::transaction(function () use ($batch, $trackingPhase, $updatedBy, $description, $targetStatus): int {
@@ -172,20 +183,12 @@ class BatchService
                         ));
                     }
 
-                    $box->update([
-                        'status' => $targetStatus,
-                        'tracking_step_key' => $trackingPhase->value,
-                    ]);
-                } else {
-                    $box->update([
-                        'tracking_step_key' => $trackingPhase->value,
-                    ]);
+                    $box->update(['status' => $targetStatus]);
                 }
 
                 $updates[] = [
                     'box_id' => $box->id,
                     'status' => $resolvedStatus->value,
-                    'tracking_step_key' => $trackingPhase->value,
                     'tracking_phase' => $trackingPhase->value,
                     'location' => $trackingPhase->phase(),
                     'description' => $resolvedDescription,
@@ -210,25 +213,21 @@ class BatchService
 
     public function getTargetBatchStatusForTrackingPhase(TrackingPhase $phase): ?BatchStatus
     {
-        switch ($phase) {
-            case TrackingPhase::DEPARTED_FROM_ORIGIN:
-            case TrackingPhase::IN_TRANSIT_SEA:
-                return BatchStatus::Sailed;
+        return match ($phase) {
+            TrackingPhase::DEPARTED_FROM_ORIGIN,
+            TrackingPhase::IN_TRANSIT_SEA => BatchStatus::Sailed,
 
-            case TrackingPhase::ARRIVED_MANILA_PORT:
-            case TrackingPhase::CUSTOMS_CLEARANCE:
-            case TrackingPhase::RELEASED_BY_BOC:
-            case TrackingPhase::RECEIVED_MANILA_WAREHOUSE:
-            case TrackingPhase::SORTING:
-            case TrackingPhase::DISPATCHED_TO_LOCAL_HUB:
-            case TrackingPhase::OUT_FOR_DELIVERY:
-                return BatchStatus::Arrived;
+            TrackingPhase::ARRIVED_MANILA_PORT => BatchStatus::Arrived,
+            TrackingPhase::CUSTOMS_CLEARANCE => BatchStatus::UnderCustomsClearance,
+            TrackingPhase::RELEASED_BY_BOC => BatchStatus::ReleasedByBoc,
+            TrackingPhase::RECEIVED_MANILA_WAREHOUSE,
+            TrackingPhase::SORTING,
+            TrackingPhase::DISPATCHED_TO_LOCAL_HUB,
+            TrackingPhase::OUT_FOR_DELIVERY,
+            TrackingPhase::DELIVERED => BatchStatus::ReceivedAtWarehouse,
 
-            case TrackingPhase::DELIVERED:
-                return BatchStatus::Delivered;
-        }
-
-        return null;
+            default => null,
+        };
     }
 
     /**
@@ -256,6 +255,9 @@ class BatchService
         return match ($status) {
             BatchStatus::Sailed => TrackingPhase::IN_TRANSIT_SEA,
             BatchStatus::Arrived => TrackingPhase::ARRIVED_MANILA_PORT,
+            BatchStatus::UnderCustomsClearance => TrackingPhase::CUSTOMS_CLEARANCE,
+            BatchStatus::ReleasedByBoc => TrackingPhase::RELEASED_BY_BOC,
+            BatchStatus::ReceivedAtWarehouse => TrackingPhase::RECEIVED_MANILA_WAREHOUSE,
             default => null,
         };
     }
@@ -286,7 +288,7 @@ class BatchService
         $capacity = (int) $batch->capacity_boxes;
 
         if (($currentCount + $additionalBoxes) > $capacity) {
-            return "Batch {$batch->batch_number} is at capacity ({$currentCount}/{$capacity} boxes). Please consider closing this batch or opening a new one.";
+            return "Batch {$batch->batch_number} is at capacity ({$currentCount}/{$capacity} boxes). Please manifest this batch or open a new one.";
         }
 
         return null;
@@ -306,13 +308,12 @@ class BatchService
         $this->refreshAndEvaluate($batch);
     }
 
-public function refreshAndEvaluate(Batch $batch): Batch
+    public function refreshAndEvaluate(Batch $batch): Batch
     {
         $batch = $this->batchRepository->recalculateMetrics($batch);
 
-        $batch = $this->evaluateManifestCandidate($batch);
-
-        // Do not silently auto-create next batch without admin permission and confirmation dialog
+        // Auto-promotion to ReadyToClose is disabled.
+        // We leave it to the admin to manually change status.
         return $batch;
     }
 
@@ -331,18 +332,16 @@ public function refreshAndEvaluate(Batch $batch): Batch
         return sprintf('%s-%s-%03d', $prefix, $dateCode, $sequence);
     }
 
-    private function evaluateManifestCandidate(Batch $batch): Batch
-    {
-        return $batch;
-    }
+
 
     private function isManifestThresholdReached(Batch $batch): bool
     {
-        if ($batch->current_box_count == 0) {
+        $boxCount = (int) ($batch->current_box_count ?? 0);
+        if ($boxCount <= 0) {
             return false;
         }
 
-        if ((int) ($batch->capacity_boxes ?? 0) > 0 && (int) $batch->current_box_count >= (int) $batch->capacity_boxes) {
+        if ((int) ($batch->capacity_boxes ?? 0) > 0 && $boxCount >= (int) $batch->capacity_boxes) {
             return true;
         }
 
@@ -454,11 +453,21 @@ public function refreshAndEvaluate(Batch $batch): Batch
             ));
         }
 
-        if ($batch->current_box_count == 0 && in_array($target, [BatchStatus::ReadyToClose, BatchStatus::Sailed, BatchStatus::Arrived, BatchStatus::Delivered], true)) {
-            throw new \InvalidArgumentException(sprintf(
-                'Cannot transition an empty batch to %s.',
-                $target->label(),
-            ));
+        if (in_array($target, [
+            BatchStatus::ReadyToClose,
+            BatchStatus::Sailed,
+            BatchStatus::Arrived,
+            BatchStatus::UnderCustomsClearance,
+            BatchStatus::ReleasedByBoc,
+            BatchStatus::ReceivedAtWarehouse,
+        ], true)) {
+            $boxCount = (int) ($batch->current_box_count ?? 0);
+            if ($boxCount <= 0 && ! $batch->boxes()->exists()) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Cannot set batch to "%s" because it contains no boxes.',
+                    $target->label(),
+                ));
+            }
         }
     }
 
@@ -472,11 +481,11 @@ public function refreshAndEvaluate(Batch $batch): Batch
             BatchStatus::Open, BatchStatus::Loading => array_merge([
                 'sailed_at' => null,
                 'arrived_at' => null,
-                'delivered_at' => null,
+                'unloaded_at' => null,
             ], $attributes),
             BatchStatus::Sailed => array_merge(['sailed_at' => $batch->sailed_at ?? now()], $attributes),
             BatchStatus::Arrived => array_merge(['arrived_at' => $batch->arrived_at ?? now()], $attributes),
-            BatchStatus::Delivered => array_merge(['delivered_at' => $batch->delivered_at ?? now()], $attributes),
+            BatchStatus::ReceivedAtWarehouse => array_merge(['unloaded_at' => $batch->unloaded_at ?? now()], $attributes),
             default => $attributes,
         };
     }
