@@ -5,11 +5,17 @@ namespace App\Repositories\Eloquent;
 use App\Enums\BoxStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
+use App\Enums\RunsheetType;
+use App\Enums\SerialNumberStatus;
+use App\Enums\TrackingPhase;
 use App\Models\AreaMilestone;
 use App\Models\Box;
 use App\Models\BoxUpdate;
+use App\Models\SerialNumber;
+use App\Models\User;
 use App\Repositories\Contracts\BoxRepositoryInterface;
 use App\Services\TrackingCacheService;
+use App\Services\TrackingStepService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -34,8 +40,9 @@ class BoxRepository implements BoxRepositoryInterface
     public function loadBoxDetails(Box $box): Box
     {
         return $box->load([
+            'boxType',
             'booking.sender',
-            'booking.boxes',
+            'booking.boxes.boxType',
             'recipient.area.milestones',
             'updates' => function ($query) {
                 $query->orderBy('created_at', 'desc');
@@ -58,9 +65,10 @@ class BoxRepository implements BoxRepositoryInterface
         ?UploadedFile $pickupProof = null,
         bool $bypassValidation = false,
         ?string $serialNumber = null,
-        ?string $trackingStepKey = null
+        ?string $trackingStepKey = null,
+        ?UploadedFile $damagePhoto = null
     ): void {
-        DB::transaction(function () use ($box, $status, $notes, $courierId, $areaMilestoneId, $deliveryProof, $trackingPhase, $signature, $deliveryOverrideReason, $pickupProof, $bypassValidation, $serialNumber, $trackingStepKey) {
+        DB::transaction(function () use ($box, $status, $notes, $courierId, $areaMilestoneId, $deliveryProof, $trackingPhase, $signature, $deliveryOverrideReason, $pickupProof, $bypassValidation, $serialNumber, $trackingStepKey, $damagePhoto) {
             // Lock the box row to prevent race conditions during status updates
             $lockedBox = Box::query()->whereKey($box->id)->lockForUpdate()->firstOrFail();
             $lockedBox->bypassStatusValidation = $bypassValidation;
@@ -71,6 +79,7 @@ class BoxRepository implements BoxRepositoryInterface
             $deliveryProofPath = null;
             $pickupProofPath = null;
             $signaturePath = null;
+            $damagePhotoPath = null;
 
             if ($deliveryProof) {
                 if ($lockedBox->delivery_proof_path) {
@@ -86,6 +95,14 @@ class BoxRepository implements BoxRepositoryInterface
                 }
 
                 $pickupProofPath = $pickupProof->store('pickup-proofs/'.$lockedBox->tracking_number, 'public');
+            }
+
+            if ($damagePhoto) {
+                if ($lockedBox->damage_photo_path) {
+                    Storage::disk('public')->delete($lockedBox->damage_photo_path);
+                }
+
+                $damagePhotoPath = $damagePhoto->store('damage-proofs/'.$lockedBox->tracking_number, 'public');
             }
 
             if ($signature) {
@@ -124,9 +141,9 @@ class BoxRepository implements BoxRepositoryInterface
                         : "Milestone reached: {$milestoneName}.";
                 }
             } elseif ($trackingStepKey) {
-                $steps = app(\App\Services\TrackingStepService::class)->getSteps();
+                $steps = app(TrackingStepService::class)->getSteps();
                 $step = collect($steps)->firstWhere('key', $trackingStepKey);
-                
+
                 $location = $lockedBox->warehouse_location ?? ($statusEnum === BoxStatus::ReceivedByWarehouse ? 'Warehouse' : 'In-Transit');
                 $description = $notes ?: ($step['label'] ?? ($statusEnum ? "Status updated to {$statusEnum->label()}." : 'Status updated.'));
             } else {
@@ -134,15 +151,13 @@ class BoxRepository implements BoxRepositoryInterface
                 $description = $notes ?: ($statusEnum ? "Status updated to {$statusEnum->label()}." : 'Status updated.');
             }
 
-            if (! $bypassValidation) {
-                $this->assertDeliveryEvidence(
-                    box: $lockedBox,
-                    targetStatus: $statusEnum,
-                    deliveryProofPath: $deliveryProofPath,
-                    signaturePath: $signaturePath,
-                    overrideReason: $deliveryOverrideReason,
-                );
-            }
+            $this->assertDeliveryEvidence(
+                box: $lockedBox,
+                targetStatus: $statusEnum,
+                deliveryProofPath: $deliveryProofPath,
+                signaturePath: $signaturePath,
+                overrideReason: $deliveryOverrideReason,
+            );
 
             if ($statusEnum === BoxStatus::Delivered && $deliveryOverrideReason) {
                 $description = trim($description."\nAdmin proof override: {$deliveryOverrideReason}");
@@ -153,11 +168,15 @@ class BoxRepository implements BoxRepositoryInterface
                 'courier_notes' => $notes,
                 'delivery_proof_path' => $deliveryProofPath ?? $lockedBox->delivery_proof_path,
                 'pickup_proof_path' => $pickupProofPath ?? $lockedBox->pickup_proof_path,
+                'damage_photo_path' => $damagePhotoPath ?? $lockedBox->damage_photo_path,
                 'signature_path' => $signaturePath ?? $lockedBox->signature_path,
             ];
 
             if ($trackingStepKey !== null) {
                 $updates['tracking_step_key'] = $trackingStepKey;
+            } elseif ($statusEnum !== null && $statusEnum !== $lockedBox->status) {
+                $defaultStep = collect(app(TrackingStepService::class)->getSteps())->firstWhere('system_status', $statusEnum->value);
+                $updates['tracking_step_key'] = $defaultStep ? $defaultStep['key'] : $statusEnum->value;
             }
 
             if ($serialNumber !== null) {
@@ -168,10 +187,10 @@ class BoxRepository implements BoxRepositoryInterface
             if ($activeSerialNumber) {
                 $isCollected = ($statusEnum === BoxStatus::Collected) || ($statusEnum === null && $lockedBox->status === BoxStatus::Collected);
                 $newSerialStatus = $isCollected
-                    ? \App\Enums\SerialNumberStatus::Assigned->value
-                    : \App\Enums\SerialNumberStatus::Allocated->value;
+                    ? SerialNumberStatus::Assigned->value
+                    : SerialNumberStatus::Allocated->value;
 
-                \App\Models\SerialNumber::where('serial_number', $activeSerialNumber)->update([
+                SerialNumber::where('serial_number', $activeSerialNumber)->update([
                     'status' => $newSerialStatus,
                     'box_id' => $lockedBox->id,
                     'assigned_by' => $courierId,
@@ -181,55 +200,29 @@ class BoxRepository implements BoxRepositoryInterface
 
             $lockedBox->update($updates);
 
-            if (! $trackingPhase && $trackingStepKey) {
-                $phaseEnum = \App\Enums\TrackingPhase::tryFrom($trackingStepKey);
-                if ($phaseEnum) {
-                    $trackingPhase = $phaseEnum->value;
-                }
-            }
-
-            if (! $trackingPhase && $statusEnum) {
-                $trackingPhase = match ($statusEnum) {
-                    BoxStatus::Collected => \App\Enums\TrackingPhase::PICKED_UP->value,
-                    BoxStatus::ReceivedByWarehouse => \App\Enums\TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
-                    BoxStatus::LoadedToContainer => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
-                    BoxStatus::InTransit => \App\Enums\TrackingPhase::IN_TRANSIT_SEA->value,
-                    BoxStatus::Arrived => \App\Enums\TrackingPhase::ARRIVED_MANILA_PORT->value,
-                    BoxStatus::ForCheckingUnloading, BoxStatus::UnloadedManila => \App\Enums\TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
-                    BoxStatus::ForDeliveryScheduling, BoxStatus::EnRouteRoRo => \App\Enums\TrackingPhase::DISPATCHED_TO_LOCAL_HUB->value,
-                    BoxStatus::OutForDelivery => \App\Enums\TrackingPhase::OUT_FOR_DELIVERY->value,
-                    BoxStatus::Delivered => \App\Enums\TrackingPhase::DELIVERED->value,
-                    default => null,
-                };
-            }
-
-            // Prevent duplicate adjacent tracking history entries for the exact same status and step
+            // Prevent duplicate adjacent tracking history entries for the same status
             $lastUpdate = BoxUpdate::where('box_id', $lockedBox->id)->latest('id')->first();
             $newStatusValue = ($statusEnum ? $statusEnum->value : null) ?? $lockedBox->status?->value ?? 'unknown';
-            $lastPhaseValue = $lastUpdate?->tracking_phase instanceof \App\Enums\TrackingPhase
-                ? $lastUpdate->tracking_phase->value
-                : $lastUpdate?->tracking_phase;
 
             if (
-                $lastUpdate &&
-                $lastUpdate->status === $newStatusValue &&
-                $lastUpdate->tracking_step_key === $trackingStepKey &&
-                $lastPhaseValue === $trackingPhase &&
-                $lastUpdate->description === $description
+                $lastUpdate
+                && $lastUpdate->status === $newStatusValue
+                && $lastUpdate->description === $description
+                && $lastUpdate->tracking_step_key === $trackingStepKey
             ) {
                 return;
             }
 
             // Determine admin override flags at write-time
-            $updater = \App\Models\User::find($courierId);
+            $updater = $courierId ? User::find($courierId) : null;
             $isAdminOverride = $updater && in_array($updater->role, ['admin', 'super_admin']);
             $stepsBypassed = 0;
 
             if ($isAdminOverride && $trackingStepKey) {
-                $stepService = app(\App\Services\TrackingStepService::class);
+                $stepService = app(TrackingStepService::class);
                 $allSteps = $stepService->getSteps();
                 $currentStatus = $lockedBox->getOriginal('status');
-                $currentStatusValue = $currentStatus instanceof \App\Enums\BoxStatus ? $currentStatus->value : $currentStatus;
+                $currentStatusValue = $currentStatus instanceof BoxStatus ? $currentStatus->value : $currentStatus;
 
                 // Find the order of the box's previous status and the new step
                 $previousStep = collect($allSteps)->first(fn ($s) => $s['system_status'] === $currentStatusValue);
@@ -240,6 +233,27 @@ class BoxRepository implements BoxRepositoryInterface
                     $newOrder = (int) $newStep['order'];
                     $stepsBypassed = max(0, $newOrder - $previousOrder - 1);
                 }
+            }
+            // A configured tracking step is more specific than the broad box
+            // status (for example, `sorting` and sea transit both use
+            // `in_transit`). Keep the customer-facing milestone precise.
+            if (! $trackingPhase && $trackingStepKey) {
+                $trackingPhase = TrackingPhase::tryFrom($trackingStepKey)?->value;
+            }
+
+            if (! $trackingPhase && $statusEnum) {
+                $trackingPhase = match ($statusEnum) {
+                    BoxStatus::Collected => TrackingPhase::PICKED_UP->value,
+                    BoxStatus::ReceivedByWarehouse => TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
+                    BoxStatus::LoadedToContainer => TrackingPhase::LOADING_CONTAINER->value,
+                    BoxStatus::InTransit => TrackingPhase::IN_TRANSIT_SEA->value,
+                    BoxStatus::Arrived => TrackingPhase::ARRIVED_MANILA_PORT->value,
+                    BoxStatus::ForCheckingUnloading, BoxStatus::UnloadedManila => TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+                    BoxStatus::ForDeliveryScheduling, BoxStatus::EnRouteRoRo => TrackingPhase::DISPATCHED_TO_LOCAL_HUB->value,
+                    BoxStatus::OutForDelivery => TrackingPhase::OUT_FOR_DELIVERY->value,
+                    BoxStatus::Delivered => TrackingPhase::DELIVERED->value,
+                    default => null,
+                };
             }
 
             BoxUpdate::create([
@@ -291,7 +305,7 @@ class BoxRepository implements BoxRepositoryInterface
     public function getStatsByCourier(int $courierId): array
     {
         $statusCounts = Box::whereHas('runsheets', function ($query) use ($courierId) {
-            $query->where('type', \App\Enums\RunsheetType::Delivery->value)
+            $query->where('type', RunsheetType::Delivery->value)
                 ->where('courier_id', $courierId)
                 ->whereIn('status', [RunsheetStatus::Assigned, RunsheetStatus::InProgress]);
         })

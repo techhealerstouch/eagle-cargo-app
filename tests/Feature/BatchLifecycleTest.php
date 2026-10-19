@@ -17,7 +17,7 @@ class BatchLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_batch_becomes_ready_to_close_when_box_capacity_is_reached()
+    public function test_batch_can_be_transitioned_to_ready_to_close_when_box_capacity_is_reached()
     {
         $service = app(BatchService::class);
 
@@ -36,6 +36,8 @@ class BatchLifecycleTest extends TestCase
             'status' => BoxStatus::ReceivedByWarehouse,
             'weight' => 10,
         ]);
+
+        $service->update($batch, ['status' => BatchStatus::ReadyToClose]);
 
         $this->assertSame(BatchStatus::ReadyToClose, $batch->fresh()->status);
         $this->assertSame(1, $batch->fresh()->current_box_count);
@@ -64,6 +66,8 @@ class BatchLifecycleTest extends TestCase
             'weight' => 8,
         ]);
 
+        $service->update($batch, ['status' => BatchStatus::ReadyToClose]);
+
         /** @var User $actor */
         $actor = User::factory()->create();
         $this->actingAs($actor);
@@ -76,8 +80,8 @@ class BatchLifecycleTest extends TestCase
         $this->assertSame(BatchStatus::Sailed, $sailedBatch->fresh()->status);
         $this->assertNotNull($sailedBatch->fresh()->sailed_at);
 
-        // A next batch should be auto-created from template
-        $this->assertSame(2, Batch::count());
+        // Next batch creation requires explicit admin confirmation dialog
+        $this->assertSame(1, Batch::count());
     }
 
     public function test_invalid_direct_transition_is_rejected()
@@ -220,72 +224,86 @@ class BatchLifecycleTest extends TestCase
         ]);
     }
 
-    public function test_reopening_batch_resets_status_and_timestamps(): void
+    public function test_marking_batch_under_customs_clearance_cascades_tracking_phase(): void
     {
-        $service = app(BatchService::class);
+        /** @var User $actor */
+        $actor = User::factory()->create();
+        $this->actingAs($actor);
 
-        $batch = $service->create([
-            'branch_name' => 'Sydney Hub',
-            'capacity_boxes' => 5,
-            'status' => BatchStatus::Open,
+        $batch = Batch::factory()->create([
+            'status' => BatchStatus::Arrived,
         ]);
 
-        $boxType = BoxType::factory()->create(['dimensions' => '24x24x24']);
-        Box::factory()->create([
+        $box = Box::factory()->create([
             'batch_id' => $batch->id,
-            'box_type_id' => $boxType->id,
-            'status' => BoxStatus::ReceivedByWarehouse,
-            'weight' => 10,
+            'status' => BoxStatus::Arrived,
+            'weight' => 8,
         ]);
 
-        // Move to Sailed
-        $batch = $service->update($batch, [
-            'status' => BatchStatus::Sailed->value,
+        $batch->update(['status' => BatchStatus::UnderCustomsClearance]);
+
+        $this->assertSame(BoxStatus::Arrived, $box->fresh()->status);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $box->id,
+            'status' => BoxStatus::Arrived->value,
+            'tracking_phase' => TrackingPhase::CUSTOMS_CLEARANCE->value,
+            'updated_by' => $actor->id,
         ]);
-
-        $this->assertSame(BatchStatus::Sailed, $batch->status);
-        $this->assertNotNull($batch->sailed_at);
-
-        // Reopen to Open
-        $reopened = $service->update($batch, [
-            'status' => BatchStatus::Open->value,
-        ]);
-
-        $this->assertSame(BatchStatus::Open, $reopened->status);
-        $this->assertNull($reopened->sailed_at);
-        $this->assertNull($reopened->arrived_at);
-        $this->assertNull($reopened->delivered_at);
     }
 
-    public function test_admin_can_reopen_batch_via_route(): void
+    public function test_marking_batch_released_by_boc_cascades_tracking_phase(): void
     {
-        /** @var User $admin */
-        $admin = User::factory()->create(['role' => \App\Enums\Role::Admin]);
-        $this->actingAs($admin);
+        /** @var User $actor */
+        $actor = User::factory()->create();
+        $this->actingAs($actor);
 
-        $service = app(BatchService::class);
-        $batch = $service->create([
-            'branch_name' => 'Sydney Hub',
-            'capacity_boxes' => 5,
-            'status' => BatchStatus::Open,
+        $batch = Batch::factory()->create([
+            'status' => BatchStatus::UnderCustomsClearance,
         ]);
 
-        $boxType = BoxType::factory()->create(['dimensions' => '24x24x24']);
-        Box::factory()->create([
+        $box = Box::factory()->create([
             'batch_id' => $batch->id,
-            'box_type_id' => $boxType->id,
-            'status' => BoxStatus::ReceivedByWarehouse,
-            'weight' => 10,
+            'status' => BoxStatus::Arrived,
+            'weight' => 8,
         ]);
 
-        $batch = $service->update($batch, ['status' => BatchStatus::Sailed->value]);
-        $this->assertSame(BatchStatus::Sailed, $batch->status);
+        $batch->update(['status' => BatchStatus::ReleasedByBoc]);
 
-        $response = $this->post(route('admin.batches.reopen', $batch));
-        $response->assertSessionHasNoErrors();
-        $response->assertSessionHas('success');
+        $this->assertSame(BoxStatus::Arrived, $box->fresh()->status);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $box->id,
+            'status' => BoxStatus::Arrived->value,
+            'tracking_phase' => TrackingPhase::RELEASED_BY_BOC->value,
+            'updated_by' => $actor->id,
+        ]);
+    }
 
-        $this->assertSame(BatchStatus::Open, $batch->fresh()->status);
-        $this->assertNull($batch->fresh()->sailed_at);
+    public function test_marking_batch_received_at_warehouse_unloads_boxes_and_completes_batch(): void
+    {
+        /** @var User $actor */
+        $actor = User::factory()->create();
+        $this->actingAs($actor);
+
+        $batch = Batch::factory()->create([
+            'status' => BatchStatus::ReleasedByBoc,
+        ]);
+
+        $box = Box::factory()->create([
+            'batch_id' => $batch->id,
+            'status' => BoxStatus::Arrived,
+            'weight' => 8,
+        ]);
+
+        $batch->update(['status' => BatchStatus::ReceivedAtWarehouse]);
+
+        $this->assertSame(BatchStatus::ReceivedAtWarehouse, $batch->fresh()->status);
+        $this->assertTrue($batch->fresh()->status->isTerminal());
+        $this->assertSame(BoxStatus::UnloadedManila, $box->fresh()->status);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $box->id,
+            'status' => BoxStatus::UnloadedManila->value,
+            'tracking_phase' => TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+            'updated_by' => $actor->id,
+        ]);
     }
 }

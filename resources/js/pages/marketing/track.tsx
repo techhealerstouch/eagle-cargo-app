@@ -209,6 +209,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                 .map((step) => ({
                     label: step.label,
                     statusKey: step.key,
+                    phase: step.phase,
                     systemStatus: step.system_status,
                     stepType: step.step_type,
                     description: step.customer_message || step.description,
@@ -228,10 +229,10 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
 
         // Default Fallback Steps if no settings configured
         return [
-            { label: 'Pending Confirmation', statusKey: 'pending', systemStatus: 'pending', icon: Package },
-            { label: 'Collected', statusKey: 'collected', systemStatus: 'collected', icon: Truck },
-            { label: 'In Transit', statusKey: 'in_transit', systemStatus: 'in_transit', icon: Ship },
-            { label: 'Delivered', statusKey: 'delivered', systemStatus: 'delivered', icon: Home },
+            { label: 'Pending Confirmation', statusKey: 'pending', systemStatus: 'pending', phase: 'Origin', icon: Package },
+            { label: 'Collected', statusKey: 'collected', systemStatus: 'collected', phase: 'Origin', icon: Truck },
+            { label: 'In Transit', statusKey: 'in_transit', systemStatus: 'in_transit', phase: 'International Transit', icon: Ship },
+            { label: 'Delivered', statusKey: 'delivered', systemStatus: 'delivered', phase: 'Destination', icon: Home },
         ];
     }, [activeTrackingData?.area_milestones, trackingSteps]);
 
@@ -290,36 +291,103 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
             }
         }
 
-        // 4. Match by system status or exact status key
+        // 4. Exact tracking_step_key match (Highest precision)
+        const activeKey = (activeTrackingData.tracking_step_key || '').toLowerCase().trim();
+        if (activeKey) {
+            const keyMatch = dynamicSteps.findIndex((step) =>
+                step.statusKey.toLowerCase() === activeKey ||
+                step.statusKey.toLowerCase().replace(/_/g, ' ') === activeKey.replace(/_/g, ' ')
+            );
+            if (keyMatch !== -1) {
+                return keyMatch;
+            }
+        }
+
+        // 5. Match by active tracking_phase
+        const activePhase = (activeTrackingData.tracking_phase || '').toLowerCase().trim();
+        if (activePhase) {
+            const phaseMatch = dynamicSteps.findIndex((step) =>
+                step.statusKey.toLowerCase() === activePhase ||
+                step.statusKey.toLowerCase().replace(/_/g, ' ') === activePhase.replace(/_/g, ' ')
+            );
+            if (phaseMatch !== -1) {
+                return phaseMatch;
+            }
+        }
+
+        // 6. Match by latest timeline event's specific tracking_step_key or tracking_phase
+        if (timeline && timeline.length > 0) {
+            for (const event of timeline) {
+                const eventStepKey = (event.tracking_step_key || '').toLowerCase().trim();
+                if (eventStepKey) {
+                    const matchIdx = dynamicSteps.findIndex((step) =>
+                        step.statusKey.toLowerCase() === eventStepKey ||
+                        step.statusKey.toLowerCase().replace(/_/g, ' ') === eventStepKey.replace(/_/g, ' ')
+                    );
+                    if (matchIdx !== -1) {
+                        return matchIdx;
+                    }
+                }
+
+                const eventPhase = (event.tracking_phase || '').toLowerCase().trim();
+                if (eventPhase) {
+                    const matchIdx = dynamicSteps.findIndex((step) =>
+                        step.statusKey.toLowerCase() === eventPhase ||
+                        step.statusKey.toLowerCase().replace(/_/g, ' ') === eventPhase.replace(/_/g, ' ')
+                    );
+                    if (matchIdx !== -1) {
+                        return matchIdx;
+                    }
+                }
+            }
+        }
+
+        // 7. Match by status_label semantic match
+        const activeLabel = (activeTrackingData.status_label || '').toLowerCase().trim();
+        if (activeLabel) {
+            const labelMatch = dynamicSteps.findIndex((step) => {
+                const stepLabel = step.label.toLowerCase().trim();
+                if (stepLabel === activeLabel) return true;
+                if (
+                    (activeLabel.includes('customs') || activeLabel.includes('boc')) &&
+                    (stepLabel.includes('customs') || stepLabel.includes('boc')) &&
+                    !activeLabel.includes('release') && !stepLabel.includes('release')
+                ) {
+                    return true;
+                }
+                if (
+                    (activeLabel.includes('release') || activeLabel.includes('cleared')) &&
+                    (stepLabel.includes('release') || stepLabel.includes('cleared'))
+                ) {
+                    return true;
+                }
+                return false;
+            });
+            if (labelMatch !== -1) {
+                return labelMatch;
+            }
+        }
+
+        // 8. Exact statusKey match with rawStatus
+        const exactKeyMatch = dynamicSteps.findIndex((step) =>
+            step.statusKey.toLowerCase() === rawStatus ||
+            step.statusKey.toLowerCase().replace(/_/g, ' ') === s
+        );
+        if (exactKeyMatch !== -1) {
+            return exactKeyMatch;
+        }
+
+        // 9. Match by system status fallback (Last resort)
         const systemMatch = dynamicSteps.findIndex((step) =>
             step.systemStatus?.toLowerCase() === rawStatus ||
-            step.statusKey.toLowerCase() === rawStatus ||
-            step.systemStatus?.toLowerCase().replace(/_/g, ' ') === s ||
-            step.statusKey.toLowerCase().replace(/_/g, ' ') === s
+            step.systemStatus?.toLowerCase().replace(/_/g, ' ') === s
         );
 
         if (systemMatch !== -1) {
             return systemMatch;
         }
 
-        // 5. Match by latest phase in timeline
-        if (timeline && timeline.length > 0) {
-            for (const event of timeline) {
-                const eventPhase = (event.tracking_phase || '').toLowerCase().trim();
-                const eventStatus = (event.status || '').toLowerCase().trim();
-
-                const matchIdx = dynamicSteps.findIndex((step) =>
-                    (eventPhase && (step.statusKey.toLowerCase() === eventPhase || step.systemStatus?.toLowerCase() === eventPhase)) ||
-                    (eventStatus && (step.statusKey.toLowerCase() === eventStatus || step.systemStatus?.toLowerCase() === eventStatus))
-                );
-
-                if (matchIdx !== -1) {
-                    return matchIdx;
-                }
-            }
-        }
-
-        // 6. Heuristic fallbacks for remaining statuses
+        // 10. Heuristic fallbacks for remaining statuses
         if (s.includes('out for delivery') || s.includes('dispatched')) {
             const outIndex = dynamicSteps.findIndex(
                 (step) => step.statusKey === 'out_for_delivery' || step.systemStatus === 'out_for_delivery'
@@ -331,7 +399,7 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
 
         if (s.includes('transit') || s.includes('shipping') || s.includes('vessel') || s.includes('container') || s.includes('arrived')) {
             const transitIdx = dynamicSteps.findIndex(
-                (step) => step.statusKey === 'in_transit' || step.systemStatus === 'in_transit' || step.label?.toLowerCase().includes('transit')
+                (step) => step.statusKey === 'in_transit' || step.systemStatus === 'in_transit' || step.phase?.toLowerCase().includes('transit')
             );
             if (transitIdx !== -1) {
                 return transitIdx;
@@ -368,11 +436,15 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
             s.systemStatus === 'in_transit' || s.statusKey === 'in_transit' || s.statusKey.includes('transit') || s.statusKey.includes('sea')
         );
 
+        const arrivedStep = dynamicSteps.find((s) =>
+            s.statusKey.includes('customs') || s.statusKey.includes('boc') || s.statusKey.includes('arrived') || s.systemStatus === 'arrived'
+        );
+
         const deliveryStep = dynamicSteps.find((s) =>
             s.systemStatus === 'out_for_delivery' || s.statusKey === 'out_for_delivery' || s.statusKey.includes('delivery')
         );
 
-        const anchors = [firstStep, pickupStep, transitStep, deliveryStep, lastStep].filter(
+        const anchors = [firstStep, pickupStep, transitStep, arrivedStep, deliveryStep, lastStep].filter(
             (step, idx, arr): step is NormalizedStep => Boolean(step) && arr.indexOf(step) === idx
         );
 
@@ -389,12 +461,18 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
             return 0;
         }
 
-        const matchIdx = stepperSteps.findIndex((s) =>
-            s.statusKey === activeStep.statusKey ||
-            (s.systemStatus && s.systemStatus === activeStep.systemStatus)
+        const exactMatchIdx = stepperSteps.findIndex((s) =>
+            s.statusKey === activeStep.statusKey
         );
-        if (matchIdx !== -1) {
-            return matchIdx;
+        if (exactMatchIdx !== -1) {
+            return exactMatchIdx;
+        }
+
+        const sysMatchIdx = stepperSteps.findIndex((s) =>
+            s.systemStatus && s.systemStatus === activeStep.systemStatus
+        );
+        if (sysMatchIdx !== -1) {
+            return sysMatchIdx;
         }
 
         const ratio = currentStepIndex / Math.max(1, dynamicSteps.length - 1);
@@ -534,9 +612,13 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                         {activeTrackingData.booking_id && activeTrackingData.declaration_form_status === 'missing' && activeTrackingData.status?.toLowerCase() !== 'cancelled' && (
                             <DeclarationAlert
                                 bookingId={activeTrackingData.booking_id}
-                                trackingNumber={activeTrackingData.tracking_number || activeTrackingData.booking_reference}
-                                canEdit={Boolean(auth.user)}
+                                bookingReference={activeTrackingData.booking_reference}
+                                isGuest={activeTrackingData.is_guest}
+                                canEdit={Boolean(auth.user || activeTrackingData.can_edit_declaration)}
+                                canSubmit={Boolean(auth.user || activeTrackingData.can_edit_declaration)}
+                                trackingNumber={activeTrackingData.tracking_number}
                                 resendsRemaining={activeTrackingData.declaration_resends_remaining}
+                                resendsMax={activeTrackingData.declaration_resends_max}
                                 senderEmailMasked={activeTrackingData.sender_email_masked}
                             />
                         )}

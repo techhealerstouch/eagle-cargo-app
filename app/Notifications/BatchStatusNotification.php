@@ -5,8 +5,8 @@ namespace App\Notifications;
 use App\Enums\BatchStatus;
 use App\Enums\NotificationEvent;
 use App\Models\Batch;
+use App\Models\Box;
 use App\Notifications\Channels\BrevoSmsMessage;
-use App\Notifications\Channels\BrevoSmsChannel;
 use App\Services\NotificationService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -68,13 +68,13 @@ class BatchStatusNotification extends Notification implements ShouldQueue
             if (isset($notifiable->sender)) {
                 $sender = $notifiable->sender;
                 if ($sender) {
-                    $box = \App\Models\Box::where('batch_id', $this->batch->id)
+                    $box = Box::where('batch_id', $this->batch->id)
                         ->whereHas('booking', function ($q) use ($sender) {
                             $q->where('sender_id', $sender->id);
                         })
                         ->first();
                     if ($box) {
-                        $url = '/track/' . $box->tracking_number . '?highlight=1';
+                        $url = '/track/'.$box->tracking_number.'?highlight=1';
                     }
                 }
             }
@@ -115,9 +115,7 @@ class BatchStatusNotification extends Notification implements ShouldQueue
                 'batch' => $this->batch->batch_number,
                 'port' => $this->batch->destination_port ?? 'destination',
             ]),
-            BatchStatus::Delivered => __('notifications.batch.message.delivered', [
-                'batch' => $this->batch->batch_number,
-            ]),
+            BatchStatus::ReceivedAtWarehouse => sprintf('Batch %s has safely arrived and been unloaded at Manila Warehouse. Packages are being sorted for local dispatch.', $this->batch->batch_number),
             default => __('notifications.batch.message.update', [
                 'batch' => $this->batch->batch_number,
                 'status' => $statusLabel,
@@ -133,7 +131,6 @@ class BatchStatusNotification extends Notification implements ShouldQueue
         return match ($this->status) {
             BatchStatus::Sailed => NotificationEvent::BatchSailed,
             BatchStatus::Arrived => NotificationEvent::BatchArrived,
-            BatchStatus::Delivered => NotificationEvent::BatchDelivered,
             default => null,
         };
     }
@@ -147,9 +144,7 @@ class BatchStatusNotification extends Notification implements ShouldQueue
             BatchStatus::Arrived => __('notifications.batch.subject.arrived', [
                 'batch' => $this->batch->batch_number,
             ]),
-            BatchStatus::Delivered => __('notifications.batch.subject.delivered', [
-                'batch' => $this->batch->batch_number,
-            ]),
+            BatchStatus::ReceivedAtWarehouse => sprintf('Batch %s: Received at Manila Warehouse', $this->batch->batch_number),
             default => __('notifications.batch.subject.update', [
                 'batch' => $this->batch->batch_number,
             ]),
@@ -160,8 +155,8 @@ class BatchStatusNotification extends Notification implements ShouldQueue
     {
         return match ($this->status) {
             BatchStatus::Sailed => 'Your Package is On Its Way!',
-            BatchStatus::Arrived => 'Your Package Has Arrived!',
-            BatchStatus::Delivered => 'Package Delivered!',
+            BatchStatus::Arrived => 'Your Package Has Arrived at Port!',
+            BatchStatus::ReceivedAtWarehouse => 'Arrived at Manila Warehouse!',
             default => 'Shipment Update',
         };
     }
@@ -178,9 +173,7 @@ class BatchStatusNotification extends Notification implements ShouldQueue
                 'batch' => $this->batch->batch_number,
                 'port' => $this->batch->destination_port ?? 'destination',
             ]),
-            BatchStatus::Delivered => __('notifications.batch.message.delivered', [
-                'batch' => $this->batch->batch_number,
-            ]),
+            BatchStatus::ReceivedAtWarehouse => sprintf('Batch %s has safely arrived and been unloaded at Manila Warehouse. Packages are being sorted for local dispatch.', $this->batch->batch_number),
             default => __('notifications.batch.message.update', [
                 'batch' => $this->batch->batch_number,
                 'status' => $this->status->label(),

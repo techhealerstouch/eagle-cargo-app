@@ -5,11 +5,13 @@ namespace App\Observers;
 use App\Enums\BatchStatus;
 use App\Enums\BoxStatus;
 use App\Models\Batch;
+use App\Models\BoxUpdate;
 use App\Models\User;
 use App\Notifications\BatchLifecycleNotification;
 use App\Notifications\BatchStatusNotification;
 use App\Services\BatchService;
 use App\Services\TrackingCacheService;
+use App\Services\TrackingStepService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
 
@@ -22,7 +24,9 @@ class BatchObserver
         BatchStatus::ReadyToClose,
         BatchStatus::Sailed,
         BatchStatus::Arrived,
-        BatchStatus::Delivered,
+        BatchStatus::UnderCustomsClearance,
+        BatchStatus::ReleasedByBoc,
+        BatchStatus::ReceivedAtWarehouse,
     ];
 
     /**
@@ -31,8 +35,16 @@ class BatchObserver
     private const SENDER_NOTIFIABLE_STATUSES = [
         BatchStatus::Sailed,
         BatchStatus::Arrived,
-        BatchStatus::Delivered,
+        BatchStatus::ReceivedAtWarehouse,
     ];
+
+    /**
+     * Handle the Batch "created" event.
+     */
+    public function created(Batch $batch): void
+    {
+        app(\App\Services\CalendarEventService::class)->syncBatchEvents($batch);
+    }
 
     /**
      * Handle the Batch "updated" event.
@@ -40,6 +52,7 @@ class BatchObserver
     public function updated(Batch $batch): void
     {
         app(TrackingCacheService::class)->forgetBatch($batch);
+        app(\App\Services\CalendarEventService::class)->syncBatchEvents($batch);
 
         if ($batch->wasChanged('status')) {
             $this->handleStatusChange($batch);
@@ -71,14 +84,16 @@ class BatchObserver
     }
 
     /**
-     * When a batch transitions to Sailed or Arrived, cascade to all boxes.
-     * (Previously handled by ContainerObserver)
+     * When a batch transitions, cascade to all boxes.
      */
     private function cascadeStatusToBoxes(Batch $batch, BatchStatus $status): void
     {
         $boxStatus = match ($status) {
             BatchStatus::Sailed => BoxStatus::InTransit,
-            BatchStatus::Arrived => BoxStatus::Arrived,
+            BatchStatus::Arrived,
+            BatchStatus::UnderCustomsClearance,
+            BatchStatus::ReleasedByBoc => BoxStatus::Arrived,
+            BatchStatus::ReceivedAtWarehouse => BoxStatus::UnloadedManila,
             default => null,
         };
 
@@ -96,7 +111,7 @@ class BatchObserver
     private function cascadeTrackingPhaseToBoxes(Batch $batch, BatchStatus $status): void
     {
         $batchService = app(BatchService::class);
-        $trackingStepService = app(\App\Services\TrackingStepService::class);
+        $trackingStepService = app(TrackingStepService::class);
 
         $trackingPhase = $batchService->resolveTrackingPhaseForStatus($status);
 
@@ -106,11 +121,9 @@ class BatchObserver
 
         // --- Prevent Downgrading ---
         // If the batch already has boxes at this or a later tracking phase, don't revert them.
-        // This is especially important when a user manually updates to a later phase (like Customs Clearance)
-        // which triggers a batch status change to Arrived, which would otherwise loop back to Arrived at Port.
         $boxIds = $batch->boxes->pluck('id');
         if ($boxIds->isNotEmpty()) {
-            $latestUpdate = \App\Models\BoxUpdate::whereIn('box_id', $boxIds)
+            $latestUpdate = BoxUpdate::whereIn('box_id', $boxIds)
                 ->whereNotNull('tracking_phase')
                 ->latest()
                 ->first();
@@ -127,9 +140,20 @@ class BatchObserver
 
         $description = match ($status) {
             BatchStatus::Sailed => sprintf('Container %s has sailed from origin port.', $batch->container_number),
-            BatchStatus::Arrived => sprintf('Container %s has arrived at Manila Port. Ready for warehouse sorting.', $batch->container_number),
-            BatchStatus::Delivered => 'Batch has been fully delivered.',
+            BatchStatus::Arrived => sprintf('Container %s has arrived at Philippine port. Ready for customs clearance.', $batch->container_number),
+            BatchStatus::UnderCustomsClearance => sprintf('Container %s is currently under customs inspection and clearance.', $batch->container_number),
+            BatchStatus::ReleasedByBoc => sprintf('Container %s has been released by customs and queued for warehouse delivery.', $batch->container_number),
+            BatchStatus::ReceivedAtWarehouse => sprintf('Container %s arrived at Manila Warehouse. Boxes safely unloaded for sorting and dispatch.', $batch->container_number),
             default => sprintf('Batch moved to %s.', $status->label()),
+        };
+
+        $targetStatus = match ($status) {
+            BatchStatus::Sailed => BoxStatus::InTransit,
+            BatchStatus::Arrived,
+            BatchStatus::UnderCustomsClearance,
+            BatchStatus::ReleasedByBoc => BoxStatus::Arrived,
+            BatchStatus::ReceivedAtWarehouse => BoxStatus::UnloadedManila,
+            default => null,
         };
 
         $batchService->bulkUpdateTrackingPhase(
@@ -137,6 +161,7 @@ class BatchObserver
             $trackingPhase,
             Auth::id(),
             $description,
+            $targetStatus,
         );
     }
 

@@ -6,6 +6,7 @@ use App\Enums\BatchStatus;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\Role;
 use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
 use App\Enums\TrackingPhase;
@@ -16,7 +17,9 @@ use App\Models\BoxUpdate;
 use App\Models\DataIntegrityWarning;
 use App\Models\Invoice;
 use App\Models\Runsheet;
+use App\Models\User;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Model;
 
 class DataIntegrityService
 {
@@ -33,6 +36,8 @@ class DataIntegrityService
     private const MISSED_ETA_HOURS = 24;
 
     private const STALE_SCAN_HOURS = 72;
+
+    private const PORT_DWELL_DAYS = 7;
 
     private const OPERATIONS_WARNING_TYPES = [
         'stale_scan',
@@ -56,6 +61,14 @@ class DataIntegrityService
         'paid_no_invoice',
         'booking_status_mismatch',
         'duplicate_batch_scan',
+        'port_dwell_overrun',
+        'orphan_runsheet_stop',
+        'payment_overcollection',
+    ];
+
+    private const SECURITY_WARNING_TYPES = [
+        'privileged_user_without_2fa',
+        'debug_mode_enabled',
     ];
 
     /**
@@ -87,6 +100,11 @@ class DataIntegrityService
             'delivered_no_invoice' => $this->checkDeliveredBookingsWithoutInvoice(),
             'paid_no_invoice' => $this->checkPaidBookingsWithoutInvoice(),
             'booking_status_mismatch' => $this->checkBookingStatusMismatches(),
+            'port_dwell_overrun' => $this->checkPortDwellOverruns(),
+            'orphan_runsheet_stop' => $this->checkOrphanRunsheetStops(),
+            'payment_overcollection' => $this->checkPaymentOvercollections(),
+            'privileged_users_without_2fa' => $this->checkPrivilegedUsersWithoutTwoFactor(),
+            'production_debug_mode' => $this->checkProductionDebugMode(),
         ];
 
         return $results;
@@ -320,6 +338,7 @@ class DataIntegrityService
             ->get()
             ->filter(fn (Box $box) => $this->lastScanAt($box)?->lessThanOrEqualTo(now()->subHours($this->slaHours('delayed_receipt'))));
 
+        /** @var Box $box */
         foreach ($boxes as $box) {
             $thresholdHours = $this->slaHours('delayed_receipt');
 
@@ -370,6 +389,7 @@ class DataIntegrityService
             ->get()
             ->filter(fn (Box $box) => $this->lastScanAt($box)?->lessThanOrEqualTo(now()->subHours($this->slaHours('overdue_loading'))));
 
+        /** @var Box $box */
         foreach ($boxes as $box) {
             $thresholdHours = $this->slaHours('overdue_loading');
 
@@ -429,6 +449,8 @@ class DataIntegrityService
                 BatchStatus::ReadyToClose->value,
                 BatchStatus::Sailed->value,
                 BatchStatus::Arrived->value,
+                BatchStatus::UnderCustomsClearance->value,
+                BatchStatus::ReleasedByBoc->value,
             ])
             ->whereHas('boxes', function ($query) {
                 $query->whereIn('status', [BoxStatus::Held->value, BoxStatus::Damaged->value])
@@ -471,7 +493,7 @@ class DataIntegrityService
             ->whereHas('batch', function ($query) {
                 $query->whereNotNull('eta_at')
                     ->where('eta_at', '<=', now()->subHours($this->slaHours('missed_eta')))
-                    ->where('status', '!=', BatchStatus::Delivered->value);
+                    ->where('status', '!=', BatchStatus::ReceivedAtWarehouse->value);
             })
             ->whereNotIn('status', [BoxStatus::Delivered->value, BoxStatus::Cancelled->value])
             ->get();
@@ -571,6 +593,7 @@ class DataIntegrityService
             ->get()
             ->unique('box_id');
 
+        /** @var BoxUpdate $update */
         foreach ($updates as $update) {
             $box = $update->box;
             if (! $box) {
@@ -666,18 +689,18 @@ class DataIntegrityService
                         $payments->where(function ($settled) {
                             $settled->where(function ($nonCash) {
                                 $nonCash->where('is_cash_payment', false)
-                                        ->orWhereNull('is_cash_payment');
+                                    ->orWhereNull('is_cash_payment');
                             })->whereNotNull('paid_at');
                         })->orWhere(function ($cash) {
                             $cash->where('is_cash_payment', true)
-                                 ->whereNotNull('confirmed_at');
+                                ->whereNotNull('confirmed_at');
                         });
                     });
             })
             ->where(function ($query) {
                 // Also flag only if there's no reference or proof on the booking itself
                 $query->whereNull('payment_reference')
-                      ->whereNull('proof_of_payment');
+                    ->whereNull('proof_of_payment');
             })
             ->get();
 
@@ -774,6 +797,7 @@ class DataIntegrityService
                 return false;
             });
 
+        /** @var Booking $booking */
         foreach ($bookings as $booking) {
             $this->upsertRecordWarning(
                 type: 'booking_status_mismatch',
@@ -809,6 +833,7 @@ class DataIntegrityService
                 return abs($paid - (float) $invoice->amount) > 0.01;
             });
 
+        /** @var Invoice $invoice */
         foreach ($invoices as $invoice) {
             $settledPayments = $invoice->payments->filter(fn ($p) => $p->isSettled());
             $paid = (float) $settledPayments->sum('amount');
@@ -833,6 +858,189 @@ class DataIntegrityService
         }
 
         return $invoices->count();
+    }
+
+    public function checkPortDwellOverruns(): int
+    {
+        $thresholdDays = (int) config('logistics.sla_hours.port_dwell_days', self::PORT_DWELL_DAYS);
+        $thresholdDate = now()->subDays($thresholdDays);
+
+        $batches = Batch::query()
+            ->where('status', BatchStatus::Arrived->value)
+            ->where(function ($query) use ($thresholdDate) {
+                $query->whereNotNull('arrived_at')
+                    ->where('arrived_at', '<=', $thresholdDate)
+                    ->orWhere(function ($noArrived) use ($thresholdDate) {
+                        $noArrived->whereNull('arrived_at')
+                            ->where('updated_at', '<=', $thresholdDate);
+                    });
+            })
+            ->get();
+
+        foreach ($batches as $batch) {
+            $arrivedAt = $batch->arrived_at ?? $batch->updated_at;
+            $ageDays = $arrivedAt ? (int) $arrivedAt->diffInDays(now()) : $thresholdDays;
+
+            $this->upsertRecordWarning(
+                type: 'port_dwell_overrun',
+                record: $batch,
+                severity: 'high',
+                message: "Batch {$batch->batch_number} has been at destination port for {$ageDays} days ({$thresholdDays}d SLA) without completion.",
+                metadata: [
+                    'batch_number' => $batch->batch_number,
+                    'destination_port' => $batch->destination_port,
+                    'arrived_at' => $arrivedAt?->toDateTimeString(),
+                    'age_days' => $ageDays,
+                    'recommended_action' => 'Unpack container, sort boxes into local delivery hubs, or advance batch to Delivered status.',
+                    'severity_reason' => 'Container has exceeded destination port dwell limit, risking demurrage fees.',
+                    'target_url' => route('admin.batches.show', $batch, false),
+                    'resolve_url' => route('admin.batches.edit', $batch, false),
+                ],
+            );
+        }
+
+        return $batches->count();
+    }
+
+    public function checkOrphanRunsheetStops(): int
+    {
+        $runsheets = Runsheet::with(['picker', 'courier', 'bookings.boxes'])
+            ->where('status', RunsheetStatus::Completed->value)
+            ->whereHas('bookings.boxes', function ($query) {
+                $query->whereIn('status', [BoxStatus::Pending->value, BoxStatus::OutForDelivery->value]);
+            })
+            ->get();
+
+        foreach ($runsheets as $runsheet) {
+            $unactedBoxes = $runsheet->bookings
+                ->flatMap(fn (Booking $booking) => $booking->boxes)
+                ->filter(fn (Box $box) => in_array($box->status, [BoxStatus::Pending, BoxStatus::OutForDelivery], true));
+
+            $this->upsertRecordWarning(
+                type: 'orphan_runsheet_stop',
+                record: $runsheet,
+                severity: 'medium',
+                message: "Runsheet #{$runsheet->id} marked completed but still contains {$unactedBoxes->count()} unacted box(es).",
+                metadata: [
+                    'runsheet_id' => $runsheet->id,
+                    'runsheet_type' => $runsheet->type instanceof RunsheetType ? $runsheet->type->value : (string) $runsheet->type,
+                    'unacted_boxes' => $unactedBoxes->pluck('tracking_number')->values()->all(),
+                    'recommended_action' => 'Reassign uncollected or undelivered stops to a new active runsheet, or update box statuses.',
+                    'severity_reason' => 'Runsheet was marked completed without recording an outcome for all stops.',
+                    'target_url' => route('admin.runsheets.show', $runsheet, false),
+                    'resolve_url' => route('admin.runsheets.edit', $runsheet, false),
+                ],
+            );
+        }
+
+        return $runsheets->count();
+    }
+
+    public function checkPaymentOvercollections(): int
+    {
+        $invoices = Invoice::with(['booking', 'payments'])
+            ->whereHas('payments')
+            ->get()
+            ->filter(function (Invoice $invoice) {
+                $settledPayments = $invoice->payments->filter(fn ($p) => $p->isSettled());
+                if ($settledPayments->isEmpty()) {
+                    return false;
+                }
+                $paid = (float) $settledPayments->sum('amount');
+
+                return $paid > ((float) $invoice->amount + 0.01);
+            });
+
+        /** @var Invoice $invoice */
+        foreach ($invoices as $invoice) {
+            $settledPayments = $invoice->payments->filter(fn ($p) => $p->isSettled());
+            $paid = (float) $settledPayments->sum('amount');
+
+            $this->upsertRecordWarning(
+                type: 'payment_overcollection',
+                record: $invoice,
+                severity: 'low',
+                message: "Invoice {$invoice->invoice_number} has received payments exceeding the invoice amount.",
+                metadata: [
+                    'invoice_number' => $invoice->invoice_number,
+                    'booking_reference' => $invoice->booking?->reference_number,
+                    'invoice_amount' => round((float) $invoice->amount, 2),
+                    'payment_total' => round($paid, 2),
+                    'overpaid_amount' => round($paid - (float) $invoice->amount, 2),
+                    'recommended_action' => 'Review payment records for duplicate entries or process a customer refund / credit.',
+                    'severity_reason' => 'Settled payments exceed billed invoice total.',
+                    'target_url' => route('admin.invoices.show', $invoice, false),
+                    'resolve_url' => route('admin.invoices.edit', $invoice, false),
+                ],
+            );
+        }
+
+        return $invoices->count();
+    }
+
+    public function checkPrivilegedUsersWithoutTwoFactor(): int
+    {
+        $users = User::query()
+            ->whereIn('role', [Role::SuperAdmin->value, Role::Admin->value])
+            ->whereNull('two_factor_confirmed_at')
+            ->get();
+
+        foreach ($users as $user) {
+            $role = $user->role instanceof Role ? $user->role->value : (string) $user->role;
+
+            $this->upsertRecordWarning(
+                type: 'privileged_user_without_2fa',
+                record: $user,
+                severity: 'high',
+                message: "Privileged account {$user->email} does not have confirmed two-factor authentication.",
+                metadata: [
+                    'user_name' => $user->name,
+                    'user_email' => $user->email,
+                    'role' => $role,
+                    'recommended_action' => 'Have this account owner enable and confirm two-factor authentication before continuing privileged work.',
+                    'severity_reason' => 'A privileged account without two-factor authentication has an increased account-takeover risk.',
+                    'target_url' => route('admin.users.edit', $user, false),
+                ],
+            );
+        }
+
+        return $users->count();
+    }
+
+    public function checkProductionDebugMode(): int
+    {
+        $isEnabledInProduction = config('app.env') === 'production' && config('app.debug');
+
+        if (! $isEnabledInProduction) {
+            DataIntegrityWarning::where('type', 'debug_mode_enabled')
+                ->where('is_resolved', false)
+                ->update([
+                    'is_resolved' => true,
+                    'resolved_at' => now(),
+                ]);
+
+            return 0;
+        }
+
+        DataIntegrityWarning::updateOrCreate(
+            [
+                'type' => 'debug_mode_enabled',
+                'record_type' => null,
+                'record_id' => null,
+                'is_resolved' => false,
+            ],
+            [
+                'severity' => 'high',
+                'message' => 'Production debug mode is enabled and may expose sensitive application details.',
+                'metadata' => [
+                    'environment' => config('app.env'),
+                    'recommended_action' => 'Set APP_DEBUG=false in the production environment and redeploy the application configuration.',
+                    'severity_reason' => 'Debug output can reveal stack traces, configuration details, and internal paths to unauthenticated visitors.',
+                ],
+            ],
+        );
+
+        return 1;
     }
 
     /**
@@ -881,6 +1089,18 @@ class DataIntegrityService
                     ]);
                 }
             });
+
+        DataIntegrityWarning::whereIn('type', self::SECURITY_WARNING_TYPES)
+            ->where('is_resolved', false)
+            ->get()
+            ->each(function (DataIntegrityWarning $warning) {
+                if (! $this->securityWarningStillApplies($warning)) {
+                    $warning->update([
+                        'is_resolved' => true,
+                        'resolved_at' => now(),
+                    ]);
+                }
+            });
     }
 
     private function upsertBoxWarning(
@@ -921,7 +1141,7 @@ class DataIntegrityService
 
     private function upsertRecordWarning(
         string $type,
-        \Illuminate\Database\Eloquent\Model $record,
+        Model $record,
         string $severity,
         string $message,
         array $metadata,
@@ -963,6 +1183,9 @@ class DataIntegrityService
             'delivered_no_invoice',
             'paid_no_invoice',
             'booking_status_mismatch',
+            'port_dwell_overrun',
+            'orphan_runsheet_stop',
+            'payment_overcollection',
         ], true)) {
             return match ($warning->type) {
                 'missed_pickup' => $this->missedPickupStillApplies($warning),
@@ -975,6 +1198,9 @@ class DataIntegrityService
                 'delivered_no_invoice' => $this->deliveredNoInvoiceStillApplies($warning),
                 'paid_no_invoice' => $this->paidNoInvoiceStillApplies($warning),
                 'booking_status_mismatch' => $this->bookingStatusMismatchStillApplies($warning),
+                'port_dwell_overrun' => $this->portDwellOverrunStillApplies($warning),
+                'orphan_runsheet_stop' => $this->orphanRunsheetStopStillApplies($warning),
+                'payment_overcollection' => $this->paymentOvercollectionStillApplies($warning),
             };
         }
 
@@ -1004,7 +1230,7 @@ class DataIntegrityService
                 && $box->batch_id === null
                 && $lastScanAt?->lessThanOrEqualTo(now()->subHours($this->slaHours('overdue_loading'))),
             'missed_eta' => $box->batch !== null
-                && $box->batch->status !== BatchStatus::Delivered
+                && $box->batch->status !== BatchStatus::ReceivedAtWarehouse
                 && $box->batch->eta_at !== null
                 && $box->batch->eta_at->lessThanOrEqualTo(now()->subHours($this->slaHours('missed_eta')))
                 && ! in_array($box->status, [BoxStatus::Delivered, BoxStatus::Cancelled], true),
@@ -1023,6 +1249,17 @@ class DataIntegrityService
             'delivery_proof_missing' => $box->status === BoxStatus::Delivered
                 && (blank($box->delivery_proof_path) || blank($box->signature_path)),
             default => false,
+        };
+    }
+
+    private function securityWarningStillApplies(DataIntegrityWarning $warning): bool
+    {
+        return match ($warning->type) {
+            'privileged_user_without_2fa' => $warning->record instanceof User
+                && in_array($warning->record->role, [Role::SuperAdmin, Role::Admin], true)
+                && $warning->record->two_factor_confirmed_at === null,
+            'debug_mode_enabled' => config('app.env') === 'production' && config('app.debug'),
+            default => true,
         };
     }
 
@@ -1085,7 +1322,13 @@ class DataIntegrityService
 
         $batch->loadMissing('boxes.booking');
 
-        return in_array($batch->status, [BatchStatus::ReadyToClose, BatchStatus::Sailed, BatchStatus::Arrived], true)
+        return in_array($batch->status, [
+            BatchStatus::ReadyToClose,
+            BatchStatus::Sailed,
+            BatchStatus::Arrived,
+            BatchStatus::UnderCustomsClearance,
+            BatchStatus::ReleasedByBoc,
+        ], true)
             && $batch->boxes->contains(function (Box $box) {
                 return in_array($box->status, [BoxStatus::Held, BoxStatus::Damaged], true)
                     || ! in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true);
@@ -1173,11 +1416,11 @@ class DataIntegrityService
                     $query->where(function ($nonCash) {
                         $nonCash->where(function ($inner) {
                             $inner->where('is_cash_payment', false)
-                                  ->orWhereNull('is_cash_payment');
+                                ->orWhereNull('is_cash_payment');
                         })->whereNotNull('paid_at');
                     })->orWhere(function ($cash) {
                         $cash->where('is_cash_payment', true)
-                             ->whereNotNull('confirmed_at');
+                            ->whereNotNull('confirmed_at');
                     });
                 })
                 ->exists();
@@ -1199,6 +1442,53 @@ class DataIntegrityService
         $paid = (float) $settledPayments->sum('amount');
 
         return abs($paid - (float) $invoice->amount) > 0.01;
+    }
+
+    private function portDwellOverrunStillApplies(DataIntegrityWarning $warning): bool
+    {
+        $batch = $warning->record;
+
+        if (! $batch instanceof Batch) {
+            return false;
+        }
+
+        $thresholdDays = (int) config('logistics.sla_hours.port_dwell_days', self::PORT_DWELL_DAYS);
+        $thresholdDate = now()->subDays($thresholdDays);
+        $arrivedDate = $batch->arrived_at ?? $batch->updated_at;
+
+        return $batch->status === BatchStatus::Arrived
+            && $arrivedDate !== null
+            && $arrivedDate->lessThanOrEqualTo($thresholdDate);
+    }
+
+    private function orphanRunsheetStopStillApplies(DataIntegrityWarning $warning): bool
+    {
+        $runsheet = $warning->record;
+
+        if (! $runsheet instanceof Runsheet) {
+            return false;
+        }
+
+        $runsheet->loadMissing('bookings.boxes');
+
+        return $runsheet->status === RunsheetStatus::Completed
+            && $runsheet->bookings
+                ->flatMap(fn (Booking $booking) => $booking->boxes)
+                ->contains(fn (Box $box) => in_array($box->status, [BoxStatus::Pending, BoxStatus::OutForDelivery], true));
+    }
+
+    private function paymentOvercollectionStillApplies(DataIntegrityWarning $warning): bool
+    {
+        $invoice = $warning->record;
+
+        if (! $invoice instanceof Invoice) {
+            return false;
+        }
+
+        $invoice->loadMissing('payments');
+        $settled = $invoice->payments->filter(fn ($p) => $p->isSettled());
+
+        return (float) $settled->sum('amount') > ((float) $invoice->amount + 0.01);
     }
 
     private function staleThresholdHoursFor(Box $box): int

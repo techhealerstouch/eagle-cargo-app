@@ -1,8 +1,10 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
+    Activity,
     AlertTriangle,
     Anchor,
     ArrowLeft,
+    ArrowRight,
     Bell,
     CheckCircle2,
     CheckSquare,
@@ -22,10 +24,9 @@ import {
     Truck,
     User,
     Warehouse,
-    Activity,
-    RotateCcw,
+    X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { toast } from 'sonner';
 import ConfirmModal from '@/components/common/confirm-modal';
@@ -41,6 +42,7 @@ import {
 } from '@/components/ui/dialog';
 import AppLayout from '@/layouts/app-layout';
 import { cn, humanize } from '@/lib/utils';
+import { BOX_STATUS_CONFIG } from '@/lib/statuses';
 import type { BreadcrumbItem } from '@/types';
 
 /* ------------------------------------------------------------------ */
@@ -73,13 +75,16 @@ interface BoxData {
     recipient: Recipient | null;
     box_type: BoxType | null;
     batch_id?: number | null;
+    batch?: {
+        id: number;
+        batch_number: string;
+    } | null;
     booking: {
         id: number;
         reference_number: string;
         sender: Sender;
-        declaration_form_status?: string | null;
-        payment_status?: string | null;
-        payment_method?: string | null;
+        payment_status?: string;
+        status?: string;
         invoice?: {
             status: string;
         } | null;
@@ -98,15 +103,15 @@ interface BatchData {
     capacity_boxes: number | null;
     latest_tracking_phase: string | null;
     latest_tracking_phase_order: number | null;
-    override_note?: string | null;
-    override_details?: {
-        from_status: string;
-        to_status: string;
-        overridden_by: string;
-        overridden_at: string;
-    } | null;
-    warnings?: string[];
     boxes: BoxData[];
+    warnings?: string[];
+    override_note?: string;
+    override_details?: {
+        from_status?: string | null;
+        to_status?: string | null;
+        overridden_by?: string | null;
+        overridden_at?: string | null;
+    } | null;
 }
 
 interface TrackingPhaseOption {
@@ -129,89 +134,25 @@ interface PageFlash {
 /* ------------------------------------------------------------------ */
 
 const BOX_STATUS_STYLES: Record<string, string> = {
-    pending: 'bg-amber-50 text-amber-700 border-amber-200/80',
-    collected: 'bg-sky-50 text-sky-700 border-sky-200/80',
-    received_by_branch: 'bg-indigo-50 text-indigo-700 border-indigo-200/80',
-    in_transit: 'bg-sky-50 text-sky-700 border-sky-200/80',
-    arrived: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-    out_for_delivery: 'bg-amber-50 text-amber-700 border-amber-200/80',
-    delivered: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-    cancelled: 'bg-rose-50 text-rose-700 border-rose-200/80',
+    pending: 'bg-amber-500/10 text-amber-500 border-amber-500/30',
+    collected: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
+    received_by_branch: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
+    in_transit: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
+    arrived: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+    out_for_delivery: 'bg-amber-500/10 text-amber-500 border-amber-500/30',
+    delivered: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+    cancelled: 'bg-rose-500/10 text-rose-400 border-rose-500/30',
 };
 
 const BATCH_STATUS_STYLES: Record<string, string> = {
-    open: 'bg-sky-50 text-sky-700 border-sky-200/80',
-    loading: 'bg-sky-50 text-sky-700 border-sky-200/80',
-    ready_to_close: 'bg-amber-50 text-amber-700 border-amber-200/80',
-    sailed: 'bg-indigo-50 text-indigo-700 border-indigo-200/80',
-    arrived: 'bg-purple-50 text-purple-700 border-purple-200/80',
-};
-
-const INVOICE_STATUS_STYLES: Record<string, string> = {
-    unpaid: 'bg-rose-50 text-rose-700 border-rose-200/80',
-    partial: 'bg-amber-50 text-amber-700 border-amber-200/80',
-    paid: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-    voided: 'bg-zinc-50 text-zinc-700 border-zinc-200/80',
-};
-
-const checkEligibility = (box: BoxData) => {
-    const invoiceStatus = box.booking?.invoice?.status;
-    const paymentStatus = box.booking?.payment_status;
-    const paymentMethod = box.booking?.payment_method;
-
-    const isPaid = 
-        invoiceStatus === 'paid' || 
-        paymentStatus === 'paid' || 
-        paymentStatus === 'cash_collected' || 
-        paymentMethod === 'cash_on_pickup';
-    const hasDeclaration = ['submitted_online', 'physical_copy_received', 'submitted'].includes(box.booking?.declaration_form_status ?? '');
-    
-    if (isPaid && hasDeclaration) {
-        return { eligible: true, text: 'Ready', className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80' };
-    }
-    return { eligible: false, text: 'Not Ready', className: 'bg-rose-50 text-rose-700 border-rose-200/80' };
-};
-
-const getPaymentStatusInfo = (box: BoxData) => {
-    const method = box.booking?.payment_method;
-    const paymentStatus = box.booking?.payment_status;
-    const invoiceStatus = box.booking?.invoice?.status;
-
-    if (method === 'cash_on_pickup') {
-        return {
-            text: 'Cash on Pickup',
-            className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-        };
-    }
-    
-    if (paymentStatus === 'cash_collected') {
-        return {
-            text: 'Cash Collected',
-            className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-        };
-    }
-
-    if (paymentStatus === 'paid' || invoiceStatus === 'paid') {
-        return {
-            text: 'Paid',
-            className: 'bg-emerald-50 text-emerald-700 border-emerald-200/80',
-        };
-    }
-
-    if (paymentStatus === 'partially_paid' || invoiceStatus === 'partial') {
-        return {
-            text: 'Partial',
-            className: 'bg-amber-50 text-amber-700 border-amber-200/80',
-        };
-    }
-
-    const defaultText = humanize(paymentStatus || invoiceStatus || 'N/A');
-    const defaultClass = INVOICE_STATUS_STYLES[invoiceStatus ?? ''] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200';
-
-    return {
-        text: defaultText,
-        className: defaultClass,
-    };
+    open: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
+    loading: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
+    ready_to_close: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+    sailed: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30',
+    arrived: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
+    under_customs_clearance: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
+    released_by_boc: 'bg-sky-500/10 text-sky-400 border-sky-500/30',
+    received_at_warehouse: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
 };
 
 /* ------------------------------------------------------------------ */
@@ -250,6 +191,38 @@ export default function BatchShow({
     const [isSearching, setIsSearching] = useState(false);
     const [hasSearched, setHasSearched] = useState(false);
 
+    // Loaded-boxes search & filter state
+    const [loadedBoxSearch, setLoadedBoxSearch] = useState('');
+    const filteredLoadedBoxes = useMemo(() => {
+        if (!batch.boxes) return [];
+        if (!loadedBoxSearch.trim()) return batch.boxes;
+
+        const q = loadedBoxSearch.toLowerCase().trim();
+        return batch.boxes.filter((box) => {
+            const tracking = box.tracking_number?.toLowerCase() ?? '';
+            const bookingRef = box.booking?.reference_number?.toLowerCase() ?? '';
+            const sender = box.booking?.sender
+                ? `${box.booking.sender.first_name} ${box.booking.sender.last_name}`.toLowerCase()
+                : '';
+            const recipient = box.recipient?.name?.toLowerCase() ?? '';
+            const boxType = box.box_type?.name?.toLowerCase() ?? '';
+            const destination = box.destination?.toLowerCase() ?? '';
+            const status = (BOX_STATUS_CONFIG[box.status]?.label ?? box.status ?? '').toLowerCase();
+            const payment = box.booking?.payment_status?.toLowerCase() ?? '';
+
+            return (
+                tracking.includes(q) ||
+                bookingRef.includes(q) ||
+                sender.includes(q) ||
+                recipient.includes(q) ||
+                boxType.includes(q) ||
+                destination.includes(q) ||
+                status.includes(q) ||
+                payment.includes(q)
+            );
+        });
+    }, [batch.boxes, loadedBoxSearch]);
+
     // Selection state
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -285,23 +258,6 @@ export default function BatchShow({
     const [isTrackingPhaseSubmitting, setIsTrackingPhaseSubmitting] = useState(false);
     const [isArriving, setIsArriving] = useState(false);
     const [isCustomsSubmitting, setIsCustomsSubmitting] = useState<string | null>(null);
-    const [isReopening, setIsReopening] = useState(false);
-    const [showReopenConfirm, setShowReopenConfirm] = useState(false);
-
-    const handleReopenBatch = () => {
-        setIsReopening(true);
-        router.post(`/admin/batches/${batch.id}/reopen`, {}, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setShowReopenConfirm(false);
-                toast.success('Batch reopened to Open status.');
-            },
-            onError: (err: any) => {
-                toast.error(err?.status || 'Failed to reopen batch.');
-            },
-            onFinish: () => setIsReopening(false),
-        });
-    };
 
     const canLoadBoxes = ['open', 'loading'].includes(batch.status);
     const hasBatchBoxes = (batch.boxes?.length ?? 0) > 0;
@@ -319,13 +275,6 @@ export default function BatchShow({
     const selectedPhaseLabel = selectedPhase
         ? `${selectedPhase.group} - ${selectedPhase.label}`
         : 'this tracking phase';
-
-    const hasReassignedBoxes = Array.from(selectedIds).some(
-        (id) => {
-            const box = availableBoxes.find((b) => b.id === id);
-            return box && box.batch_id != null && box.batch_id !== batch.id;
-        }
-    );
 
     /* ---- search available boxes ---- */
     const searchAvailableBoxes = useCallback(
@@ -382,10 +331,16 @@ export default function BatchShow({
     };
 
     const toggleSelectAll = () => {
-        if (selectedIds.size === availableBoxes.length) {
+        const eligibleBoxes = availableBoxes.filter(
+            (b) => b.booking?.status !== 'cancelled' && (b.booking?.payment_status === 'paid' || b.booking?.payment_status === 'cash_collected' || b.booking?.invoice?.status === 'paid')
+        );
+        
+        if (eligibleBoxes.length === 0) return;
+
+        if (selectedIds.size === eligibleBoxes.length) {
             setSelectedIds(new Set());
         } else {
-            setSelectedIds(new Set(availableBoxes.map((b) => b.id)));
+            setSelectedIds(new Set(eligibleBoxes.map((b) => b.id)));
         }
     };
 
@@ -526,28 +481,65 @@ export default function BatchShow({
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title={`Batch ${batch.batch_number} | Admin`} />
             <div className="flex flex-col gap-6 p-8 max-w-[1600px] mx-auto w-full">
-                {/* Warnings Banner */}
-                {batch.warnings && batch.warnings.length > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-sm flex gap-3 shadow-sm">
-                        <AlertTriangle className="size-5 text-amber-500 shrink-0 mt-0.5" />
-                        <div>
-                            <h4 className="font-semibold text-amber-900 mb-1">Warning: Action Required</h4>
-                            <p>This batch has reached capacity limits or its cut-off date has passed. Please consider closing the batch.</p>
-                            <ul className="list-disc pl-5 mt-2 text-xs font-medium">
-                                {batch.warnings.map((warning, i) => (
-                                    <li key={i}>{warning}</li>
-                                ))}
-                            </ul>
+                
+                {batch.warnings && batch.warnings.length > 0 && ['open', 'loading'].includes(batch.status) && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2 shadow-2xs animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="size-7 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                                <AlertTriangle className="size-3.5" />
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap min-w-0 text-xs">
+                                <span className="font-bold text-amber-800 dark:text-amber-300 shrink-0">
+                                    Batch Warning:
+                                </span>
+                                <span className="text-amber-900 dark:text-amber-200 font-medium">
+                                    {batch.warnings.join(' • ')}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="shrink-0 flex items-center">
+                            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/30 whitespace-nowrap">
+                                Please consider closing this batch
+                            </span>
                         </div>
                     </div>
                 )}
 
+                {batch.override_note && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3.5 py-2 shadow-2xs animate-in fade-in slide-in-from-top-2 duration-300">
+                        <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                            <div className="size-7 rounded-lg bg-sky-500/20 text-sky-600 dark:text-sky-400 flex items-center justify-center shrink-0">
+                                <FileCheck className="size-3.5" />
+                            </div>
+                            <span className="text-xs font-bold text-sky-900 dark:text-sky-100 shrink-0">
+                                Override Reason:
+                            </span>
+                            {batch.override_details?.from_status && batch.override_details?.to_status && (
+                                <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/20 border border-sky-500/30 text-sky-800 dark:text-sky-200 text-[10px] font-bold shrink-0">
+                                    <span className="capitalize">{humanize(batch.override_details.from_status)}</span>
+                                    <ArrowRight className="size-2.5 text-sky-600 dark:text-sky-400" />
+                                    <span className="capitalize">{humanize(batch.override_details.to_status)}</span>
+                                </div>
+                            )}
+                            <span className="text-xs text-sky-950 dark:text-sky-100 font-medium italic bg-white/70 dark:bg-card/70 px-2 py-0.5 rounded border border-sky-200/60 dark:border-sky-800/60 truncate max-w-lg" title={batch.override_note}>
+                                "{batch.override_note}"
+                            </span>
+                        </div>
+                        {batch.override_details?.overridden_by && (
+                            <div className="text-[10px] text-sky-700/80 dark:text-sky-300/80 font-medium shrink-0">
+                                by <strong className="font-semibold text-sky-900 dark:text-sky-100">{batch.override_details.overridden_by}</strong>
+                                {batch.override_details.overridden_at && ` • ${batch.override_details.overridden_at}`}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Header Section */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-zinc-100 pb-8">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-border pb-8">
                     <div className="flex items-center gap-4">
                         <Link
                             href="/admin/batches"
-                            className="rounded-xl p-2.5 bg-white border border-zinc-200 text-zinc-500 transition-all hover:bg-zinc-50 hover:text-zinc-900 shadow-sm"
+                            className="rounded-xl p-2.5 bg-card border border-border text-brand-text-mid transition-all hover:bg-brand-warm/20 hover:text-brand-text shadow-2xs"
                         >
                             <ArrowLeft className="size-5" />
                         </Link>
@@ -557,8 +549,8 @@ export default function BatchShow({
                                 title="Batch Details"
                                 description="View loaded boxes and manage box assignments for this batch."
                             />
-                            <span className="rounded-xl bg-sky-50 px-3.5 py-1.5 font-mono text-xs font-bold text-sky-900 border border-sky-200/60 shadow-sm flex items-center gap-2 max-w-[240px] truncate" title={batch.batch_number}>
-                                <Layers className="size-3.5 text-sky-600 shrink-0" />
+                            <span className="rounded-xl bg-brand-warm/20 px-3.5 py-1.5 font-mono text-xs font-bold text-brand-rust border border-border shadow-2xs flex items-center gap-2 max-w-[240px] truncate" title={batch.batch_number}>
+                                <Layers className="size-3.5 text-brand-rust shrink-0" />
                                 <span className="truncate">{batch?.batch_number?.toUpperCase() ?? 'N/A'}</span>
                             </span>
                         </div>
@@ -646,22 +638,10 @@ export default function BatchShow({
                             </>
                         )}
 
-                        {!['open', 'loading'].includes(batch.status) && (
-                            <button
-                                type="button"
-                                onClick={() => setShowReopenConfirm(true)}
-                                disabled={isReopening}
-                                className="h-11 px-5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-semibold uppercase tracking-wide transition-all hover:bg-amber-100 active:scale-[0.98] flex items-center gap-2"
-                            >
-                                <RotateCcw className="size-3.5 text-amber-600" />
-                                Reopen Batch
-                            </button>
-                        )}
-
                         <button
                             type="button"
                             onClick={() => setShowBatchFullConfirm(true)}
-                            className="h-11 px-5 rounded-xl bg-sky-50 border border-sky-200 text-sky-700 text-xs font-semibold uppercase tracking-wide transition-all hover:bg-sky-100 active:scale-[0.98] flex items-center gap-2"
+                            className="h-11 px-5 rounded-xl bg-brand-warm/20 border border-border text-brand-rust text-xs font-semibold uppercase tracking-wide transition-all hover:bg-brand-warm/30 active:scale-[0.98] flex items-center gap-2 cursor-pointer"
                         >
                             <Sparkles className="size-3.5" />
                             Generate Next Batch
@@ -669,34 +649,15 @@ export default function BatchShow({
 
                         <Link
                             href={`/admin/batches/${batch.id}/edit`}
-                            className="h-11 px-6 rounded-xl bg-zinc-950 text-white text-xs font-semibold uppercase tracking-wide shadow-sm transition-all hover:bg-zinc-800 active:scale-[0.98] flex items-center gap-2"
+                            className="h-11 px-6 rounded-xl bg-brand-rust text-white text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all hover:bg-brand-rust/90 active:scale-[0.98] flex items-center gap-2"
                         >
                             Edit Batch
                         </Link>
                     </div>
                 </div>
 
-                {/* Override Alert Banner */}
-                {batch.override_note && batch.override_details && (
-                    <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 text-sm flex gap-3 shadow-sm">
-                        <AlertTriangle className="size-5 text-rose-600 shrink-0 mt-0.5" />
-                        <div>
-                            <h4 className="font-semibold text-rose-900 mb-0.5 flex items-center gap-2">
-                                Status Overridden
-                                <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 uppercase tracking-wider">
-                                    {batch.override_details.from_status.replace(/_/g, ' ')} → {batch.override_details.to_status.replace(/_/g, ' ')}
-                                </span>
-                            </h4>
-                            <p className="text-xs mt-1 mb-2 italic">"{batch.override_note}"</p>
-                            <p className="text-[10px] font-medium text-rose-700/80 uppercase tracking-wider">
-                                By {batch.override_details.overridden_by} on {batch.override_details.overridden_at}
-                            </p>
-                        </div>
-                    </div>
-                )}
-
                 {/* Visual Roadmap Pipeline */}
-                <div className="bg-white rounded-2xl border border-zinc-200/80 p-5 shadow-sm">
+                <div className="bg-card rounded-xl border border-border p-2 sm:p-2.5 shadow-2xs">
                     {(() => {
                         const statuses = [
                             'open',
@@ -704,154 +665,197 @@ export default function BatchShow({
                             'ready_to_close',
                             'sailed',
                             'arrived',
-                            'delivered',
+                            'under_customs_clearance',
+                            'released_by_boc',
+                            'received_at_warehouse',
                         ];
                         const currentIdx = Math.max(0, statuses.indexOf(batch.status));
-                        const progressPct = batch.status === 'delivered' ? 100 : (currentIdx / (statuses.length - 1)) * 100;
+                        const progressPct = batch.status === 'received_at_warehouse' ? 100 : Math.round((currentIdx / (statuses.length - 1)) * 100);
+
+                        const steps = [
+                            { id: 'open', label: 'Open', icon: Package },
+                            { id: 'loading', label: 'Loading', icon: ContainerIcon },
+                            { id: 'ready_to_close', label: 'Ready', icon: ShieldCheck },
+                            { id: 'sailed', label: 'Sailed', icon: Ship },
+                            { id: 'arrived', label: 'Port Arrived', icon: Anchor },
+                            { id: 'under_customs_clearance', label: 'Under BOC', icon: Gavel },
+                            { id: 'released_by_boc', label: 'Released', icon: FileCheck },
+                            { id: 'received_at_warehouse', label: 'Unloaded (MNL)', icon: Warehouse },
+                        ];
+
+                        const currentStep = steps[currentIdx] || steps[0];
+                        const CurrentIcon = currentStep.icon;
 
                         return (
-                            <div className="relative flex flex-col md:flex-row items-center justify-between gap-4 md:gap-2">
-                                {/* Connecting Track (Desktop) */}
-                                <div className="absolute top-1/2 left-8 right-8 hidden h-1 -translate-y-1/2 bg-zinc-100 rounded-full md:block -z-0">
-                                    <div
-                                        className="h-full bg-gradient-to-r from-emerald-500 to-sky-500 rounded-full transition-all duration-700 ease-in-out"
-                                        style={{ width: `${progressPct}%` }}
-                                    />
-                                </div>
+                            <div>
+                                {/* Desktop & Tablet: Segmented Stage Pills */}
+                                <div className="hidden sm:grid grid-cols-4 lg:grid-cols-8 gap-1.5 md:gap-2">
+                                    {steps.map((step, idx) => {
+                                        const isCompleted = idx < currentIdx || batch.status === 'received_at_warehouse';
+                                        const isActive = idx === currentIdx && batch.status !== 'received_at_warehouse';
+                                        const isUpcoming = idx > currentIdx && batch.status !== 'received_at_warehouse';
+                                        const Icon = step.icon;
 
-                                {[
-                                    { id: 'open', label: 'Open', icon: Package },
-                                    { id: 'loading', label: 'Loading', icon: ContainerIcon },
-                                    { id: 'ready_to_close', label: 'Ready', icon: ShieldCheck },
-                                    { id: 'sailed', label: 'Sailed', icon: Ship },
-                                    { id: 'arrived', label: 'Arrived', icon: MapPin },
-                                    { id: 'delivered', label: 'Delivered', icon: CheckCircle2 },
-                                ].map((step, idx) => {
-                                    const isCompleted = idx < currentIdx || batch.status === 'delivered';
-                                    const isActive = idx === currentIdx && batch.status !== 'delivered';
-                                    const Icon = step.icon;
-
-                                    return (
-                                        <div key={step.id} className="relative z-10 flex flex-1 flex-col items-center">
-                                            <div className="relative">
-                                                <div
-                                                    className={cn(
-                                                        'size-9 rounded-xl flex items-center justify-center transition-all duration-300 border shadow-2xs',
-                                                        isActive
-                                                            ? 'bg-sky-600 text-white ring-4 ring-sky-600/15 scale-110 border-sky-600 shadow-md shadow-sky-600/20'
-                                                            : isCompleted
-                                                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300/80'
-                                                            : 'bg-white border-zinc-200 text-zinc-400'
-                                                    )}
-                                                >
-                                                    <Icon className="size-4" />
-                                                </div>
-
-                                                {/* Checkmark overlay for completed steps */}
-                                                {isCompleted && (
-                                                    <div className="absolute -top-1 -right-1 flex size-4.5 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xs border-2 border-white">
-                                                        <CheckCircle2 className="size-3.5 fill-emerald-600 text-white" />
-                                                    </div>
+                                        return (
+                                            <div
+                                                key={step.id}
+                                                className={cn(
+                                                    'flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-center transition-all select-none',
+                                                    isActive && 'bg-sky-600 text-white border-sky-600 shadow-xs shadow-sky-600/20 font-extrabold ring-2 ring-sky-500/25',
+                                                    isCompleted && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-bold',
+                                                    isUpcoming && 'bg-zinc-100/70 dark:bg-zinc-800/50 border-zinc-200/60 dark:border-zinc-800 text-zinc-400 dark:text-zinc-500 font-medium'
+                                                )}
+                                                title={`Stage ${idx + 1}: ${step.label}`}
+                                            >
+                                                {isCompleted ? (
+                                                    <CheckCircle2 className="size-3.5 fill-emerald-600 text-white dark:fill-emerald-400 dark:text-zinc-950 shrink-0" />
+                                                ) : (
+                                                    <Icon className={cn('size-3.5 shrink-0', isActive ? 'text-white' : 'text-current')} />
+                                                )}
+                                                <span className="text-[10px] md:text-[11px] uppercase tracking-tight truncate leading-tight">
+                                                    {step.label}
+                                                </span>
+                                                {isActive && (
+                                                    <span className="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-white/20 text-white hidden xl:inline">
+                                                        Active
+                                                    </span>
                                                 )}
                                             </div>
+                                        );
+                                    })}
+                                </div>
 
-                                            <div className="mt-2.5 text-center">
-                                                <p
+                                {/* Mobile: Segmented Multi-Bar + Active Stage Label */}
+                                <div className="sm:hidden space-y-2 p-1">
+                                    <div className="grid grid-cols-8 gap-1">
+                                        {steps.map((step, idx) => {
+                                            const isCompleted = idx < currentIdx || batch.status === 'received_at_warehouse';
+                                            const isActive = idx === currentIdx && batch.status !== 'received_at_warehouse';
+
+                                            return (
+                                                <div
+                                                    key={step.id}
                                                     className={cn(
-                                                        'text-[10px] font-semibold tracking-tight uppercase',
-                                                        isActive ? 'text-sky-900 font-bold' : isCompleted ? 'text-emerald-800 font-semibold' : 'text-zinc-400'
+                                                        'h-1.5 rounded-full transition-all duration-500',
+                                                        isActive && 'bg-sky-600',
+                                                        isCompleted && 'bg-emerald-500',
+                                                        idx > currentIdx && 'bg-zinc-200 dark:bg-zinc-800'
                                                     )}
-                                                >
-                                                    {step.label}
-                                                </p>
-                                            </div>
-
-                                            {isActive && (
-                                                <div className="mt-1">
-                                                    <span className="rounded-full bg-sky-50 border border-sky-200/80 px-2 py-0.5 text-[9px] font-bold text-sky-700 uppercase tracking-wider">
-                                                        CURRENT STAGE
-                                                    </span>
-                                                </div>
-                                            )}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="flex items-center justify-between text-xs px-0.5">
+                                        <div className="flex items-center gap-1.5">
+                                            <CurrentIcon className="size-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
+                                            <span className="font-bold text-brand-text uppercase tracking-tight text-[11px]">
+                                                {currentStep.label}
+                                            </span>
                                         </div>
-                                    );
-                                })}
+                                        <span className="text-[10px] font-mono font-bold text-brand-text-light">
+                                            Stage {Math.min(steps.length, currentIdx + 1)} of {steps.length} ({progressPct}%)
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
                         );
                     })()}
                 </div>
 
+                {/* Empty Batch Status Warning & Quick Reopen Banner */}
+                {batch.current_box_count === 0 && ['ready_to_close', 'sailed', 'arrived', 'under_customs_clearance', 'released_by_boc', 'received_at_warehouse'].includes(batch.status) && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2 shadow-2xs">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="size-7 rounded-lg bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+                                <AlertTriangle className="size-3.5" />
+                            </div>
+                            <div className="text-xs min-w-0">
+                                <span className="font-bold text-amber-700 dark:text-amber-400">Empty Container ({humanize(batch.status)}): </span>
+                                <span className="text-amber-800 dark:text-amber-300 font-medium">
+                                    0 boxes loaded. Change status back to <strong>Open</strong> to start loading.
+                                </span>
+                            </div>
+                        </div>
+                        <Link
+                            href={`/admin/batches/${batch.id}/edit`}
+                            className="inline-flex items-center justify-center h-7 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-zinc-950 text-[10px] font-bold uppercase tracking-wider transition-all shrink-0 shadow-xs"
+                        >
+                            Reopen to Open
+                        </Link>
+                    </div>
+                )}
+
                 {/* Summary Stat Grid */}
-                <div className="bg-white rounded-2xl border border-zinc-200/80 shadow-sm overflow-hidden">
-                    <div className="grid grid-cols-2 divide-y divide-zinc-100 lg:grid-cols-5 lg:divide-x lg:divide-y-0">
-                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <Package className="size-4" />
+                <div className="bg-card rounded-xl border border-border shadow-2xs overflow-hidden">
+                    <div className="grid grid-cols-2 divide-y divide-border sm:grid-cols-3 lg:grid-cols-5 lg:divide-x lg:divide-y-0">
+                        <div className="group flex items-center gap-2.5 py-2 px-3 sm:px-3.5 transition-colors hover:bg-brand-warm/10">
+                            <div className="flex size-7 items-center justify-center rounded-lg bg-brand-warm/20 text-brand-rust border border-border shrink-0">
+                                <Package className="size-3.5" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-brand-text-light uppercase tracking-wider">
                                     Loaded Boxes
                                 </p>
-                                <p className="text-sm font-bold text-zinc-900 truncate">
+                                <p className="text-xs sm:text-sm font-bold text-brand-text truncate">
                                     {capacityLabel}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <ContainerIcon className="size-4" />
+                        <div className="group flex items-center gap-2.5 py-2 px-3 sm:px-3.5 transition-colors hover:bg-brand-warm/10">
+                            <div className="flex size-7 items-center justify-center rounded-lg bg-brand-warm/20 text-brand-rust border border-border shrink-0">
+                                <ContainerIcon className="size-3.5" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-brand-text-light uppercase tracking-wider">
                                     Container Ref
                                 </p>
-                                <p className="font-mono text-sm font-bold text-zinc-900 truncate">
+                                <p className="font-mono text-xs sm:text-sm font-bold text-brand-text truncate">
                                     {batch.container_number?.toUpperCase() ?? '—'}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <ShieldCheck className="size-4" />
+                        <div className="group flex items-center gap-2.5 py-2 px-3 sm:px-3.5 transition-colors hover:bg-brand-warm/10">
+                            <div className="flex size-7 items-center justify-center rounded-lg bg-brand-warm/20 text-brand-rust border border-border shrink-0">
+                                <ShieldCheck className="size-3.5" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-brand-text-light uppercase tracking-wider">
                                     Seal Number
                                 </p>
-                                <p className="font-mono text-sm font-bold text-zinc-900 truncate">
+                                <p className="font-mono text-xs sm:text-sm font-bold text-brand-text truncate">
                                     {batch.seal_number ?? '—'}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <Ship className="size-4" />
+                        <div className="group flex items-center gap-2.5 py-2 px-3 sm:px-3.5 transition-colors hover:bg-brand-warm/10">
+                            <div className="flex size-7 items-center justify-center rounded-lg bg-brand-warm/20 text-brand-rust border border-border shrink-0">
+                                <Ship className="size-3.5" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-brand-text-light uppercase tracking-wider">
                                     Vessel
                                 </p>
-                                <p className="text-sm font-bold text-zinc-900 uppercase truncate">
+                                <p className="text-xs sm:text-sm font-bold text-brand-text uppercase truncate">
                                     {batch.vessel_name ?? '—'}
                                 </p>
                             </div>
                         </div>
 
-                        <div className="group flex items-center gap-3 p-4 transition-colors hover:bg-zinc-50/50">
-                            <div className="flex size-8 items-center justify-center rounded-xl bg-sky-50 text-sky-600 border border-sky-100 shrink-0">
-                                <Activity className="size-4" />
+                        <div className="group flex items-center gap-2.5 py-2 px-3 sm:px-3.5 transition-colors hover:bg-brand-warm/10 col-span-2 sm:col-span-1">
+                            <div className="flex size-7 items-center justify-center rounded-lg bg-brand-warm/20 text-brand-rust border border-border shrink-0">
+                                <Activity className="size-3.5" />
                             </div>
                             <div className="min-w-0">
-                                <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-0.5">
+                                <p className="text-[9px] font-bold text-brand-text-light uppercase tracking-wider">
                                     Status
                                 </p>
                                 <span
                                     className={cn(
-                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
-                                        BATCH_STATUS_STYLES[batch.status ?? ''] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200'
+                                        'inline-flex items-center rounded-full px-2 py-0.2 text-[10px] font-bold border capitalize',
+                                        BATCH_STATUS_STYLES[batch.status ?? ''] ?? 'bg-brand-warm/10 text-brand-text-mid border-border'
                                     )}
                                 >
                                     {humanize(batch.status ?? '')}
@@ -862,131 +866,175 @@ export default function BatchShow({
                 </div>
 
                 {/* Loaded Boxes Table */}
-                <div className="bg-white rounded-2xl border border-zinc-200/80 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-zinc-100 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="size-7 rounded-md bg-sky-600 flex items-center justify-center text-white shadow-sm">
+                <div className="bg-card rounded-2xl border border-border shadow-2xs overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card">
+                        <div className="flex items-center gap-2.5">
+                            <div className="size-7 rounded-md bg-brand-rust flex items-center justify-center text-white shadow-2xs shrink-0">
                                 <Package className="size-4" />
                             </div>
-                            <h2 className="font-sans text-sm font-semibold text-zinc-950">Loaded Boxes</h2>
+                            <h2 className="font-sans text-sm font-semibold text-brand-text">Loaded Boxes</h2>
+                            <span className="text-[10px] font-bold text-brand-text-light bg-brand-warm/20 px-2.5 py-0.5 rounded-full border border-border">
+                                {loadedBoxSearch.trim()
+                                    ? `${filteredLoadedBoxes.length} of ${batch.boxes?.length ?? 0}`
+                                    : `${batch.boxes?.length ?? 0} Box(es)`}
+                            </span>
                         </div>
-                        <span className="text-[10px] font-semibold text-zinc-500 bg-zinc-100 px-3 py-1 rounded-full border border-zinc-200/40">
-                            {batch.boxes?.length ?? 0} Box(es)
-                        </span>
+
+                        {batch.boxes && batch.boxes.length > 0 && (
+                            <div className="relative w-full sm:w-72">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-brand-text-light pointer-events-none" />
+                                <input
+                                    type="text"
+                                    value={loadedBoxSearch}
+                                    onChange={(e) => setLoadedBoxSearch(e.target.value)}
+                                    placeholder="Search boxes by tracking, name, city..."
+                                    className="w-full h-8 pl-8 pr-8 text-xs bg-brand-warm/10 dark:bg-zinc-900/60 border border-border rounded-lg placeholder:text-brand-text-light focus:outline-none focus:ring-1 focus:ring-brand-rust focus:border-brand-rust transition-all"
+                                />
+                                {loadedBoxSearch && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setLoadedBoxSearch('')}
+                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-brand-text-light hover:text-brand-text p-0.5 rounded-md"
+                                        title="Clear search"
+                                    >
+                                        <X className="size-3.5" />
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {batch.boxes && batch.boxes.length > 0 ? (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-sm">
-                                <thead className="border-b border-zinc-100 bg-zinc-50/60 font-sans text-zinc-500">
-                                    <tr>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Tracking #
-                                        </th>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Sender
-                                        </th>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Booking
-                                        </th>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Payment
-                                        </th>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Destination
-                                        </th>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Status
-                                        </th>
-                                        <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
-                                            Eligibility
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-zinc-100">
-                                    {batch.boxes.map((box) => (
-                                        <tr
-                                            key={box.id}
-                                            className="transition-colors hover:bg-zinc-50/80"
-                                        >
-                                            <td className="px-6 py-4 font-mono text-sm font-semibold text-zinc-900">
-                                                {box.tracking_number}
-                                            </td>
-                                            <td className="px-6 py-4 text-zinc-700">
-                                                <div className="flex items-center gap-2">
-                                                    <User className="size-3.5 text-zinc-400" />
-                                                    <span className="text-sm font-medium">
-                                                        {box.booking?.sender
-                                                            ? `${box.booking.sender.first_name} ${box.booking.sender.last_name}`
-                                                            : '—'}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-xs font-medium uppercase text-zinc-600">
-                                                {box.booking?.reference_number ?? '—'}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                {(() => {
-                                                    const paymentInfo = getPaymentStatusInfo(box);
-                                                    return (
-                                                        <span
-                                                            className={cn(
-                                                                'inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-semibold border capitalize',
-                                                                paymentInfo.className
-                                                            )}
-                                                        >
-                                                            {paymentInfo.text}
-                                                        </span>
-                                                    );
-                                                })()}
-                                            </td>
-                                            <td className="px-6 py-4 text-zinc-700">
-                                                <div className="flex items-center gap-2">
-                                                    <MapPin className="size-3.5 text-amber-500" />
-                                                    <span className="text-sm font-medium">
-                                                        {box.destination || '—'}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span
-                                                    className={cn(
-                                                        'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold border capitalize',
-                                                        BOX_STATUS_STYLES[box.status] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200'
-                                                    )}
-                                                >
-                                                    {humanize(box.status)}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                {(() => {
-                                                    const eligibility = checkEligibility(box);
-                                                    return (
-                                                        <span
-                                                            className={cn(
-                                                                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
-                                                                eligibility.className
-                                                            )}
-                                                        >
-                                                            {eligibility.text}
-                                                        </span>
-                                                    );
-                                                })()}
-                                            </td>
+                        filteredLoadedBoxes.length > 0 ? (
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="border-b border-border bg-brand-warm/10 dark:bg-brand-warm/20 font-sans text-brand-text-mid">
+                                        <tr>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Tracking #
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Booking #
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Payment
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Sender
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Recipient
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Box Type
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Destination
+                                            </th>
+                                            <th className="px-6 py-3.5 text-xs font-semibold uppercase tracking-wider">
+                                                Status
+                                            </th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody className="divide-y divide-border">
+                                        {filteredLoadedBoxes.map((box) => (
+                                            <tr
+                                                key={box.id}
+                                                className="transition-colors hover:bg-brand-warm/10"
+                                            >
+                                                <td className="px-6 py-4 font-mono text-sm font-bold text-brand-text">
+                                                    {box.tracking_number}
+                                                </td>
+                                                <td className="px-6 py-4 text-xs font-medium text-brand-text-mid">
+                                                    {box.booking?.reference_number ?? '—'}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span
+                                                        className={cn(
+                                                            'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize tracking-wide',
+                                                            box.booking?.payment_status === 'paid'
+                                                                ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                                                                : box.booking?.payment_status === 'pending'
+                                                                    ? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+                                                                    : 'bg-brand-warm/10 text-brand-text-mid border-border'
+                                                        )}
+                                                    >
+                                                        {box.booking?.payment_status ? humanize(box.booking.payment_status) : 'N/A'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-brand-text">
+                                                    <div className="flex items-center gap-2">
+                                                        <User className="size-3.5 text-brand-text-light" />
+                                                        <span className="text-sm font-medium">
+                                                            {box.booking?.sender
+                                                                ? `${box.booking.sender.first_name} ${box.booking.sender.last_name}`
+                                                                : '—'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-brand-text">
+                                                    <div className="flex items-center gap-2">
+                                                        <Truck className="size-3.5 text-brand-text-light" />
+                                                        <span className="text-sm font-medium">
+                                                            {box.recipient?.name ?? '—'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4 text-xs font-medium uppercase text-brand-text-mid">
+                                                    {box.box_type?.name ?? '—'}
+                                                </td>
+                                                <td className="px-6 py-4 text-brand-text">
+                                                    <div className="flex items-center gap-2">
+                                                        <MapPin className="size-3.5 text-amber-500" />
+                                                        <span className="text-sm font-medium">
+                                                            {box.destination || '—'}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span
+                                                        className={cn(
+                                                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold border capitalize',
+                                                            BOX_STATUS_STYLES[box.status] ?? 'bg-brand-warm/10 text-brand-text-mid border-border'
+                                                        )}
+                                                    >
+                                                        {BOX_STATUS_CONFIG[box.status]?.label ?? humanize(box.status)}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-center justify-center p-10 text-center">
+                                <div className="mb-3 flex size-12 items-center justify-center rounded-xl bg-brand-warm/10 border border-border">
+                                    <Search className="size-5 text-brand-text-light" />
+                                </div>
+                                <h3 className="text-sm font-semibold text-brand-text">
+                                    No boxes match your search
+                                </h3>
+                                <p className="max-w-xs text-xs text-brand-text-light mt-1 mb-3">
+                                    No loaded boxes matched <span className="font-semibold text-brand-text">"{loadedBoxSearch}"</span>.
+                                </p>
+                                <button
+                                    type="button"
+                                    onClick={() => setLoadedBoxSearch('')}
+                                    className="text-xs font-semibold text-brand-rust hover:underline"
+                                >
+                                    Clear search
+                                </button>
+                            </div>
+                        )
                     ) : (
                         <div className="flex flex-col items-center justify-center p-12 text-center">
-                            <div className="mb-4 flex size-16 items-center justify-center rounded-2xl bg-zinc-100 border border-zinc-200/60">
-                                <Package className="size-8 text-zinc-400" />
+                            <div className="mb-4 flex size-16 items-center justify-center rounded-2xl bg-brand-warm/10 border border-border">
+                                <Package className="size-8 text-brand-text-light" />
                             </div>
-                            <h3 className="mb-1 text-sm font-semibold text-zinc-900">
+                            <h3 className="mb-1 text-sm font-semibold text-brand-text">
                                 No boxes loaded yet
                             </h3>
-                            <p className="max-w-sm text-xs text-zinc-500 leading-relaxed font-normal">
+                            <p className="max-w-sm text-xs text-brand-text-light leading-relaxed font-normal">
                                 {canLoadBoxes
                                     ? 'Use the panel below to search and load boxes into this batch.'
                                     : 'No boxes have been assigned to this batch.'}
@@ -996,31 +1044,29 @@ export default function BatchShow({
                 </div>
 
                 {/* Bulk Tracking Phase Panel */}
-                <div className="bg-white rounded-2xl border border-zinc-200/80 shadow-sm overflow-hidden">
-                    <div className="px-6 py-5 border-b border-zinc-100 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="size-7 rounded-md bg-amber-500 flex items-center justify-center text-white shadow-sm">
+                <div className="bg-card rounded-2xl border border-border shadow-2xs overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-card">
+                        <div className="flex items-center gap-2.5">
+                            <div className="size-7 rounded-md bg-amber-500 flex items-center justify-center text-white shadow-2xs shrink-0">
                                 <Ship className="size-4" />
                             </div>
-                            <h2 className="font-sans text-sm font-semibold text-zinc-950">
-                                Bulk Tracking Phase Update
-                            </h2>
+                            <div>
+                                <h2 className="font-sans text-sm font-semibold text-brand-text">
+                                    Bulk Tracking Phase Update
+                                </h2>
+                            </div>
                         </div>
-                        <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-3 py-1 rounded-full border border-amber-100">
+                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30">
                             BOC & Transit Milestones
                         </span>
                     </div>
 
-                    <form className="space-y-6 p-6 md:p-8" onSubmit={submitTrackingPhaseUpdate}>
-                        <p className="text-xs text-zinc-500 leading-relaxed font-normal">
-                            Apply a journey milestone to all boxes in this batch. This writes a tracking history entry per box.
-                        </p>
-
-                        <div className="grid gap-6 md:grid-cols-2">
-                            <div className="space-y-2">
+                    <form className="p-4 sm:p-5 space-y-3" onSubmit={submitTrackingPhaseUpdate}>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-1">
                                 <label
                                     htmlFor="tracking-phase-select"
-                                    className="text-xs font-semibold text-zinc-700 ml-0.5"
+                                    className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light ml-0.5"
                                 >
                                     Tracking Phase
                                 </label>
@@ -1029,7 +1075,7 @@ export default function BatchShow({
                                     value={selectedTrackingPhase}
                                     onChange={(e) => setSelectedTrackingPhase(e.target.value)}
                                     disabled={!hasBatchBoxes || isTrackingPhaseSubmitting}
-                                    className="flex h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-xs font-semibold text-zinc-900 shadow-sm focus:ring-2 focus:ring-sky-100 outline-none disabled:cursor-not-allowed disabled:bg-zinc-50"
+                                    className="flex h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-semibold text-brand-text shadow-2xs focus:ring-1 focus:ring-brand-rust outline-none disabled:cursor-not-allowed disabled:bg-brand-warm/10"
                                 >
                                     {trackingPhases.length === 0 && (
                                         <option value="">No tracking phases available</option>
@@ -1050,10 +1096,10 @@ export default function BatchShow({
                                 </select>
                             </div>
 
-                            <div className="space-y-2">
+                            <div className="space-y-1">
                                 <label
                                     htmlFor="tracking-phase-description"
-                                    className="text-xs font-semibold text-zinc-700 ml-0.5"
+                                    className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light ml-0.5"
                                 >
                                     Description (Optional)
                                 </label>
@@ -1065,13 +1111,13 @@ export default function BatchShow({
                                     onChange={(e) => setTrackingDescription(e.target.value)}
                                     disabled={!hasBatchBoxes || isTrackingPhaseSubmitting}
                                     placeholder="Example: Cleared by BOC and released for local handling."
-                                    className="flex h-11 w-full rounded-xl border border-zinc-200 bg-white px-4 text-xs font-medium text-zinc-900 shadow-sm focus:ring-2 focus:ring-sky-100 outline-none disabled:cursor-not-allowed disabled:bg-zinc-50"
+                                    className="flex h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-medium text-brand-text shadow-2xs focus:ring-1 focus:ring-brand-rust outline-none disabled:cursor-not-allowed disabled:bg-brand-warm/10"
                                 />
                             </div>
                         </div>
 
-                        <div className="flex flex-col md:flex-row items-center justify-between border-t border-zinc-100 pt-5 gap-4">
-                            <p className="text-xs text-zinc-500">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-border">
+                            <p className="text-xs text-brand-text-light leading-snug">
                                 {!hasBatchBoxes
                                     ? 'No boxes in this batch yet.'
                                     : selectedPhaseIsCurrent
@@ -1080,7 +1126,7 @@ export default function BatchShow({
                                         : `Already marked as ${selectedPhaseLabel}. No later phase is available for your role.`
                                     : selectedPhaseIsPast
                                     ? 'This batch has already passed that tracking phase. Select a later phase to continue.'
-                                    : `This will update ${batch.boxes.length} box${batch.boxes.length !== 1 ? 'es' : ''}.`}
+                                    : `This will update ${batch.boxes.length} box${batch.boxes.length !== 1 ? 'es' : ''} with a tracking history entry.`}
                             </p>
 
                             <Button
@@ -1091,16 +1137,16 @@ export default function BatchShow({
                                     selectedPhaseIsCurrentOrPast ||
                                     isTrackingPhaseSubmitting
                                 }
-                                className="h-11 px-8 rounded-xl bg-sky-600 text-white text-xs font-semibold uppercase tracking-wide shadow-md shadow-sky-600/10 transition-all hover:bg-sky-700 active:scale-[0.98] flex items-center gap-2 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 disabled:shadow-none"
+                                className="h-8 px-5 rounded-lg bg-brand-rust text-white text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all hover:bg-brand-rust/90 active:scale-[0.98] flex items-center gap-1.5 disabled:cursor-not-allowed disabled:bg-brand-warm/10 disabled:text-brand-text-light disabled:shadow-none shrink-0"
                             >
                                 {isTrackingPhaseSubmitting ? (
                                     <>
-                                        <Loader2 className="size-4 animate-spin" />
+                                        <Loader2 className="size-3.5 animate-spin" />
                                         Updating...
                                     </>
                                 ) : (
                                     <>
-                                        <Ship className="size-4" />
+                                        <Ship className="size-3.5" />
                                         {selectedPhaseIsCurrentOrPast ? 'Already Updated' : 'Update All Boxes'}
                                     </>
                                 )}
@@ -1111,15 +1157,15 @@ export default function BatchShow({
 
                 {/* Load Boxes Panel — only show when batch is in "open" or "loading" status */}
                 {canLoadBoxes && (
-                    <div className="bg-white rounded-2xl border border-zinc-200/80 shadow-sm overflow-hidden">
-                        <div className="px-6 py-5 border-b border-zinc-100 flex items-center justify-between">
+                    <div className="bg-card rounded-2xl border border-border shadow-2xs overflow-hidden">
+                        <div className="px-6 py-5 border-b border-border flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="size-7 rounded-md bg-emerald-600 flex items-center justify-center text-white shadow-sm">
+                                <div className="size-7 rounded-md bg-emerald-600 flex items-center justify-center text-white shadow-2xs">
                                     <ContainerIcon className="size-4" />
                                 </div>
-                                <h2 className="font-sans text-sm font-semibold text-zinc-950">Load Boxes</h2>
+                                <h2 className="font-sans text-sm font-semibold text-brand-text">Load Boxes</h2>
                             </div>
-                            <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-100 animate-pulse">
+                            <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/30 animate-pulse">
                                 Ready to Load
                             </span>
                         </div>
@@ -1128,24 +1174,24 @@ export default function BatchShow({
                             {/* Search bar and Bulk Add */}
                             <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                                 <div className="relative w-full max-w-md">
-                                    <Search className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-zinc-400" />
+                                    <Search className="absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-brand-text-light" />
                                     <input
                                         id="box-search"
                                         type="text"
-                                        className="h-11 w-full rounded-xl border border-zinc-200 bg-white pr-4 pl-10 text-xs font-medium text-zinc-900 shadow-sm transition-all focus:ring-2 focus:ring-sky-100 outline-none"
+                                        className="h-11 w-full rounded-xl border border-border bg-card pr-4 pl-10 text-xs font-medium text-brand-text shadow-2xs transition-all focus:ring-2 focus:ring-ring outline-none"
                                         placeholder="Search by tracking number or sender name..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                     />
                                     {isSearching && (
-                                        <Loader2 className="absolute top-1/2 right-3.5 size-4 -translate-y-1/2 animate-spin text-sky-600" />
+                                        <Loader2 className="absolute top-1/2 right-3.5 size-4 -translate-y-1/2 animate-spin text-brand-rust" />
                                     )}
                                 </div>
                                 <Button
                                     type="button"
                                     onClick={() => setIsBulkLoadModalOpen(true)}
                                     variant="outline"
-                                    className="h-11 shrink-0 bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded-xl"
+                                    className="h-11 shrink-0 bg-card border-border text-brand-text hover:bg-brand-warm/20 rounded-xl"
                                 >
                                     <Layers className="size-4 mr-2" />
                                     Bulk Paste Tracking #s
@@ -1161,7 +1207,7 @@ export default function BatchShow({
                                                 <button
                                                     type="button"
                                                     onClick={toggleSelectAll}
-                                                    className="flex items-center gap-2 text-xs font-semibold text-sky-600 hover:text-sky-700 transition-colors"
+                                                    className="flex items-center gap-2 text-xs font-semibold text-brand-rust hover:text-brand-rust/80 transition-colors cursor-pointer"
                                                 >
                                                     {selectedIds.size === availableBoxes.length ? (
                                                         <CheckSquare className="size-4" />
@@ -1172,27 +1218,33 @@ export default function BatchShow({
                                                         ? 'Deselect All'
                                                         : 'Select All'}
                                                 </button>
-                                                <span className="text-xs font-medium text-zinc-500">
+                                                <span className="text-xs font-medium text-brand-text-light">
                                                     {selectedIds.size} of {availableBoxes.length} selected
                                                 </span>
                                             </div>
 
-                                            <div className="overflow-x-auto rounded-xl border border-zinc-200/80">
+                                            <div className="overflow-x-auto rounded-xl border border-border">
                                                 <table className="w-full text-left text-sm">
-                                                    <thead className="border-b border-zinc-100 bg-zinc-50/60 font-sans text-zinc-500">
+                                                    <thead className="border-b border-border bg-brand-warm/10 dark:bg-brand-warm/20 font-sans text-brand-text-mid">
                                                         <tr>
                                                             <th className="w-12 px-4 py-3" />
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
                                                                 Tracking #
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                                                                Sender
-                                                            </th>
-                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                                                                Booking
+                                                                Booking #
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
                                                                 Payment
+                                                            </th>
+                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                                                                Sender
+                                                            </th>
+                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                                                                Recipient
+                                                            </th>
+                                                            <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
+                                                                Box Type
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
                                                                 Destination
@@ -1204,91 +1256,99 @@ export default function BatchShow({
                                                                 Eligibility
                                                             </th>
                                                             <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider">
-                                                                Assignment
+                                                                Batch Status
                                                             </th>
                                                         </tr>
                                                     </thead>
-                                                    <tbody className="divide-y divide-zinc-100">
+                                                    <tbody className="divide-y divide-border">
                                                         {availableBoxes.map((box) => {
                                                             const isSelected = selectedIds.has(box.id);
+                                                            const isEligible = box.booking?.status !== 'cancelled' && (box.booking?.payment_status === 'paid' || box.booking?.payment_status === 'cash_collected' || box.booking?.invoice?.status === 'paid');
 
                                                             return (
                                                                 <tr
                                                                     key={box.id}
                                                                     className={cn(
-                                                                        'cursor-pointer transition-colors',
-                                                                        isSelected ? 'bg-emerald-50/40' : 'hover:bg-zinc-50/80'
+                                                                        'transition-colors',
+                                                                        isEligible ? 'cursor-pointer hover:bg-brand-warm/10' : 'opacity-70 bg-gray-50/50 dark:bg-gray-900/50',
+                                                                        isSelected ? 'bg-emerald-500/10' : ''
                                                                     )}
-                                                                    onClick={() => toggleSelect(box.id)}
+                                                                    onClick={() => {
+                                                                        if (isEligible) toggleSelect(box.id);
+                                                                    }}
                                                                 >
                                                                     <td className="px-4 py-3 text-center">
                                                                         {isSelected ? (
-                                                                            <CheckSquare className="size-4.5 text-emerald-600" />
+                                                                            <CheckSquare className="size-4.5 text-emerald-500" />
                                                                         ) : (
-                                                                            <Square className="size-4.5 text-zinc-400" />
+                                                                            <Square className={cn("size-4.5", isEligible ? "text-brand-text-light" : "text-gray-300 dark:text-gray-700")} />
                                                                         )}
                                                                     </td>
-                                                                    <td className="px-4 py-3 font-mono text-sm font-semibold text-zinc-900">
+                                                                    <td className="px-4 py-3 font-mono text-sm font-bold text-brand-text">
                                                                         {box.tracking_number}
                                                                     </td>
-                                                                    <td className="px-4 py-3 text-sm text-zinc-700">
+                                                                    <td className="px-4 py-3 text-xs font-medium text-brand-text-mid">
+                                                                        {box.booking?.reference_number ?? '—'}
+                                                                    </td>
+                                                                    <td className="px-4 py-3">
+                                                                        <span
+                                                                            className={cn(
+                                                                                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize tracking-wide',
+                                                                                box.booking?.payment_status === 'paid'
+                                                                                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30'
+                                                                                    : box.booking?.payment_status === 'pending'
+                                                                                        ? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+                                                                                        : 'bg-brand-warm/10 text-brand-text-mid border-border'
+                                                                            )}
+                                                                        >
+                                                                            {box.booking?.payment_status ? humanize(box.booking.payment_status) : 'N/A'}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-sm text-brand-text">
                                                                         {box.booking?.sender
                                                                             ? `${box.booking.sender.first_name} ${box.booking.sender.last_name}`
                                                                             : '—'}
                                                                     </td>
-                                                                    <td className="px-4 py-3 text-xs font-medium uppercase text-zinc-600">
-                                                                        {box.booking?.reference_number ?? '—'}
+                                                                    <td className="px-4 py-3 text-sm text-brand-text">
+                                                                        {box.recipient?.name ?? '—'}
                                                                     </td>
-                                                                    <td className="px-4 py-3">
-                                                                        {(() => {
-                                                                            const paymentInfo = getPaymentStatusInfo(box);
-                                                                            return (
-                                                                                <span
-                                                                                    className={cn(
-                                                                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
-                                                                                        paymentInfo.className
-                                                                                    )}
-                                                                                >
-                                                                                    {paymentInfo.text}
-                                                                                </span>
-                                                                            );
-                                                                        })()}
+                                                                    <td className="px-4 py-3 text-xs font-medium uppercase text-brand-text-mid">
+                                                                        {box.box_type?.name ?? '—'}
                                                                     </td>
-                                                                    <td className="px-4 py-3 text-sm text-zinc-700">
+                                                                    <td className="px-4 py-3 text-sm text-brand-text">
                                                                         {box.destination || '—'}
                                                                     </td>
                                                                     <td className="px-4 py-3">
                                                                         <span
                                                                             className={cn(
-                                                                                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
-                                                                                BOX_STATUS_STYLES[box.status] ?? 'bg-zinc-100 text-zinc-700 border-zinc-200'
+                                                                                'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize tracking-wide',
+                                                                                BOX_STATUS_STYLES[box.status] ?? 'bg-brand-warm/10 text-brand-text-mid border-border'
                                                                             )}
                                                                         >
-                                                                            {humanize(box.status)}
+                                                                            {BOX_STATUS_CONFIG[box.status]?.label ?? humanize(box.status)}
                                                                         </span>
                                                                     </td>
-                                                                    <td className="px-4 py-3">
-                                                                        {(() => {
-                                                                            const eligibility = checkEligibility(box);
-                                                                            return (
-                                                                                <span
-                                                                                    className={cn(
-                                                                                        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border capitalize',
-                                                                                        eligibility.className
-                                                                                    )}
-                                                                                >
-                                                                                    {eligibility.text}
-                                                                                </span>
-                                                                            );
-                                                                        })()}
-                                                                    </td>
-                                                                    <td className="px-4 py-3 text-sm">
-                                                                        {box.batch_id != null && box.batch_id !== batch.id ? (
-                                                                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-600/20">
-                                                                                Re-assign
+                                                                    <td className="px-4 py-3 text-xs">
+                                                                        {isEligible ? (
+                                                                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 tracking-wide">
+                                                                                <CheckCircle2 className="size-3" />
+                                                                                Ready
                                                                             </span>
                                                                         ) : (
-                                                                            <span className="inline-flex items-center rounded-full bg-zinc-50 px-2 py-0.5 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10">
+                                                                            <span className="inline-flex items-center gap-1 rounded-full bg-rose-500/10 px-2.5 py-1 text-[10px] font-semibold text-rose-600 dark:text-rose-400 border border-rose-500/20 tracking-wide">
+                                                                                <AlertTriangle className="size-3" />
+                                                                                {box.booking?.status === 'cancelled' ? 'Cancelled' : 'Unpaid'}
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="px-4 py-3 text-xs">
+                                                                        {box.batch ? (
+                                                                            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-500 border border-amber-500/30">
+                                                                                <Layers className="size-3" />
+                                                                                {box.batch.batch_number} (Re-assign)
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                                                                                 Unassigned
                                                                             </span>
                                                                         )}
@@ -1304,7 +1364,7 @@ export default function BatchShow({
                                                 <Button
                                                     type="submit"
                                                     disabled={selectedIds.size === 0 || isSubmitting}
-                                                    className="h-11 px-8 rounded-xl bg-emerald-600 text-white text-xs font-semibold uppercase tracking-wide shadow-md shadow-emerald-600/10 transition-all hover:bg-emerald-700 active:scale-[0.98] flex items-center gap-2 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 disabled:shadow-none"
+                                                    className="h-11 px-8 rounded-xl bg-emerald-600 text-white text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all hover:bg-emerald-700 active:scale-[0.98] flex items-center gap-2 disabled:cursor-not-allowed disabled:bg-brand-warm/10 disabled:text-brand-text-light disabled:shadow-none cursor-pointer"
                                                 >
                                                     {isSubmitting ? (
                                                         <>
@@ -1322,7 +1382,7 @@ export default function BatchShow({
                                         </form>
                                     ) : (
                                         <div className="py-10 text-center">
-                                            <p className="text-xs text-zinc-500 font-medium">
+                                            <p className="text-xs text-brand-text-light font-medium">
                                                 {searchQuery
                                                     ? 'No available boxes match your search.'
                                                     : 'No boxes are available for loading (must be in "Received by Warehouse" status and not assigned to any batch).'}
@@ -1333,12 +1393,12 @@ export default function BatchShow({
                             )}
 
                             {!hasSearched && (
-                                <div className="rounded-2xl border border-dashed border-zinc-200 py-10 text-center bg-zinc-50/50">
-                                    <Search className="mx-auto mb-3 size-7 text-zinc-300" />
-                                    <p className="text-xs font-semibold text-zinc-700">
+                                <div className="rounded-2xl border border-dashed border-border py-10 text-center bg-brand-warm/5">
+                                    <Search className="mx-auto mb-3 size-7 text-brand-text-light" />
+                                    <p className="text-xs font-semibold text-brand-text">
                                         Start typing to search for boxes available for loading.
                                     </p>
-                                    <p className="mt-1 text-[10px] text-zinc-400">
+                                    <p className="mt-1 text-[10px] text-brand-text-light">
                                         Only boxes in "Received by Warehouse" status are shown
                                     </p>
                                 </div>
@@ -1354,14 +1414,14 @@ export default function BatchShow({
                 onClose={() => setShowConfirm(false)}
                 onConfirm={confirmLoad}
                 loading={isSubmitting}
-                title={hasReassignedBoxes ? "Warning: Re-assigning Boxes" : "Confirm Load"}
-                description={
-                    hasReassignedBoxes 
-                    ? `You have selected boxes that are currently assigned to another batch. Proceeding will remove them from their current batch and load them into batch ${batch.batch_number}.`
-                    : `You are about to load ${selectedIds.size} box${selectedIds.size !== 1 ? 'es' : ''} into batch ${batch.batch_number}. Each box will be transitioned from "Received by Warehouse" to "In Transit". Senders will be notified.`
-                }
-                variant={hasReassignedBoxes ? "warning" : "primary"}
-                confirmText={hasReassignedBoxes ? "Yes, Re-assign and Load" : "Confirm Load"}
+                title="Confirm Load"
+                description={`You are about to load ${selectedIds.size} box${selectedIds.size !== 1 ? 'es' : ''} into batch ${batch.batch_number}.${
+                    availableBoxes.filter((b) => selectedIds.has(b.id) && b.batch_id).length > 0
+                        ? ` Note: ${availableBoxes.filter((b) => selectedIds.has(b.id) && b.batch_id).length} box(es) currently assigned to another batch will be moved to this batch.`
+                        : ''
+                } Each box will be transitioned to "In Transit". Senders will be notified.`}
+                variant="primary"
+                confirmText="Confirm Load"
             />
 
             <ConfirmModal
@@ -1373,7 +1433,7 @@ export default function BatchShow({
                 subtitle={`Vessel ${batch.vessel_name || 'N/A'} • ${batch.current_box_count} box${batch.current_box_count !== 1 ? 'es' : ''}`}
                 bannerText="Recipients will be notified automatically"
                 bannerIcon={<Bell className="size-4" />}
-                customIcon={<Ship className="size-6 text-green-700" />}
+                customIcon={<Ship className="size-6 text-emerald-400" />}
                 variant="success"
                 flatFooter={true}
                 cancelButtonVariant="outline"
@@ -1408,12 +1468,12 @@ export default function BatchShow({
 
             {/* Bulk Load Modal */}
             <Dialog open={isBulkLoadModalOpen} onOpenChange={setIsBulkLoadModalOpen}>
-                <DialogContent className="max-w-md p-6 rounded-xl border border-zinc-200/80 bg-white shadow-xl gap-5">
+                <DialogContent className="max-w-md p-6 rounded-2xl border border-border bg-card shadow-2xl gap-5">
                     <DialogHeader>
-                        <DialogTitle className="font-sans text-base font-semibold text-zinc-900 tracking-tight">
+                        <DialogTitle className="font-sans text-base font-semibold text-brand-text tracking-tight">
                             Bulk Paste Tracking Numbers
                         </DialogTitle>
-                        <DialogDescription className="mt-2 text-xs leading-relaxed text-zinc-600 font-normal">
+                        <DialogDescription className="mt-2 text-xs leading-relaxed text-brand-text-light font-normal">
                             Paste tracking numbers separated by commas, spaces, or new lines. These boxes will be assigned to batch {batch.batch_number}. If the boxes are pending or collected, they will be automatically marked as Received by Warehouse.
                         </DialogDescription>
                     </DialogHeader>
@@ -1423,7 +1483,7 @@ export default function BatchShow({
                             value={bulkTrackingNumbers}
                             onChange={(e) => setBulkTrackingNumbers(e.target.value)}
                             placeholder="BOX-001, BOX-002&#10;BOX-003"
-                            className="w-full h-40 p-3 text-sm font-mono border border-zinc-200 rounded-xl focus:ring-2 focus:ring-sky-100 outline-none bg-white resize-none"
+                            className="w-full h-40 p-3 text-sm font-mono border border-border rounded-xl focus:ring-2 focus:ring-ring outline-none bg-card text-brand-text resize-none"
                         />
                     </div>
 
@@ -1433,7 +1493,7 @@ export default function BatchShow({
                             variant="outline"
                             onClick={() => setIsBulkLoadModalOpen(false)}
                             disabled={isSubmitting}
-                            className="h-9 rounded-lg px-4 text-xs font-medium border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors"
+                            className="h-9 rounded-lg px-4 text-xs font-medium border border-border bg-card text-brand-text hover:bg-brand-warm/20 transition-colors"
                         >
                             Cancel
                         </Button>
@@ -1441,7 +1501,7 @@ export default function BatchShow({
                             type="button"
                             onClick={handleBulkLoadBoxes}
                             disabled={isSubmitting || !bulkTrackingNumbers.trim()}
-                            className="h-9 rounded-lg px-4 text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 transition-colors shadow-2xs"
+                            className="h-9 rounded-lg px-4 text-xs font-medium text-white bg-brand-rust hover:bg-brand-rust/90 transition-colors shadow-2xs cursor-pointer"
                         >
                             {isSubmitting ? (
                                 <>
@@ -1458,19 +1518,19 @@ export default function BatchShow({
 
             {/* Skipped Reasons Modal */}
             <Dialog open={!!skippedReasonsToShow} onOpenChange={(open) => !open && setSkippedReasonsToShow(null)}>
-                <DialogContent className="max-w-md p-6 rounded-xl border border-zinc-200/80 bg-white shadow-xl gap-5">
+                <DialogContent className="max-w-md p-6 rounded-2xl border border-border bg-card shadow-2xl gap-5">
                     <DialogHeader>
-                        <DialogTitle className="font-sans text-base font-semibold text-zinc-900 tracking-tight text-rose-600 flex items-center gap-2">
+                        <DialogTitle className="font-sans text-base font-semibold text-brand-text tracking-tight text-rose-500 flex items-center gap-2">
                             <Layers className="size-5" />
                             Some Tracking Numbers Were Skipped
                         </DialogTitle>
-                        <DialogDescription className="mt-2 text-xs leading-relaxed text-zinc-600 font-normal">
+                        <DialogDescription className="mt-2 text-xs leading-relaxed text-brand-text-light font-normal">
                             The following tracking numbers could not be loaded into the batch:
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-rose-100 bg-rose-50/50 p-4">
-                        <ul className="space-y-2 text-xs text-rose-800 font-mono">
+                    <div className="mt-2 max-h-60 overflow-y-auto rounded-xl border border-rose-500/20 bg-rose-500/10 p-4">
+                        <ul className="space-y-2 text-xs text-rose-400 font-mono">
                             {skippedReasonsToShow?.map((reason, idx) => (
                                 <li key={idx} className="flex gap-2">
                                     <span className="shrink-0 font-bold text-rose-400">•</span>
@@ -1491,18 +1551,6 @@ export default function BatchShow({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-
-            {/* Reopen Batch Confirmation Modal */}
-            <ConfirmModal
-                isOpen={showReopenConfirm}
-                onClose={() => setShowReopenConfirm(false)}
-                onConfirm={handleReopenBatch}
-                title="Reopen Shipment Batch?"
-                description={`Are you sure you want to reopen batch ${batch.batch_number}? This will change the status back to Open and reset any sailing/arrival timestamps so you can continue managing container boxes.`}
-                confirmText={isReopening ? 'Reopening...' : 'Yes, Reopen Batch'}
-                cancelText="Cancel"
-                variant="primary"
-            />
         </AppLayout>
     );
 }

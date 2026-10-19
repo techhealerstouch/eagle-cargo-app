@@ -1,19 +1,10 @@
 import * as React from 'react';
 import { usePage } from '@inertiajs/react';
-import { AlertTriangle, Trash2, RotateCcw, Info, ArrowRight, CheckCircle, Package } from 'lucide-react';
+import { AlertTriangle, Trash2, RefreshCw } from 'lucide-react';
 import BulkUpdateModal, { BulkUpdateAction } from '@/components/common/bulk-update-modal';
 import { Label } from '@/components/ui/label';
-import { humanize } from '@/lib/utils';
 
-export interface BatchItem {
-    id: number;
-    batch_number: string;
-    container_number?: string | null;
-    status: string;
-    boxes_count?: number;
-    current_box_count?: number;
-    destination?: string | null;
-}
+import type { TrackingPhaseOption } from '@/components/admin/batch-tracking-modal';
 
 interface BatchBulkUpdateModalProps {
     isOpen: boolean;
@@ -22,171 +13,141 @@ interface BatchBulkUpdateModalProps {
     isGlobalSelection: boolean;
     filters: any;
     onSuccessCallback?: () => void;
-    batchesData?: BatchItem[];
+    batchesData?: BatchData[];
+    trackingPhases?: TrackingPhaseOption[];
 }
 
-const BATCH_STATUS_META: Record<string, { label: string; badgeClass: string }> = {
-    open: { label: 'Open', badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-    loading: { label: 'Loading', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
-    ready_to_close: { label: 'Ready to Close', badgeClass: 'bg-amber-50 text-amber-700 border-amber-200' },
-    sailed: { label: 'Sailed', badgeClass: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-    arrived: { label: 'Arrived', badgeClass: 'bg-purple-50 text-purple-700 border-purple-200' },
-    delivered: { label: 'Delivered', badgeClass: 'bg-teal-50 text-teal-700 border-teal-200' },
-};
-
-function BatchStatusBadge({ status }: { status: string }) {
-    const meta = BATCH_STATUS_META[status] || {
-        label: humanize(status),
-        badgeClass: 'bg-zinc-100 text-zinc-700 border-zinc-200',
-    };
-    return (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${meta.badgeClass}`}>
-            {meta.label}
-        </span>
-    );
+interface BatchData {
+    id: number;
+    batch_number: string;
+    status: string;
 }
 
 export default function BatchBulkUpdateModal(props: BatchBulkUpdateModalProps) {
     const { auth } = usePage<any>().props;
     const isSuperAdmin = auth?.user?.role === 'super_admin';
-
-    const selectedBatches = React.useMemo(() => {
-        if (!props.batchesData || props.selectedIds.length === 0) return [];
-        return props.batchesData.filter((b) => props.selectedIds.includes(b.id));
-    }, [props.batchesData, props.selectedIds]);
-
-    const isSingle = !props.isGlobalSelection && selectedBatches.length === 1;
-    const singleBatch = isSingle ? selectedBatches[0] : null;
-
-    const statusSummary = React.useMemo(() => {
-        if (selectedBatches.length === 0) return null;
-        const counts: Record<string, number> = {};
-        for (const b of selectedBatches) {
-            counts[b.status] = (counts[b.status] || 0) + 1;
-        }
-        return counts;
-    }, [selectedBatches]);
+    const selectedBatches = (props.batchesData ?? []).filter((batch) => props.selectedIds.includes(batch.id));
+    const singleBatch = !props.isGlobalSelection && props.selectedIds.length === 1 ? selectedBatches[0] : undefined;
 
     const actions: BulkUpdateAction[] = [
         {
-            id: 'status',
-            label: 'Change Status / Reopen',
-            icon: RotateCcw,
-            description: 'Update the operational status or reopen closed/sailed batches back to Open or Loading.',
-            endpoint: '/admin/batches/bulk-update-status',
-            method: 'post',
+            id: 'tracking_phase',
+            label: 'Update Tracking Milestone',
+            icon: RefreshCw,
+            description: 'Advance all boxes across the selected batches to a container milestone (e.g. Under Customs Clearance, Released by BOC, Received at Manila Warehouse).',
+            endpoint: '/admin/batches/bulk-update-tracking-phase',
             getPayload: (formState) => ({
-                status: formState.status !== undefined
-                    ? formState.status
-                    : (singleBatch ? singleBatch.status : 'open'),
+                tracking_phase: formState.tracking_phase,
+                description: formState.description || undefined,
+                status_filter: props.filters?.status || undefined,
             }),
             renderForm: (formState, setFormState) => {
-                const currentStatus = formState.status !== undefined
-                    ? formState.status
-                    : (singleBatch ? singleBatch.status : 'open');
+                const availablePhases = (props.trackingPhases ?? []).filter(
+                    (phase) => phase.value !== 'delivered'
+                );
 
                 return (
                     <div className="space-y-4">
-                        {/* Single batch context */}
-                        {isSingle && singleBatch && (
-                            <div className="p-3.5 rounded-xl border border-zinc-200/90 bg-gradient-to-br from-zinc-50 via-white to-zinc-50/50 shadow-2xs space-y-2">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                                        Current Batch Status
-                                    </span>
-                                    <span className="text-xs font-mono font-bold text-zinc-800">
-                                        {singleBatch.batch_number}
-                                    </span>
-                                </div>
-                                <div className="flex items-center gap-2.5">
-                                    <BatchStatusBadge status={singleBatch.status} />
-                                    <span className="text-xs text-zinc-600">
-                                        {(singleBatch.current_box_count ?? singleBatch.boxes_count) !== undefined
-                                            ? `${singleBatch.current_box_count ?? singleBatch.boxes_count} assigned boxes`
-                                            : ''}
-                                        {singleBatch.container_number ? ` • Container: ${singleBatch.container_number}` : ''}
-                                    </span>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Multi-batch status summary */}
-                        {!isSingle && !props.isGlobalSelection && statusSummary && Object.keys(statusSummary).length > 0 && (
-                            <div className="p-3.5 rounded-xl border border-zinc-200/90 bg-zinc-50/80 shadow-2xs space-y-2">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                                    Current Statuses Across Selection ({selectedBatches.length} Batches)
-                                </span>
-                                <div className="flex flex-wrap gap-2">
-                                    {Object.entries(statusSummary).map(([statusKey, count]) => (
-                                        <div key={statusKey} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-zinc-200/80 rounded-lg shadow-2xs">
-                                            <BatchStatusBadge status={statusKey} />
-                                            <span className="text-[11px] font-bold text-zinc-700 bg-zinc-100 px-1.5 py-0.5 rounded">
-                                                {count} {count === 1 ? 'batch' : 'batches'}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
+                        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+                            {props.isGlobalSelection
+                                ? 'Applying milestone to all batches matching current filters.'
+                                : singleBatch
+                                    ? `Applying milestone to Batch ${singleBatch.batch_number}.`
+                                    : `Applying milestone to ${props.selectedIds.length} selected batches.`}
+                        </div>
                         <div className="space-y-2">
-                            <Label htmlFor="batch-status-select" className="text-xs font-semibold text-zinc-700">
+                            <Label htmlFor="batch-bulk-tracking-phase" className="text-xs font-semibold text-brand-text">
+                                Target Container Milestone
+                            </Label>
+                            <select
+                                id="batch-bulk-tracking-phase"
+                                className="flex h-10 w-full rounded-xl border border-border bg-card px-3 text-xs text-brand-text focus:outline-none focus:ring-2 focus:ring-ring shadow-2xs transition-all"
+                                value={formState.tracking_phase || ''}
+                                onChange={(e) => setFormState({ ...formState, tracking_phase: e.target.value })}
+                            >
+                                <option value="" disabled>Select container milestone...</option>
+                                {availablePhases.map((phase) => (
+                                    <option key={phase.value} value={phase.value}>
+                                        {phase.group ? `${phase.group} - ` : ''}{phase.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="batch-bulk-tracking-desc" className="text-xs font-semibold text-brand-text">
+                                Description / Notes (Optional)
+                            </Label>
+                            <input
+                                id="batch-bulk-tracking-desc"
+                                type="text"
+                                maxLength={500}
+                                placeholder="Example: Cleared by BOC and released to local warehouse..."
+                                value={formState.description || ''}
+                                onChange={(e) => setFormState({ ...formState, description: e.target.value })}
+                                className="flex h-10 w-full rounded-xl border border-border bg-card px-3 text-xs text-brand-text focus:outline-none focus:ring-2 focus:ring-ring shadow-2xs transition-all"
+                            />
+                        </div>
+                        <p className="text-[11px] text-zinc-500">
+                            ℹ️ Note: Batches that are still Open or Loading, or already past the selected milestone, will be skipped automatically.
+                        </p>
+                    </div>
+                );
+            },
+        },
+        {
+            id: 'status',
+            label: 'Update Status / Reopen',
+            icon: RefreshCw,
+            description: 'Change the logistical stage of the selected batches (or reopen to Open/Loading).',
+            endpoint: '/admin/batches/bulk-update-status',
+            getPayload: (formState) => ({
+                status: formState.status || 'open',
+                status_filter: props.filters?.status || undefined,
+            }),
+            renderForm: (formState, setFormState) => {
+                const currentStatus = singleBatch?.status;
+                const targetStatus = formState.status || 'open';
+
+                return (
+                    <div className="space-y-4">
+                        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+                            {props.isGlobalSelection
+                                ? 'All batches matching current filters.'
+                                : singleBatch
+                                    ? `Batch ${singleBatch.batch_number} is currently ${singleBatch.status}.`
+                                    : `${props.selectedIds.length} batches selected from the current page.`}
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="batch-bulk-status" className="text-xs font-semibold text-brand-text">
                                 Target Batch Status
                             </Label>
                             <select
-                                id="batch-status-select"
-                                className="flex h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 font-medium shadow-2xs transition-all"
-                                value={currentStatus}
+                                id="batch-bulk-status"
+                                className="flex h-10 w-full rounded-xl border border-border bg-card px-3 text-xs text-brand-text focus:outline-none focus:ring-2 focus:ring-ring shadow-2xs transition-all"
+                                value={targetStatus}
                                 onChange={(e) => setFormState({ ...formState, status: e.target.value })}
                             >
-                                <option value="open">Open {singleBatch?.status === 'open' ? '(Current)' : ''}</option>
-                                <option value="loading">Loading {singleBatch?.status === 'loading' ? '(Current)' : ''}</option>
-                                <option value="ready_to_close">Ready to Close {singleBatch?.status === 'ready_to_close' ? '(Current)' : ''}</option>
-                                <option value="sailed">Sailed {singleBatch?.status === 'sailed' ? '(Current)' : ''}</option>
-                                <option value="arrived">Arrived {singleBatch?.status === 'arrived' ? '(Current)' : ''}</option>
-                                <option value="delivered">Delivered {singleBatch?.status === 'delivered' ? '(Current)' : ''}</option>
+                                <option value="open">Open (Accepting Boxes){currentStatus === 'open' ? ' (Current)' : ''}</option>
+                                <option value="loading">Loading (Active Container Loading)</option>
+                                <option value="ready_to_close">Ready to Close (Manifest Ready - requires boxes)</option>
+                                <option value="sailed">Sailed (Departed - requires boxes)</option>
+                                <option value="arrived">Arrived at Port (requires boxes)</option>
+                                <option value="under_customs_clearance">Under BOC Clearance (requires boxes)</option>
+                                <option value="released_by_boc">Released by BOC (requires boxes)</option>
+                                <option value="received_at_warehouse">Received at Manila Warehouse (Unloaded / Terminal)</option>
                             </select>
                         </div>
-
-                        {/* Transition Note */}
-                        {isSingle && singleBatch && (
-                            <div className="pt-0.5">
-                                {currentStatus === singleBatch.status ? (
-                                    <div className="flex items-center gap-2 text-xs text-zinc-500 bg-zinc-50 p-2.5 rounded-xl border border-zinc-200/60">
-                                        <Info className="size-4 text-zinc-400 shrink-0" />
-                                        <span>No change: Batch is already in <strong>{humanize(singleBatch.status)}</strong> status.</span>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center gap-2.5 text-xs text-sky-900 bg-gradient-to-r from-sky-50 to-blue-50/40 p-2.5 rounded-xl border border-sky-200/80">
-                                        <ArrowRight className="size-4 text-sky-600 shrink-0" />
-                                        <span>
-                                            Batch status will change from <strong className="text-zinc-900">{humanize(singleBatch.status)}</strong> ➔ <strong className="text-sky-700">{humanize(currentStatus)}</strong>.
-                                        </span>
-                                    </div>
-                                )}
-                            </div>
+                        {singleBatch && targetStatus === currentStatus && (
+                            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-lg">No change: this batch already has that status.</p>
                         )}
-
-                        {currentStatus === 'open' || currentStatus === 'loading' ? (
-                            <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/70 p-3.5 shadow-2xs">
-                                <Info className="size-4 text-sky-600 mt-0.5 shrink-0" />
-                                <div>
-                                    <p className="text-xs font-bold text-sky-900">Reopening Batches</p>
-                                    <p className="text-[11px] text-sky-800 mt-0.5 leading-relaxed">
-                                        Reopening batches allows you to add or remove boxes. Any existing sailing, arrival, or delivery timestamps will be reset to blank.
-                                    </p>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 shadow-2xs">
-                                <AlertTriangle className="size-4 text-amber-600 mt-0.5 shrink-0" />
-                                <div>
-                                    <p className="text-xs font-bold text-amber-900">Empty Batch Safeguard</p>
-                                    <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-                                        Batches with 0 boxes cannot be moved to shipping statuses (Ready to Close, Sailed, Arrived, Delivered) and will remain unchanged.
-                                    </p>
-                                </div>
-                            </div>
+                        {singleBatch && targetStatus !== currentStatus && (
+                            <p className="text-xs text-zinc-600">{currentStatus} <span aria-hidden="true">-&gt;</span> {targetStatus}</p>
+                        )}
+                        {!singleBatch && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-3 rounded-lg">Invalid transitions may be skipped.</p>}
+                        {currentStatus === 'open' && (
+                            <p className="text-[11px] text-emerald-600 bg-emerald-50 border border-emerald-200 p-3 rounded-lg">
+                                ✅ Reopening batches will reset sailing/arrival dates and allow loading new boxes into the container.
+                            </p>
                         )}
                     </div>
                 );
@@ -202,23 +163,20 @@ export default function BatchBulkUpdateModal(props: BatchBulkUpdateModalProps) {
             description: 'Permanently delete batches. Only batches without boxes can be deleted.',
             endpoint: '/admin/batches/bulk-destroy',
             method: 'delete',
+            getPayload: () => ({
+                status_filter: props.filters?.status || undefined,
+            }),
             renderForm: () => (
-                <div className="p-4 bg-gradient-to-r from-red-50 to-rose-50/40 rounded-xl border border-red-200/80 shadow-2xs">
+                <div className="p-4 bg-rose-500/10 rounded-xl border border-rose-500/30 shadow-2xs">
                     <div className="flex items-start gap-3">
-                        <div className="size-8 rounded-lg bg-red-100/80 text-red-600 flex items-center justify-center shrink-0">
+                        <div className="size-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
                             <AlertTriangle className="size-4" />
                         </div>
                         <div>
-                            <h4 className="text-xs font-semibold text-red-900">Confirm Deletion</h4>
-                            <p className="text-xs text-red-700/90 leading-relaxed mt-0.5">
+                            <h4 className="text-xs font-semibold text-rose-400">Confirm Deletion</h4>
+                            <p className="text-xs text-rose-300 leading-relaxed mt-0.5">
                                 Are you sure you want to delete {props.isGlobalSelection ? 'all matching' : props.selectedIds.length} batch(es)? Only batches without assigned boxes will be removed. This action cannot be undone.
                             </p>
-                            {isSingle && singleBatch && (
-                                <div className="mt-2 pt-2 border-t border-red-200/60 flex items-center gap-2">
-                                    <span className="text-xs font-bold text-red-900">{singleBatch.batch_number}</span>
-                                    <BatchStatusBadge status={singleBatch.status} />
-                                </div>
-                            )}
                         </div>
                     </div>
                 </div>
@@ -226,15 +184,11 @@ export default function BatchBulkUpdateModal(props: BatchBulkUpdateModalProps) {
         });
     }
 
-    const dynamicTitle = singleBatch
-        ? `Update Batch #${singleBatch.batch_number}`
-        : 'Update Selected Batches';
-
     return (
         <BulkUpdateModal
             isOpen={props.isOpen}
             onClose={props.onClose}
-            title={dynamicTitle}
+            title="Update Selected Batches"
             actions={actions}
             selectedIds={props.selectedIds}
             isGlobalSelection={props.isGlobalSelection}
@@ -243,3 +197,4 @@ export default function BatchBulkUpdateModal(props: BatchBulkUpdateModalProps) {
         />
     );
 }
+

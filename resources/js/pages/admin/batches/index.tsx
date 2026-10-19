@@ -3,18 +3,10 @@ import {
     Layers,
     Plus,
     Pencil,
-    CheckCircle2,
     Eye,
     ScanLine,
-    AlertTriangle,
-    Trash2,
-    Ship,
-    Anchor,
-    Truck,
-    Loader2,
-    ArrowRight,
     Sparkles,
-    MapPin,
+    Ship,
 } from 'lucide-react';
 import { useState } from 'react';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
@@ -36,15 +28,9 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from '@/components/ui/select';
 import AppLayout from '@/layouts/app-layout';
 import { BATCH_STATUS_CONFIG } from '@/lib/statuses';
 import { humanize } from '@/lib/utils';
@@ -96,11 +82,12 @@ export default function BatchesIndex({
     const [isGlobalSelection, setIsGlobalSelection] = useState(false);
     const [isBatchBulkUpdateModalOpen, setIsBatchBulkUpdateModalOpen] = useState(false);
 
-    // Modals state
+    // Tracking update state
     const [trackingBatch, setTrackingBatch] = useState<BatchData | null>(null);
-    const [closingBatch, setClosingBatch] = useState<BatchData | null>(null);
-    const [isClosing, setIsClosing] = useState(false);
     const [generateTemplateBatch, setGenerateTemplateBatch] = useState<BatchData | null>(null);
+    const [confirmCloseBatch, setConfirmCloseBatch] = useState<BatchData | null>(null);
+    const [isConfirmingClose, setIsConfirmingClose] = useState(false);
+    const [sailEta, setSailEta] = useState('');
 
     const toggleSelectAll = () => {
         if (selectedIds.length === batches.data.length) {
@@ -140,17 +127,12 @@ export default function BatchesIndex({
                 <div className="flex flex-col gap-4">
                     <div className="flex flex-col gap-4 p-2 md:flex-row md:items-end md:justify-between">
                         <div className="flex flex-1 flex-wrap items-end gap-3">
-                            <div className="flex max-w-sm flex-1 flex-col gap-1.5">
-                                <span className="flex items-center gap-1.5 px-1 text-[9px] font-black tracking-[0.2em] text-brand-text-mid/70 uppercase">
-                                    <span className="h-px w-2 bg-brand-rust/20"></span>
-                                    Inventory Search
-                                </span>
-                                <SearchFilter
-                                    routeName="/admin/batches"
-                                    queryParams={filters}
-                                    placeholder="Search by batch, container, or voyage..."
-                                />
-                            </div>
+                            <SearchFilter
+                                label="Inventory Search"
+                                routeName="/admin/batches"
+                                queryParams={filters}
+                                placeholder="Search by batch, container, or voyage..."
+                            />
                             <FilterSelect
                                 label="Status"
                                 routeName="/admin/batches"
@@ -165,8 +147,10 @@ export default function BatchesIndex({
                                         value: 'ready_to_close',
                                     },
                                     { label: 'Sailed', value: 'sailed' },
-                                    { label: 'Arrived', value: 'arrived' },
-                                    { label: 'Delivered', value: 'delivered' },
+                                    { label: 'Arrived at Port', value: 'arrived' },
+                                    { label: 'Under BOC Clearance', value: 'under_customs_clearance' },
+                                    { label: 'Released by BOC', value: 'released_by_boc' },
+                                    { label: 'Received at Manila Warehouse', value: 'received_at_warehouse' },
                                 ]}
                             />
                         </div>
@@ -178,12 +162,12 @@ export default function BatchesIndex({
                     />
                 </div>
 
-                <div className="rounded-xl border border-zinc-200/80 bg-white overflow-hidden shadow-2xs">
+                <div className="card overflow-hidden shadow-xs">
                     {batches.data.length > 0 ? (
                         <div className="w-full overflow-x-auto">
                             <table className="w-full text-left border-collapse">
                                 <thead>
-                                    <tr className="border-b border-zinc-200/80 bg-zinc-50/70 text-xs font-semibold text-zinc-600">
+                                    <tr className="border-b border-border bg-brand-warm/10 dark:bg-brand-warm/20 text-xs font-semibold text-brand-text-mid">
                                         <th className="w-10 px-4 py-3">
                                             <Checkbox
                                                 checked={
@@ -195,7 +179,7 @@ export default function BatchesIndex({
                                                     toggleSelectAll
                                                 }
                                                 aria-label="Select all"
-                                                className="size-4 rounded border-zinc-300"
+                                                className="size-4 rounded border-border"
                                             />
                                         </th>
                                         <th className="px-4 py-3 font-semibold">
@@ -218,7 +202,7 @@ export default function BatchesIndex({
                                         </th>
                                     </tr>
                                 </thead>
-                                <tbody className="divide-y divide-zinc-100 text-xs font-normal">
+                                <tbody className="divide-y divide-border text-xs font-normal">
                                     {batches.data.map((batch) => {
                                         const utilization = batch.capacity_boxes
                                             ? (batch.current_box_count /
@@ -229,7 +213,7 @@ export default function BatchesIndex({
                                         return (
                                             <tr
                                                 key={batch.id}
-                                                className="hover:bg-zinc-50/60 transition-colors"
+                                                className="hover:bg-brand-cream/20 dark:hover:bg-brand-warm/20 transition-colors"
                                             >
                                                 <td className="px-4 py-3.5">
                                                     <Checkbox
@@ -242,15 +226,15 @@ export default function BatchesIndex({
                                                             )
                                                         }
                                                         aria-label={`Select batch ${batch.batch_number}`}
-                                                        className="size-4 rounded border-zinc-300"
+                                                        className="size-4 rounded border-border"
                                                     />
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex flex-col">
-                                                        <span className="font-mono text-xs font-semibold text-zinc-900">
+                                                        <span className="font-mono text-xs font-semibold text-brand-text">
                                                             {batch.batch_number}
                                                         </span>
-                                                        <span className="text-[10px] text-zinc-400">
+                                                        <span className="text-[10px] text-brand-text-light/60">
                                                             {[
                                                                 batch.origin_port,
                                                                 batch.destination_port,
@@ -261,15 +245,15 @@ export default function BatchesIndex({
                                                         </span>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3.5 font-mono text-xs text-zinc-600">
+                                                <td className="px-4 py-3.5 font-mono text-xs text-brand-text-mid">
                                                     {batch.container_number || '—'}
                                                 </td>
-                                                <td className="px-4 py-3.5 text-zinc-600">
+                                                <td className="px-4 py-3.5 text-brand-text-mid">
                                                     {batch.vessel_name || '—'}
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex min-w-28 flex-col gap-1">
-                                                        <div className="flex items-center justify-between text-[11px] font-medium text-zinc-600">
+                                                        <div className="flex items-center justify-between text-[11px] font-medium text-brand-text-mid">
                                                             <span>
                                                                 {batch.current_box_count} / {batch.capacity_boxes || '∞'}
                                                             </span>
@@ -279,51 +263,51 @@ export default function BatchesIndex({
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${BATCH_STATUS_CONFIG[batch.status]?.badge ?? 'bg-zinc-100 text-zinc-700 border border-zinc-200'}`}>
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${BATCH_STATUS_CONFIG[batch.status]?.badge ?? 'bg-muted text-muted-foreground border border-border'}`}>
                                                         {humanize(batch.status)}
                                                     </span>
                                                 </td>
                                                 <td className="px-4 py-3.5 text-right whitespace-nowrap">
                                                     <div className="flex justify-end items-center gap-1.5">
+                                                        {batch.status === 'ready_to_close' && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setConfirmCloseBatch(batch)}
+                                                                title="Confirm Manifest / Close Batch"
+                                                                className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 hover:border-indigo-300 dark:hover:border-indigo-700 transition-all flex items-center justify-center shadow-2xs"
+                                                            >
+                                                                <Ship className="size-3.5" />
+                                                            </button>
+                                                        )}
                                                         {!['open', 'loading', 'ready_to_close'].includes(batch.status) && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => setTrackingBatch(batch)}
-                                                                title="Update Tracking Phase"
-                                                                className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-amber-600 hover:bg-amber-50 hover:border-amber-300 transition-all flex items-center justify-center shadow-2xs"
+                                                                title="Update Tracking"
+                                                                className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30 hover:border-green-300 dark:hover:border-green-700 transition-all flex items-center justify-center shadow-2xs"
                                                             >
-                                                                <MapPin className="size-3.5" />
-                                                            </button>
-                                                        )}
-                                                        {batch.status === 'ready_to_close' && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setClosingBatch(batch)}
-                                                                title="Confirm Close (Sail Batch)"
-                                                                className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-green-600 hover:bg-green-50 hover:border-green-300 transition-all flex items-center justify-center shadow-2xs"
-                                                            >
-                                                                <Ship className="size-3.5" />
+                                                                <ScanLine className="size-3.5" />
                                                             </button>
                                                         )}
                                                         <button
                                                             type="button"
                                                             onClick={() => setGenerateTemplateBatch(batch)}
                                                             title="Generate Next Batch from Template"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-sky-600 hover:bg-sky-50 hover:border-sky-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/30 hover:border-sky-300 dark:hover:border-sky-700 transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Sparkles className="size-3.5" />
                                                         </button>
                                                         <Link
                                                             href={`/admin/batches/${batch.id}`}
                                                             title="View Batch Details"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Eye className="size-3.5" />
                                                         </Link>
                                                         <Link
                                                             href={`/admin/batches/${batch.id}/edit`}
                                                             title="Edit Batch"
-                                                            className="h-8 w-8 rounded-lg border border-zinc-200/80 bg-white text-zinc-500 hover:text-brand-rust hover:bg-zinc-50 hover:border-zinc-300 transition-all flex items-center justify-center shadow-2xs"
+                                                            className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-brand-rust hover:bg-brand-warm/50 hover:border-brand-sand dark:hover:border-border transition-all flex items-center justify-center shadow-2xs"
                                                         >
                                                             <Pencil className="size-3.5" />
                                                         </Link>
@@ -334,32 +318,6 @@ export default function BatchesIndex({
                                     })}
                                 </tbody>
                             </table>
-                            <div className="flex items-center justify-center gap-2 border-t border-border px-6 py-4">
-                                {(
-                                    (batches as any).meta?.links ||
-                                    batches.links ||
-                                    []
-                                ).map((link: { url: string | null; label: string; active: boolean }, i: number) =>
-                                    link.url ? (
-                                        <Link
-                                            key={i}
-                                            href={link.url}
-                                            className={`rounded-md px-3 py-1 text-sm transition-colors ${link.active ? 'bg-brand-rust text-white' : 'hover:bg-brand-sand/50'}`}
-                                            dangerouslySetInnerHTML={{
-                                                __html: link.label,
-                                            }}
-                                        />
-                                    ) : (
-                                        <span
-                                            key={i}
-                                            className="rounded-md px-3 py-1 text-sm text-brand-text-mid"
-                                            dangerouslySetInnerHTML={{
-                                                __html: link.label,
-                                            }}
-                                        />
-                                    ),
-                                )}
-                            </div>
                         </div>
                     ) : (
                         <div className="flex h-full flex-col items-center justify-center p-12">
@@ -394,11 +352,11 @@ export default function BatchesIndex({
                         setIsGlobalSelection(false);
                     }}
                     actions={[
-                        {
+                        ...(isSuperAdmin ? [{
                             label: 'Update Selected',
                             icon: Sparkles,
                             onClick: () => setIsBatchBulkUpdateModalOpen(true),
-                        },
+                        }] : [])
                     ]}
                 />
 
@@ -409,6 +367,7 @@ export default function BatchesIndex({
                     isGlobalSelection={isGlobalSelection}
                     filters={filters}
                     batchesData={batches.data}
+                    trackingPhases={trackingPhases}
                     onSuccessCallback={() => {
                         setSelectedIds([]);
                         setIsGlobalSelection(false);
@@ -421,33 +380,62 @@ export default function BatchesIndex({
                 onClose={() => setTrackingBatch(null)}
                 batch={trackingBatch}
                 trackingPhases={trackingPhases}
+                onSuccessCallback={() => setTrackingBatch(null)}
             />
 
-            <ConfirmModal
-                isOpen={!!closingBatch}
-                onClose={() => setClosingBatch(null)}
-                title="Sail Batch"
-                description={
-                    closingBatch
-                        ? `Are you sure you want to lock and sail batch ${closingBatch.batch_number}? This will lock the batch from further edits.`
-                        : ''
-                }
-                confirmText="Sail Batch"
-                variant="primary"
-                loading={isClosing}
-                onConfirm={() => {
-                    if (!closingBatch) return;
-                    setIsClosing(true);
-                    router.post(
-                        `/admin/batches/${closingBatch.id}/confirm-manifest`,
-                        {},
-                        {
-                            onSuccess: () => setClosingBatch(null),
-                            onFinish: () => setIsClosing(false),
-                        }
-                    );
-                }}
-            />
+            <Dialog open={!!confirmCloseBatch} onOpenChange={(open) => !open && setConfirmCloseBatch(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Confirm Manifest & Sail Batch</DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to confirm the manifest for {confirmCloseBatch?.batch_number}? This will lock the batch, mark it as 'Sailed', and allow tracking updates to be applied.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="py-4 space-y-3">
+                        <Label htmlFor="eta_at" className="text-xs font-semibold text-zinc-700">
+                            Confirmed Port Arrival ETA (from Shipping Line)
+                        </Label>
+                        <Input
+                            id="eta_at"
+                            type="datetime-local"
+                            value={sailEta}
+                            onChange={(e) => setSailEta(e.target.value)}
+                            className="h-11 rounded-xl"
+                        />
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => setConfirmCloseBatch(null)}
+                            disabled={isConfirmingClose}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={() => {
+                                if (confirmCloseBatch) {
+                                    setIsConfirmingClose(true);
+                                    router.post(`/admin/batches/${confirmCloseBatch.id}/confirm-manifest`, {
+                                        eta_at: sailEta || null,
+                                    }, {
+                                        preserveScroll: true,
+                                        onFinish: () => {
+                                            setIsConfirmingClose(false);
+                                            setConfirmCloseBatch(null);
+                                            setSailEta('');
+                                        }
+                                    });
+                                }
+                            }}
+                            disabled={isConfirmingClose}
+                        >
+                            Confirm & Sail
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <ConfirmModal
                 isOpen={generateTemplateBatch !== null}

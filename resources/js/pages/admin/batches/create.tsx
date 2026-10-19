@@ -34,6 +34,7 @@ const STEPS = [
 export default function BatchesCreate({ templateBatch }: { templateBatch?: any }) {
     const [currentStep, setCurrentStep] = useState(0);
     const [visitedSteps, setVisitedSteps] = useState<number[]>([0]);
+    const [justTransitioned, setJustTransitioned] = useState(false);
     const [uniqueWarnings, setUniqueWarnings] = useState<Record<string, string>>({});
     const [checkingUnique, setCheckingUnique] = useState<Record<string, boolean>>({});
     const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -316,6 +317,10 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
             const next = currentStep + 1;
             setCurrentStep(next);
             setVisitedSteps(prev => prev.includes(next) ? prev : [...prev, next]);
+            if (next === STEPS.length - 1) {
+                setJustTransitioned(true);
+                setTimeout(() => setJustTransitioned(false), 600);
+            }
         }
     };
 
@@ -327,6 +332,16 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Guard: Never allow auto-submission if user is not on the final step (Step 4: Load Capacity)
+        if (currentStep < STEPS.length - 1) {
+            nextStep();
+            return;
+        }
+
+        if (justTransitioned) {
+            return;
+        }
 
         // 1. Uniqueness check warnings (Step 0)
         if (Object.keys(uniqueWarnings).length > 0) {
@@ -515,7 +530,18 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                 </span>
                             </div>
 
-                            <form onSubmit={handleSubmit} className="p-6 md:p-8 flex-1 flex flex-col">
+                            <form
+                                onSubmit={handleSubmit}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') {
+                                        e.preventDefault();
+                                        if (currentStep < STEPS.length - 1) {
+                                            nextStep();
+                                        }
+                                    }
+                                }}
+                                className="p-6 md:p-8 flex-1 flex flex-col"
+                            >
                                 <div className="flex-1">
                                     {currentStep === 0 && (
                                         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -887,12 +913,12 @@ export default function BatchesCreate({ templateBatch }: { templateBatch?: any }
                                         ) : (
                                             <button
                                                 type="submit"
-                                                disabled={processing || !allStepsSatisfied}
+                                                disabled={processing || !allStepsSatisfied || justTransitioned}
                                                 className={cn(
                                                     "h-11 px-10 flex items-center justify-center rounded-xl text-xs font-semibold uppercase tracking-wide transition-all",
-                                                    !processing && allStepsSatisfied
+                                                    !processing && allStepsSatisfied && !justTransitioned
                                                         ? "bg-sky-600 text-white shadow-md shadow-sky-600/10 hover:bg-sky-700 active:scale-[0.98] cursor-pointer"
-                                                        : "bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-60"
+                                                        : "bg-zinc-200 text-zinc-400 cursor-not-allowed opacity-60 pointer-events-none"
                                                 )}
                                             >
                                                 {processing ? 'Processing...' : 'Initialize Batch'}

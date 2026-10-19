@@ -92,27 +92,69 @@ export function classifyTimelineStep(
  * Match a timeline event to a roadmap step by comparing status strings.
  * Returns the index of the best matching step, or -1 if no match.
  */
-function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]): number {
+export function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]): number {
     const eventStatus = (event.status_label || event.status || '').toLowerCase().replace(/_/g, ' ').trim();
     const eventPhase = (event.tracking_phase || '').toLowerCase().replace(/_/g, ' ').trim();
+    const eventStepKey = (event.tracking_step_key || '').toLowerCase().replace(/_/g, ' ').trim();
     const rawStatus = (event.status || '').toLowerCase().trim();
     const desc = (event.description || '').toLowerCase();
 
-    // 1. Direct system_status / statusKey match
-    for (let i = 0; i < steps.length; i++) {
-        const step = steps[i];
-        const stepSystem = (step.systemStatus || '').toLowerCase().trim();
-        const stepKey = (step.statusKey || '').toLowerCase().trim();
-
-        if (stepSystem && (rawStatus === stepSystem || eventStatus === stepSystem)) {
-            return i;
-        }
-        if (stepKey && (rawStatus === stepKey || eventStatus === stepKey)) {
-            return i;
+    // 1. Exact tracking_step_key match (Highest precision)
+    if (eventStepKey) {
+        for (let i = 0; i < steps.length; i++) {
+            const stepKey = steps[i].statusKey.toLowerCase().replace(/_/g, ' ').trim();
+            const rawKey = steps[i].statusKey.toLowerCase().trim();
+            if (eventStepKey === stepKey || eventStepKey === rawKey) {
+                return i;
+            }
         }
     }
 
-    // 2. Admin confirmation event
+    // 2. Tracking phase match (Specific milestone phase)
+    if (eventPhase) {
+        for (let i = 0; i < steps.length; i++) {
+            const stepKey = steps[i].statusKey.toLowerCase().replace(/_/g, ' ').trim();
+            const rawKey = steps[i].statusKey.toLowerCase().trim();
+            if (eventPhase === stepKey || eventPhase === rawKey) {
+                return i;
+            }
+        }
+
+        // Semantic matching for customs / BOC milestones
+        if (eventPhase.includes('customs') || eventPhase.includes('boc')) {
+            const customsIdx = steps.findIndex((s) => {
+                const k = s.statusKey.toLowerCase();
+                return (k.includes('customs') || k.includes('boc')) && !k.includes('release');
+            });
+            if (customsIdx !== -1) return customsIdx;
+        }
+    }
+
+    // 3. Status label semantic match
+    if (event.status_label) {
+        const normLabel = event.status_label.toLowerCase().trim();
+        for (let i = 0; i < steps.length; i++) {
+            const stepLabel = steps[i].label.toLowerCase().trim();
+            if (normLabel === stepLabel) {
+                return i;
+            }
+            if (
+                (normLabel.includes('customs') || normLabel.includes('boc')) &&
+                (stepLabel.includes('customs') || stepLabel.includes('boc')) &&
+                !normLabel.includes('release') && !stepLabel.includes('release')
+            ) {
+                return i;
+            }
+            if (
+                (normLabel.includes('release') || normLabel.includes('cleared')) &&
+                (stepLabel.includes('release') || stepLabel.includes('cleared'))
+            ) {
+                return i;
+            }
+        }
+    }
+
+    // 4. Admin confirmation event
     if (desc.includes('booking accepted') || desc.includes('booking confirmed') || desc.includes('confirmed by admin') || rawStatus === 'confirmed') {
         const confirmedStepIdx = steps.findIndex((s) =>
             s.systemStatus === 'confirmed' ||
@@ -125,7 +167,7 @@ function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]):
         }
     }
 
-    // 3. Booking registration / creation event (placed by customer)
+    // 5. Booking registration / creation event (placed by customer)
     if (desc.includes('booking created') || desc.includes('box registered') || desc.includes('booking received') || desc.includes('booking submitted') || desc.includes('booking placed') || rawStatus === 'pending') {
         const placedStepIdx = steps.findIndex((s) =>
             s.systemStatus === 'pending' ||
@@ -140,23 +182,27 @@ function matchEventToStep(event: TrackingTimelineItem, steps: NormalizedStep[]):
         }
     }
 
-    // 4. Fallback search by label or tracking_phase
+    // 6. Direct statusKey match with rawStatus or eventStatus
     for (let i = 0; i < steps.length; i++) {
         const stepKey = steps[i].statusKey.toLowerCase().replace(/_/g, ' ').trim();
-        const stepLabel = steps[i].label.toLowerCase().trim();
-        const stepSystem = (steps[i].systemStatus || '').toLowerCase().replace(/_/g, ' ').trim();
-
-        if (
-            (eventStatus && (eventStatus === stepKey || eventStatus === stepLabel || eventStatus === stepSystem)) ||
-            (eventPhase && (eventPhase === stepKey || eventPhase === stepSystem || eventPhase === stepLabel))
-        ) {
+        const rawKey = steps[i].statusKey.toLowerCase().trim();
+        if (rawStatus === stepKey || rawStatus === rawKey || eventStatus === stepKey || eventStatus === rawKey) {
             return i;
         }
+    }
 
-        if (
-            (eventStatus && stepKey && (eventStatus.includes(stepKey) || stepKey.includes(eventStatus))) ||
-            (eventStatus && stepLabel && (eventStatus.includes(stepLabel) || stepLabel.includes(eventStatus)))
-        ) {
+    // 7. Fallback search by label
+    for (let i = 0; i < steps.length; i++) {
+        const stepLabel = steps[i].label.toLowerCase().trim();
+        if (eventStatus && (eventStatus === stepLabel || eventStatus.includes(stepLabel) || stepLabel.includes(eventStatus))) {
+            return i;
+        }
+    }
+
+    // 8. Fallback to system_status (Last resort)
+    for (let i = 0; i < steps.length; i++) {
+        const stepSystem = (steps[i].systemStatus || '').toLowerCase().trim();
+        if (stepSystem && (rawStatus === stepSystem || eventStatus === stepSystem)) {
             return i;
         }
     }
@@ -376,11 +422,17 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                         </div>
                                     )}
 
-                                    {/* Future steps with no events — empty hint */}
+                                    {/* Future steps or ongoing step with no events */}
                                     {isAwaitingAdmin && events.length === 0 ? (
                                         <div className="p-3 md:p-3.5 rounded-xl border border-amber-200/70 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-xs">
                                             <p className="font-medium leading-relaxed">
                                                 Your booking has been received and is waiting for admin acceptance and scheduling.
+                                            </p>
+                                        </div>
+                                    ) : isOngoing && events.length === 0 ? (
+                                        <div className="p-3.5 md:p-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 text-zinc-700 dark:text-zinc-300 text-xs shadow-sm">
+                                            <p className="font-medium leading-relaxed">
+                                                {step.customerMessage || step.description || 'Current milestone in progress.'}
                                             </p>
                                         </div>
                                     ) : isFuture && events.length === 0 ? (

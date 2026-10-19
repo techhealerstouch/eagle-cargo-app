@@ -220,6 +220,8 @@ class CalendarEventService
                 BatchStatus::ReadyToClose->value,
                 BatchStatus::Sailed->value,
                 BatchStatus::Arrived->value,
+                BatchStatus::UnderCustomsClearance->value,
+                BatchStatus::ReleasedByBoc->value,
             ])
             ->count();
 

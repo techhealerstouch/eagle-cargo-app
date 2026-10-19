@@ -30,10 +30,17 @@ export const TrackingMultiBoxSelector: React.FC<TrackingMultiBoxSelectorProps> =
     const getProgressPercent = (statusStr: string = '') => {
         const s = statusStr.toLowerCase();
         if (s.includes('delivered')) return 100;
-        if (s.includes('delivery') || s.includes('out for')) return 80;
-        if (s.includes('transit') || s.includes('shipping') || s.includes('container')) return 60;
-        if (s.includes('collected') || s.includes('warehouse') || s.includes('picked')) return 40;
-        return 20;
+        if (s.includes('out for') || s.includes('out_for_delivery')) return 90;
+        if (s.includes('hub') || s.includes('sorting') || s.includes('scheduling')) return 85;
+        if (s.includes('manila warehouse') || s.includes('received at manila') || s.includes('received_manila_warehouse')) return 82;
+        if (s.includes('released') || s.includes('cleared')) return 80;
+        if (s.includes('customs') || s.includes('boc') || s.includes('clearance')) return 75;
+        if (s.includes('arrived') || s.includes('port')) return 70;
+        if (s.includes('transit') || s.includes('shipping') || s.includes('sailing') || s.includes('sea')) return 60;
+        if (s.includes('container') || s.includes('loading')) return 50;
+        if (s.includes('warehouse') || s.includes('branch')) return 40;
+        if (s.includes('collected') || s.includes('picked')) return 25;
+        return 15;
     };
 
     return (
