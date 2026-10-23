@@ -11,6 +11,7 @@ use App\Http\Controllers\PickerController;
 use App\Models\Booking;
 use App\Models\Invoice;
 use App\Models\Runsheet;
+use Carbon\Carbon;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Validator;
@@ -86,6 +87,29 @@ class RecordPaymentRequest extends FormRequest
                 return;
             }
 
+            $booking = Booking::query()->find((int) $this->input('booking_id'));
+            if ($booking) {
+                $runsheet = $this->route('runsheet');
+                if (is_string($runsheet) || is_int($runsheet)) {
+                    $runsheet = Runsheet::find($runsheet);
+                }
+
+                $isCashOnPickup = $booking->payment_status === PaymentStatus::CashOnPickup
+                    || $booking->payment_method === 'cash_on_pickup';
+
+                if ($isCashOnPickup) {
+                    $futureScheduledDate = $this->resolveFutureScheduledPickupDate($booking, $runsheet);
+                    if ($futureScheduledDate) {
+                        $validator->errors()->add('booking_id', sprintf(
+                            'Cash on pickup cannot be collected before the scheduled pickup date (%s).',
+                            $futureScheduledDate->format('M d, Y')
+                        ));
+
+                        return;
+                    }
+                }
+            }
+
             $invoice = $this->resolveTargetInvoice();
             if (! $invoice) {
                 return;
@@ -140,5 +164,27 @@ class RecordPaymentRequest extends FormRequest
                     ->orWhere('stripe_status', 'succeeded');
             })
             ->sum('amount');
+    }
+
+    private function resolveFutureScheduledPickupDate(Booking $booking, ?Runsheet $runsheet): ?Carbon
+    {
+        $timezone = config('app.timezone', 'Australia/Sydney');
+        $today = Carbon::today($timezone);
+
+        if ($booking->preferred_date) {
+            $bookingDate = Carbon::parse($booking->preferred_date, $timezone)->startOfDay();
+            if ($bookingDate->isAfter($today)) {
+                return $bookingDate;
+            }
+        }
+
+        if ($runsheet?->scheduled_date) {
+            $runsheetDate = Carbon::parse($runsheet->scheduled_date, $timezone)->startOfDay();
+            if ($runsheetDate->isAfter($today)) {
+                return $runsheetDate;
+            }
+        }
+
+        return null;
     }
 }

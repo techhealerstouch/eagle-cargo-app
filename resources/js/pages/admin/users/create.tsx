@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
-import { Save, ArrowLeft, ArrowRight, User, ShieldCheck, Mail, Phone, MapPin, ChevronDown, Send, Map, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Save, ArrowLeft, ArrowRight, User, ShieldCheck, Mail, Phone, MapPin, ChevronDown, Send, Map, Loader2, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,6 @@ import FormStepperHeader, { StepItem } from '@/components/admin/users/form-stepp
 import PhoneInput from '@/components/ui/PhoneInput';
 import { useEmailValidator } from '@/hooks/use-email-validator';
 import { toast } from 'sonner';
-
 
 const ROLE_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
     sender: { label: 'CUSTOMER (SENDER)', bg: 'bg-blue-50/80', text: 'text-blue-700', border: 'border-blue-200' },
@@ -49,12 +48,21 @@ export default function UsersCreate({
     const { auth } = usePage<{ auth: any }>().props;
     const isSuperAdmin = auth?.user?.role === 'super_admin';
     const [currentStep, setCurrentStep] = useState(1);
+    const [canSubmit, setCanSubmit] = useState(false);
     const [rawJsonMode, setRawJsonMode] = useState(false);
+    const [passwordMode, setPasswordMode] = useState<'auto' | 'manual'>('auto');
     const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
     const [stepErrors, setStepErrors] = useState<Record<string, string>>({});
-    const emailValidator = useEmailValidator({
-        endpoint: '/admin/users/check-email',
-    });
+
+    // Prevent immediate accidental submission on entering step 4 (e.g., from rapid clicking or double clicks)
+    useEffect(() => {
+        if (currentStep === 4) {
+            const timer = setTimeout(() => setCanSubmit(true), 350);
+            return () => clearTimeout(timer);
+        } else {
+            setCanSubmit(false);
+        }
+    }, [currentStep]);
 
     // Visual commission rate state
     const [commissionForm, setCommissionForm] = useState({
@@ -78,7 +86,15 @@ export default function UsersCreate({
         pickup_zone_id: '',
         commission_type: 'flat',
         commission_rates: '{\n  "amount": 5.0,\n  "percentage": 5.0,\n  "sizes": {\n    "Jumbo": 10.0,\n    "Regular": 7.0,\n    "Small": 5.0\n  }\n}',
+        password: '',
+        password_confirmation: '',
         send_welcome_email: true,
+    });
+
+    const emailValidator = useEmailValidator({
+        email: data.email,
+        endpoint: '/admin/users/check-email',
+        debounceMs: 400,
     });
 
     const breadcrumbs: BreadcrumbItem[] = [
@@ -112,42 +128,70 @@ export default function UsersCreate({
         setData('commission_rates', JSON.stringify(jsonObject, null, 2));
     };
 
-    const validateStep = (step: number): boolean => {
+    const validateStep = (step: number, notify: boolean = false): boolean => {
         const newErrors: Record<string, string> = {};
         if (step === 1) {
             if (!data.name.trim()) newErrors.name = 'Full Name is required';
-            if (!data.email.trim()) newErrors.email = 'Email Address is required';
-        } else if (step === 3 && data.role === 'picker') {
-            if (!data.pickup_zone_id) newErrors.pickup_zone_id = 'Assigned Pickup Zone is required';
+            if (!data.email.trim()) {
+                newErrors.email = 'Email Address is required';
+            } else if (emailValidator.isInvalid && emailValidator.errorMessage) {
+                newErrors.email = emailValidator.errorMessage;
+            }
+        }
+        if (step === 2) {
+            if (['courier', 'picker', 'sender', 'warehouse'].includes(data.role) && !data.mobile?.trim()) {
+                newErrors.mobile = 'Mobile Phone Number is required';
+            }
+            if (['courier', 'picker', 'sender'].includes(data.role) && !data.address?.trim()) {
+                newErrors.address = 'Street Address is required';
+            }
+        }
+        if (step === 4) {
+            if (passwordMode === 'manual') {
+                if (!data.password) {
+                    newErrors.password = 'Default Password is required';
+                } else if (data.password.length < 8) {
+                    newErrors.password = 'Default Password must be at least 8 characters';
+                }
+                if (data.password && data.password !== data.password_confirmation) {
+                    newErrors.password_confirmation = 'Password confirmation does not match';
+                }
+            }
         }
         setStepErrors(newErrors);
+
+        if (notify && Object.keys(newErrors).length > 0) {
+            const firstKey = Object.keys(newErrors)[0];
+            toast.error(`Cannot proceed: ${newErrors[firstKey]}`);
+        }
+
         return Object.keys(newErrors).length === 0;
     };
 
     const handleNext = async () => {
-        if (!validateStep(currentStep)) {
-            if (currentStep === 1) {
-                if (!data.name.trim() && !data.email.trim()) {
-                    toast.error('Please enter Full Name and Email Address to continue.');
-                } else if (!data.name.trim()) {
-                    toast.error('Full Name is required.');
-                } else if (!data.email.trim()) {
-                    toast.error('Email Address is required.');
-                }
-            } else if (currentStep === 3 && data.role === 'picker' && !data.pickup_zone_id) {
-                toast.error('Assigned Pickup Zone is required for the Picker role.');
-            } else {
-                toast.error('Please complete all required fields to continue.');
-            }
-            return;
-        }
-
         if (currentStep === 1) {
-            const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
+            if (!validateStep(1, true)) return;
+
+            if (emailValidator.isChecking) {
+                toast.loading('Checking email availability...', { id: 'email-check-loader' });
+            }
+
+            const isEmailAvailable = await emailValidator.validateEmailAsync();
+            toast.dismiss('email-check-loader');
+
             if (!isEmailAvailable) {
-                toast.error(emailValidator.message || 'Cannot proceed: This email address is already registered or invalid.');
+                const errorMsg = emailValidator.errorMessage || 'This email address is already registered.';
+                setStepErrors((prev) => ({
+                    ...prev,
+                    email: errorMsg,
+                }));
+                toast.error(`Cannot proceed: ${errorMsg}`);
                 return;
             }
+        } else if (currentStep === 2) {
+            if (!validateStep(2, true)) return;
+        } else {
+            if (!validateStep(currentStep, true)) return;
         }
 
         if (currentStep === 2 && !isTerritoryRole) {
@@ -165,19 +209,16 @@ export default function UsersCreate({
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!validateStep(currentStep)) {
-            toast.error('Please fill in all required fields before creating the account.');
+
+        // Critical Guard: Form must never be submitted before the final step (Step 4)
+        if (currentStep < 4) {
+            handleNext();
             return;
         }
 
-        const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
-        if (!isEmailAvailable) {
-            setCurrentStep(1);
-            toast.error(emailValidator.message || 'Cannot create account: Email address is already registered.');
-            return;
-        }
+        if (!validateStep(currentStep, true)) return;
 
         let finalRates: any = null;
         if (data.role === 'picker') {
@@ -185,7 +226,7 @@ export default function UsersCreate({
                 try {
                     finalRates = JSON.parse(data.commission_rates);
                 } catch (err) {
-                    toast.error('Invalid JSON format in Commission Rates.');
+                    toast.error('Cannot submit: Invalid JSON syntax in Commission Rates.');
                     return;
                 }
             } else {
@@ -211,16 +252,18 @@ export default function UsersCreate({
             commission_type: data.role === 'picker' ? data.commission_type : null,
             area_id: data.role === 'courier' ? data.area_id : null,
             pickup_zone_id: data.role === 'picker' ? data.pickup_zone_id : null,
+            password: passwordMode === 'manual' ? data.password : null,
+            password_confirmation: passwordMode === 'manual' ? data.password_confirmation : null,
             send_welcome_email: sendWelcomeEmail,
         }));
 
         post('/admin/users', {
             onError: (errs) => {
-                const firstError = Object.values(errs)[0];
-                toast.error(firstError || 'Failed to create user account. Please check the form.');
+                const firstErr = Object.values(errs)[0];
+                toast.error(typeof firstErr === 'string' ? `Registration failed: ${firstErr}` : 'Registration failed. Please review the errors in the form.');
             },
             onSuccess: () => {
-                toast.success('User account created successfully.');
+                toast.success('Account created successfully!');
             },
         });
     };
@@ -269,25 +312,28 @@ export default function UsersCreate({
                     <FormStepperHeader
                         steps={steps}
                         currentStep={currentStep}
-                        onStepClick={async (stepId) => {
+                        onStepClick={(stepId) => {
                             if (stepId > currentStep) {
-                                if (!validateStep(currentStep)) {
-                                    toast.error('Please complete the current step before advancing.');
-                                    return;
-                                }
-                                if (currentStep === 1) {
-                                    const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
-                                    if (!isEmailAvailable) {
-                                        toast.error(emailValidator.message || 'Cannot proceed: Email address is not available.');
-                                        return;
-                                    }
-                                }
+                                toast.warning('Please complete all required fields on the current step first.');
+                                handleNext();
+                            } else {
+                                setCurrentStep(stepId);
                             }
-                            setCurrentStep(stepId);
                         }}
                     />
 
-                    <form onSubmit={handleSubmit} className="space-y-8">
+                    <form
+                        onSubmit={handleSubmit}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+                                e.preventDefault();
+                                if (currentStep < 4) {
+                                    handleNext();
+                                }
+                            }
+                        }}
+                        className="space-y-8"
+                    >
                         {/* STEP 1: IDENTITY & ROLE */}
                         {currentStep === 1 && (
                             <div className="space-y-6 animate-in fade-in duration-300">
@@ -324,63 +370,78 @@ export default function UsersCreate({
                                 {/* Email Address & User Role Grid */}
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="space-y-2">
-                                        <Label htmlFor="email" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
-                                            EMAIL ADDRESS <span className="text-red-500">*</span>
-                                        </Label>
+                                        <div className="flex items-center justify-between">
+                                            <Label htmlFor="email" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
+                                                EMAIL ADDRESS <span className="text-red-500">*</span>
+                                            </Label>
+                                            {emailValidator.isChecking && (
+                                                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                                                    <Loader2 className="size-3 animate-spin" /> Checking...
+                                                </span>
+                                            )}
+                                            {emailValidator.isValid && data.email.trim() && (
+                                                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
+                                                    <CheckCircle2 className="size-3" /> Available
+                                                </span>
+                                            )}
+                                        </div>
                                         <div className="relative">
                                             <Mail className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
                                             <Input
                                                 id="email"
                                                 type="email"
-                                                className={`h-12 rounded-xl border bg-card pl-11 pr-11 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 transition-all shadow-2xs ${
-                                                    emailValidator.isChecking
-                                                        ? 'border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20'
-                                                        : emailValidator.status === 'valid'
-                                                          ? 'border-emerald-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
-                                                          : emailValidator.status === 'invalid' || emailValidator.status === 'error'
-                                                            ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
-                                                            : 'border-border focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust'
+                                                className={`h-12 rounded-xl bg-card pl-11 pr-11 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 transition-all shadow-2xs ${
+                                                    (errors.email || stepErrors.email || emailValidator.isInvalid)
+                                                        ? 'border-red-500 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                                                        : emailValidator.isValid && data.email.trim()
+                                                        ? 'border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500'
+                                                        : emailValidator.isChecking
+                                                        ? 'border-amber-400 focus:ring-2 focus:ring-amber-400/20 focus:border-amber-400'
+                                                        : 'border-border focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust'
                                                 }`}
                                                 value={data.email}
                                                 onChange={(e) => {
                                                     setData('email', e.target.value);
-                                                    emailValidator.checkEmail(e.target.value);
-                                                }}
-                                                onBlur={() => {
-                                                    if (data.email.trim()) {
-                                                        emailValidator.validateEmailAsync(data.email);
+                                                    if (stepErrors.email) {
+                                                        setStepErrors((prev) => {
+                                                            const copy = { ...prev };
+                                                            delete copy.email;
+                                                            return copy;
+                                                        });
                                                     }
                                                 }}
                                                 placeholder="user@example.com"
                                                 maxLength={255}
                                                 required
                                             />
-                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
-                                                {emailValidator.isChecking && (
-                                                    <Loader2 className="size-4 animate-spin text-amber-500" />
-                                                )}
-                                                {!emailValidator.isChecking && emailValidator.status === 'valid' && (
-                                                    <CheckCircle2 className="size-4 text-emerald-500" />
-                                                )}
-                                                {!emailValidator.isChecking && (emailValidator.status === 'invalid' || emailValidator.status === 'error') && (
+                                            {emailValidator.isChecking && (
+                                                <div className="absolute right-4 top-1/2 -translate-y-1/2" title="Checking availability...">
+                                                    <Loader2 className="size-4 text-amber-500 animate-spin" />
+                                                </div>
+                                            )}
+                                            {emailValidator.isValid && data.email.trim() && (
+                                                <div className="absolute right-4 top-1/2 -translate-y-1/2" title="Email is available">
+                                                    <CheckCircle2 className="size-4 text-emerald-600" />
+                                                </div>
+                                            )}
+                                            {(errors.email || stepErrors.email || emailValidator.isInvalid) && (
+                                                <div className="absolute right-4 top-1/2 -translate-y-1/2" title="Validation error">
                                                     <AlertCircle className="size-4 text-red-500" />
-                                                )}
-                                            </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        {/* Status messages */}
-                                        {emailValidator.status === 'valid' && emailValidator.message && (
+                                        {(errors.email || stepErrors.email || (emailValidator.isInvalid && emailValidator.errorMessage)) && (
+                                            <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50/90 p-3 text-red-800 shadow-2xs animate-in fade-in duration-200">
+                                                <AlertCircle className="size-4 shrink-0 text-red-600 mt-0.5" />
+                                                <div className="text-xs font-semibold leading-relaxed">
+                                                    <span className="font-extrabold uppercase tracking-wider block text-[10px] text-red-700">Email Validation Error</span>
+                                                    {errors.email || stepErrors.email || emailValidator.errorMessage}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {!errors.email && !stepErrors.email && !emailValidator.isInvalid && emailValidator.isValid && data.email.trim() && (
                                             <p className="text-[11px] font-bold text-emerald-600 ml-0.5 uppercase tracking-wider flex items-center gap-1.5">
-                                                <span>✓</span> {emailValidator.message}
-                                            </p>
-                                        )}
-                                        {(emailValidator.status === 'invalid' || emailValidator.status === 'error') && emailValidator.message && (
-                                            <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">
-                                                {emailValidator.message}
-                                            </p>
-                                        )}
-                                        {!(emailValidator.status === 'invalid' || emailValidator.status === 'error') && (errors.email || stepErrors.email) && (
-                                            <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">
-                                                {errors.email || stepErrors.email}
+                                                <span>Email address is available</span>
                                             </p>
                                         )}
                                     </div>
@@ -565,7 +626,7 @@ export default function UsersCreate({
                                     <>
                                         <div className="space-y-2 md:col-span-2">
                                             <Label htmlFor="pickup_zone_id" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5 flex items-center justify-between">
-                                                <span>ASSIGNED PICKUP AREA / ZONE <span className="text-red-500">*</span></span>
+                                                <span>ASSIGNED PICKUP AREA / ZONE</span>
                                             </Label>
                                             <div className="relative">
                                                 <select
@@ -574,9 +635,8 @@ export default function UsersCreate({
                                                     className="flex h-12 w-full rounded-xl border border-border bg-card px-4 pr-10 text-xs font-bold uppercase tracking-wider text-foreground focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all shadow-2xs appearance-none cursor-pointer"
                                                     value={data.pickup_zone_id}
                                                     onChange={(e) => setData('pickup_zone_id', e.target.value)}
-                                                    required
                                                 >
-                                                    <option value="">SELECT REQUIRED PICKUP AREA / ZONE</option>
+                                                    <option value="">ALL AREAS / ZONES (GLOBAL)</option>
                                                     {pickupZones.map((zone) => (
                                                         <option key={zone.id} value={String(zone.id)}>
                                                             {zone.name.toUpperCase()} {zone.suburbs && zone.suburbs.length > 0 ? `(${zone.suburbs.length} SUBURBS)` : ''}
@@ -590,7 +650,7 @@ export default function UsersCreate({
                                                     {errors.pickup_zone_id || stepErrors.pickup_zone_id}
                                                 </p>
                                             )}
-                                            {data.pickup_zone_id && (() => {
+                                            {data.pickup_zone_id ? (() => {
                                                 const selectedZone = pickupZones.find(z => String(z.id) === data.pickup_zone_id);
                                                 if (selectedZone?.suburbs && selectedZone.suburbs.length > 0) {
                                                     return (
@@ -604,7 +664,14 @@ export default function UsersCreate({
                                                     );
                                                 }
                                                 return null;
-                                            })()}
+                                            })() : (
+                                                <div className="mt-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
+                                                    <span className="font-bold block mb-0.5">All Pickup Areas / Global Territory</span>
+                                                    <span className="leading-relaxed text-[11px] opacity-90">
+                                                        This picker is assigned to all areas and can handle collections across any pickup zone.
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="space-y-3 md:col-span-2 pt-2">
@@ -641,32 +708,107 @@ export default function UsersCreate({
                                     </h3>
                                 </div>
 
-                                <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 space-y-4 shadow-2xs">
-                                    <div className="flex items-start gap-3.5">
-                                        <ShieldCheck className="size-5 text-brand-secondary shrink-0 mt-0.5" />
-                                        <div className="space-y-0.5">
-                                            <h4 className="font-serif text-xs font-bold uppercase tracking-wider text-brand-navy">
-                                                SYSTEM-GENERATED SECURE PASSWORD
-                                            </h4>
-                                            <p className="text-[11px] font-normal text-muted-foreground leading-relaxed">
-                                                For enhanced security, a password will be automatically generated by the system and emailed to the user immediately upon account creation. The user will be prompted to update their profile settings and password when they first log in.
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPasswordMode('auto')}
+                                            className={`p-4 rounded-xl border text-left transition-all ${
+                                                passwordMode === 'auto'
+                                                    ? 'border-brand-navy bg-brand-navy/5 ring-1 ring-brand-navy/20 dark:bg-brand-navy/20'
+                                                    : 'border-border bg-card hover:bg-muted/30'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <ShieldCheck className={`size-4 ${passwordMode === 'auto' ? 'text-brand-navy' : 'text-muted-foreground'}`} />
+                                                <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                                    System-Generated Password
+                                                </span>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground leading-normal">
+                                                Automatically creates a secure 12-character random password and emails it to the user.
                                             </p>
-                                        </div>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => setPasswordMode('manual')}
+                                            className={`p-4 rounded-xl border text-left transition-all ${
+                                                passwordMode === 'manual'
+                                                    ? 'border-brand-rust bg-brand-rust/5 ring-1 ring-brand-rust/20 dark:bg-brand-rust/20'
+                                                    : 'border-border bg-card hover:bg-muted/30'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2 mb-1.5">
+                                                <KeyRound className={`size-4 ${passwordMode === 'manual' ? 'text-brand-rust' : 'text-muted-foreground'}`} />
+                                                <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                                    Set Default Password Manually
+                                                </span>
+                                            </div>
+                                            <p className="text-[11px] text-muted-foreground leading-normal">
+                                                Specify a known default password directly for onboarding or manual handoff.
+                                            </p>
+                                        </button>
                                     </div>
 
-                                    <div className="pt-3 border-t border-border/40 flex items-center justify-between">
-                                        <label className="flex items-center gap-3 cursor-pointer group">
-                                            <input
-                                                type="checkbox"
-                                                checked={sendWelcomeEmail}
-                                                onChange={(e) => setSendWelcomeEmail(e.target.checked)}
-                                                className="size-4 rounded border-border text-brand-rust focus:ring-brand-rust/20 cursor-pointer"
-                                            />
-                                            <span className="text-xs font-bold text-foreground group-hover:text-brand-rust transition-colors flex items-center gap-1.5">
-                                                <Send className="size-3.5 text-muted-foreground" />
-                                                Send credentials & login instructions via email immediately
-                                            </span>
-                                        </label>
+                                    {passwordMode === 'manual' && (
+                                        <div className="rounded-2xl border border-border/60 bg-muted/20 p-5 space-y-4 shadow-2xs animate-in fade-in duration-200">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="password" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
+                                                        DEFAULT PASSWORD *
+                                                    </Label>
+                                                    <Input
+                                                        id="password"
+                                                        type="password"
+                                                        value={data.password}
+                                                        onChange={(e) => setData('password', e.target.value)}
+                                                        placeholder="Minimum 8 characters"
+                                                        className="h-11 rounded-xl bg-background text-sm font-medium"
+                                                    />
+                                                    {stepErrors.password && (
+                                                        <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{stepErrors.password}</p>
+                                                    )}
+                                                </div>
+
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="password_confirmation" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
+                                                        CONFIRM DEFAULT PASSWORD *
+                                                    </Label>
+                                                    <Input
+                                                        id="password_confirmation"
+                                                        type="password"
+                                                        value={data.password_confirmation}
+                                                        onChange={(e) => setData('password_confirmation', e.target.value)}
+                                                        placeholder="Repeat default password"
+                                                        className="h-11 rounded-xl bg-background text-sm font-medium"
+                                                    />
+                                                    {stepErrors.password_confirmation && (
+                                                        <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{stepErrors.password_confirmation}</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 space-y-3 shadow-2xs">
+                                        <div className="flex items-center justify-between">
+                                            <label className="flex items-center gap-3 cursor-pointer group">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={sendWelcomeEmail}
+                                                    onChange={(e) => setSendWelcomeEmail(e.target.checked)}
+                                                    className="size-4 rounded border-border text-brand-rust focus:ring-brand-rust/20 cursor-pointer"
+                                                />
+                                                <span className="text-xs font-bold text-foreground group-hover:text-brand-rust transition-colors flex items-center gap-1.5">
+                                                    <Send className="size-3.5 text-muted-foreground" />
+                                                    Send default login credentials & portal access instructions via email immediately
+                                                </span>
+                                            </label>
+                                        </div>
+                                        <p className="text-[11px] font-normal text-muted-foreground leading-relaxed pl-7">
+                                            The email will contain portal login links, their registered email, the {passwordMode === 'manual' ? 'default password you configured' : 'auto-generated password'}, and step-by-step instructions on accessing their operational dashboard.
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -695,17 +837,23 @@ export default function UsersCreate({
 
                             {currentStep < 4 ? (
                                 <Button
+                                    key="wizard-continue-btn"
                                     type="button"
                                     onClick={handleNext}
                                     className="px-8 h-12 rounded-xl text-xs font-extrabold uppercase tracking-widest flex items-center gap-2 bg-brand-navy hover:bg-brand-navy/90 text-white shadow-sm"
                                 >
                                     CONTINUE
-                                    <ArrowRight className="size-4" />
+                                    {currentStep === 1 && emailValidator.isChecking ? (
+                                        <Loader2 className="size-4 animate-spin" />
+                                    ) : (
+                                        <ArrowRight className="size-4" />
+                                    )}
                                 </Button>
                             ) : (
                                 <Button
+                                    key="wizard-submit-btn"
                                     type="submit"
-                                    disabled={processing}
+                                    disabled={processing || !canSubmit}
                                     variant="success"
                                     className="px-8 h-12 rounded-xl text-xs font-extrabold uppercase tracking-widest flex items-center gap-2.5 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                 >

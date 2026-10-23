@@ -41,6 +41,8 @@ export interface Booking {
     declaration_data?: any;
     declaration_form_path?: string | null;
     declaration_form_status?: string;
+    is_before_scheduled_date?: boolean;
+    scheduled_pickup_date_formatted?: string | null;
     [key: string]: any;
 }
 
@@ -61,4 +63,7 @@ export interface PaymentFlowProps {
     isLoading?: boolean;
     backUrl?: string;
     backLabel?: string;
+    isLocked?: boolean;
+    lockMessage?: string;
 }
+

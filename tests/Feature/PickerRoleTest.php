@@ -8,18 +8,20 @@ use App\Enums\RunsheetType;
 use App\Models\Booking;
 use App\Models\Runsheet;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
 
 class PickerRoleTest extends TestCase
 {
-    use RefreshDatabase;
+    use DatabaseTransactions;
 
     protected User $picker;
 
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutMiddleware(ValidateCsrfToken::class);
         /** @var User $picker */
         $picker = User::factory()->create(['role' => Role::Picker->value]);
         $this->picker = $picker;
@@ -80,6 +82,7 @@ class PickerRoleTest extends TestCase
                 'area_description' => 'Test Pickup Area',
                 'status' => RunsheetStatus::Draft->value,
                 'type' => RunsheetType::Pickup->value,
+                'starting_serial_number' => '100000',
                 'booking_ids' => [],
             ]);
 

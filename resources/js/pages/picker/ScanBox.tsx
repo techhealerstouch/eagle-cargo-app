@@ -117,6 +117,9 @@ interface PickerScanResponse {
             paymentConsoleUrl: string | null;
             paymentPostUrl: string | null;
             uploadDeclarationUrl: string;
+            isBeforeScheduledDate?: boolean;
+            scheduledPickupDate?: string | null;
+            paymentDisabledReason?: string | null;
         } | null;
     };
 }

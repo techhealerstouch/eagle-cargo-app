@@ -14,7 +14,7 @@ interface PaymentMethodSelectorProps {
     methods: PaymentMethodDefinition[];
     activeMethod: PaymentMethodId;
     onSelect: (methodId: PaymentMethodId) => void;
-    role?: 'sender' | 'picker' | 'admin';
+    role?: 'sender' | 'picker' | 'admin' | 'guest';
 }
 
 export function PaymentMethodSelector({ methods, activeMethod, onSelect, role }: PaymentMethodSelectorProps) {
@@ -46,3 +46,4 @@ export function PaymentMethodSelector({ methods, activeMethod, onSelect, role }:
         </div>
     );
 }
+

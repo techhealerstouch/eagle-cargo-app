@@ -454,6 +454,8 @@ class RunsheetController extends Controller
             'picker.picker:id,user_id,mobile',
             'bookings.sender',
             'bookings.boxes.recipient.area', 'boxes.booking.sender', 'boxes.recipient.area',
+            'pickupNotes.booking:id,reference_number',
+            'pickupNotes.picker:id,name',
         ]);
 
         return Inertia::render('admin/runsheets/show', [

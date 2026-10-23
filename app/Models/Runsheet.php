@@ -9,6 +9,7 @@ use App\Enums\RunsheetType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Runsheet extends Model
 {
@@ -60,5 +61,11 @@ class Runsheet extends Model
             ->orderByPivot('sequence')
             ->orderBy('boxes.created_at')
             ->orderBy('boxes.id');
+    }
+
+    /** @return HasMany<PickupNote, $this> */
+    public function pickupNotes(): HasMany
+    {
+        return $this->hasMany(PickupNote::class)->latest();
     }
 }

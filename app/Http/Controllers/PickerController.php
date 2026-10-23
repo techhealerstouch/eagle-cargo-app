@@ -7,22 +7,26 @@ use App\Enums\PaymentStatus;
 use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
 use App\Http\Requests\Picker\RecordPaymentRequest;
+use App\Http\Requests\Picker\StorePickupNoteRequest;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\Invoice;
 use App\Models\Runsheet;
+use App\Models\SerialNumber;
+use Carbon\Carbon;
 use App\Repositories\Contracts\BoxRepositoryInterface;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
 use App\Services\CommissionService;
 use App\Services\PaymentService;
+use App\Services\PickupNoteService;
 use App\Services\RunsheetService;
 use App\Services\SettingsService;
 use App\Services\TrackingStepService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 
@@ -33,6 +37,7 @@ class PickerController extends Controller
         private readonly RunsheetService $runsheetService,
         private readonly TrackingStepService $trackingStepService,
         private readonly PaymentService $paymentService,
+        private readonly PickupNoteService $pickupNoteService,
     ) {}
 
     public function dashboard()
@@ -97,11 +102,34 @@ class PickerController extends Controller
             abort(403);
         }
 
-        $runsheet->load(['bookings.sender', 'bookings.boxes', 'bookings.invoice']);
+        $runsheet->load(['bookings.sender', 'bookings.boxes', 'bookings.invoice', 'pickupNotes.picker:id,name']);
+
+        $runsheet->bookings->each(function (Booking $booking) use ($runsheet) {
+            $futureDate = $this->resolveFutureScheduledPickupDate($booking, $runsheet);
+            $booking->setAttribute('is_before_scheduled_date', $futureDate !== null);
+            $booking->setAttribute('scheduled_pickup_date_formatted', $futureDate ? $futureDate->format('M d, Y') : null);
+        });
 
         return Inertia::render('picker/RunsheetDetail', [
             'runsheet' => $runsheet,
         ]);
+    }
+
+    public function storePickupNote(StorePickupNoteRequest $request, Runsheet $runsheet)
+    {
+        if (! $this->isAssignedToRunsheet($runsheet)) {
+            abort(403);
+        }
+
+        $validated = $request->validated();
+        $this->pickupNoteService->create(
+            $runsheet,
+            (int) $validated['booking_id'],
+            $request->user(),
+            $validated['note'],
+        );
+
+        return back()->with('success', 'Pickup note sent to dispatch.');
     }
 
     public function scanPage()
@@ -141,18 +169,31 @@ class PickerController extends Controller
         $lineItemsSnapshot = $invoice ? $invoice->resolveLineItemsSnapshot() : null;
         $adminTeamSnapshot = $invoice ? $invoice->resolveAdminTeamSnapshot() : null;
 
-        $availableSerialNumbers = \App\Models\SerialNumber::whereHas('box', function ($q) {
+        $availableSerialNumbers = SerialNumber::whereHas('box', function ($q) {
             $q->where('status', BoxStatus::Pending->value)
-              ->whereHas('booking.runsheets', function ($q2) {
-                  $q2->where('type', RunsheetType::Pickup->value)
-                     ->where('picker_id', Auth::id())
-                     ->whereIn('status', [RunsheetStatus::Assigned->value, RunsheetStatus::InProgress->value]);
-              });
+                ->whereHas('booking.runsheets', function ($q2) {
+                    $q2->where('type', RunsheetType::Pickup->value)
+                        ->where('picker_id', Auth::id())
+                        ->whereIn('status', [RunsheetStatus::Assigned->value, RunsheetStatus::InProgress->value]);
+                });
         })->orderBy('serial_number')->pluck('serial_number')->toArray();
 
-        if ($box->serial_number && !in_array($box->serial_number, $availableSerialNumbers)) {
+        if ($box->serial_number && ! in_array($box->serial_number, $availableSerialNumbers)) {
             $availableSerialNumbers[] = $box->serial_number;
             sort($availableSerialNumbers);
+        }
+
+        $isBeforeScheduled = false;
+        $scheduledDateFormatted = null;
+        if ($box->booking && $activeRunsheetId) {
+            $activeRunsheet = Runsheet::find($activeRunsheetId);
+            if ($activeRunsheet) {
+                $futureDate = $this->resolveFutureScheduledPickupDate($box->booking, $activeRunsheet);
+                if ($futureDate) {
+                    $isBeforeScheduled = true;
+                    $scheduledDateFormatted = $futureDate->format('M d, Y');
+                }
+            }
         }
 
         return Inertia::render('picker/BoxDetail', [
@@ -166,6 +207,8 @@ class PickerController extends Controller
             'lineItemsSnapshot' => $lineItemsSnapshot,
             'adminTeamSnapshot' => $adminTeamSnapshot,
             'availableSerialNumbers' => $availableSerialNumbers,
+            'isBeforeScheduledDate' => $isBeforeScheduled,
+            'scheduledPickupDateFormatted' => $scheduledDateFormatted,
         ]);
     }
 
@@ -254,6 +297,15 @@ class PickerController extends Controller
             abort(404, 'Booking not found on this runsheet.');
         }
 
+        $futureDate = $this->resolveFutureScheduledPickupDate($booking, $runsheet);
+        if ($futureDate && ($booking->payment_status === PaymentStatus::CashOnPickup || $booking->payment_method === 'cash_on_pickup')) {
+            return redirect()->route('picker.runsheet', ['runsheet' => $runsheet->id])
+                ->with('error', sprintf(
+                    'Cash on pickup cannot be collected before the scheduled pickup date (%s).',
+                    $futureDate->format('M d, Y')
+                ));
+        }
+
         $booking = $booking->load('boxes.recipient', 'boxes.boxType');
         $invoice = $booking->invoice ?? Invoice::generateForBooking($booking);
 
@@ -268,8 +320,32 @@ class PickerController extends Controller
 
     public function recordPayment(RecordPaymentRequest $request, Runsheet $runsheet)
     {
+        if (! $this->isAssignedToRunsheet($runsheet) || ! in_array($runsheet->status, [RunsheetStatus::Assigned, RunsheetStatus::InProgress], true)) {
+            $message = 'You are not assigned to this runsheet or the runsheet is not active.';
+
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $message], 403);
+            }
+
+            return redirect()->back()->with('error', $message);
+        }
+
         $validated = $request->validated();
         $booking = $runsheet->bookings()->findOrFail($validated['booking_id']);
+
+        $futureDate = $this->resolveFutureScheduledPickupDate($booking, $runsheet);
+        if ($futureDate && ($booking->payment_status === PaymentStatus::CashOnPickup || $booking->payment_method === 'cash_on_pickup')) {
+            $message = sprintf(
+                'Cash on pickup cannot be collected before the scheduled pickup date (%s).',
+                $futureDate->format('M d, Y')
+            );
+
+            if ($request->expectsJson()) {
+                return response()->json(['message' => $message], 422);
+            }
+
+            return redirect()->back()->with('error', $message);
+        }
 
         try {
             $idempotencyKey = $validated['idempotency_key'] ?? ('picker_'.$runsheet->id.'_'.Str::uuid());
@@ -322,77 +398,122 @@ class PickerController extends Controller
 
     public function collectBoxes(Request $request, Runsheet $runsheet)
     {
+        Log::info('[PickerController@collectBoxes] Request received', [
+            'runsheet_id' => $runsheet->id,
+            'user_id' => Auth::id(),
+            'runsheet_status' => $runsheet->status?->value ?? (string) $runsheet->status,
+            'is_assigned' => $this->isAssignedToRunsheet($runsheet),
+            'has_file' => $request->hasFile('pickup_proof'),
+            'file_name' => $request->file('pickup_proof')?->getClientOriginalName(),
+            'file_size' => $request->file('pickup_proof')?->getSize(),
+            'boxes_input' => $request->input('boxes'),
+        ]);
+
         if (! $this->isAssignedToRunsheet($runsheet) || ! in_array($runsheet->status, [RunsheetStatus::Assigned, RunsheetStatus::InProgress], true)) {
-            abort(403);
+            Log::warning('[PickerController@collectBoxes] Unauthorized runsheet access', [
+                'runsheet_id' => $runsheet->id,
+                'user_id' => Auth::id(),
+                'status' => $runsheet->status?->value ?? (string) $runsheet->status,
+                'is_assigned' => $this->isAssignedToRunsheet($runsheet),
+            ]);
+            throw ValidationException::withMessages(['boxes' => 'You are not assigned to this runsheet or the runsheet is not active.']);
         }
 
-        $validated = $request->validate([
-            'boxes' => ['required', 'array', 'min:1'],
-            'boxes.*.id' => ['required', 'integer', 'distinct', 'exists:boxes,id'],
-            'pickup_proof' => ['required', 'file', 'mimes:jpeg,jpg,png', 'max:5120'],
-        ]);
+        try {
+            $validated = $request->validate([
+                'boxes' => ['required', 'array', 'min:1'],
+                'boxes.*.id' => ['required', 'integer', 'distinct', 'exists:boxes,id'],
+                'pickup_proof' => ['required', 'file', 'mimes:jpeg,jpg,png,webp', 'max:10240'],
+            ]);
+        } catch (ValidationException $e) {
+            Log::warning('[PickerController@collectBoxes] Validation error', ['errors' => $e->errors()]);
+            throw $e;
+        }
 
         $boxData = collect($validated['boxes'])->keyBy('id');
         $boxIds = $boxData->keys()->toArray();
         $pickupProof = $request->file('pickup_proof');
 
-        $collectedCount = DB::transaction(function () use ($runsheet, $boxIds, $boxData, $pickupProof) {
-            $lockedRunsheet = Runsheet::query()->whereKey($runsheet->id)->lockForUpdate()->firstOrFail();
-            if (! $this->isAssignedToRunsheet($lockedRunsheet) || ! in_array($lockedRunsheet->status, [RunsheetStatus::Assigned, RunsheetStatus::InProgress], true)) {
-                abort(403);
-            }
-
-            $boxes = Box::query()
-                ->whereIn('id', $boxIds)
-                ->lockForUpdate()
-                ->get();
-
-            if ($boxes->count() !== count($boxIds)) {
-                throw ValidationException::withMessages(['boxes' => 'One or more selected boxes could not be found.']);
-            }
-
-            $bookings = Booking::query()
-                ->whereIn('id', $boxes->pluck('booking_id')->filter()->unique())
-                ->lockForUpdate()
-                ->get()
-                ->keyBy('id');
-            $runsheetBookingIds = $lockedRunsheet->bookings()
-                ->whereIn('bookings.id', $boxes->pluck('booking_id')->filter()->unique())
-                ->pluck('bookings.id')
-                ->map(fn ($id) => (int) $id)
-                ->all();
-
-            if (count($runsheetBookingIds) !== $boxes->pluck('booking_id')->filter()->unique()->count()) {
-                abort(403);
-            }
-
-            foreach ($boxes as $box) {
-                $booking = $bookings->get($box->booking_id);
-                if (! $booking) {
-                    abort(403);
+        try {
+            $collectedCount = DB::transaction(function () use ($runsheet, $boxIds, $pickupProof) {
+                $lockedRunsheet = Runsheet::query()->whereKey($runsheet->id)->lockForUpdate()->firstOrFail();
+                if (! $this->isAssignedToRunsheet($lockedRunsheet) || ! in_array($lockedRunsheet->status, [RunsheetStatus::Assigned, RunsheetStatus::InProgress], true)) {
+                    throw ValidationException::withMessages(['boxes' => 'Runsheet is no longer active or assigned.']);
                 }
-                if ($box->status !== BoxStatus::Pending) {
-                    throw ValidationException::withMessages(['boxes' => "Box {$box->tracking_number} is not pending pickup."]);
+
+                $boxes = Box::query()
+                    ->whereIn('id', $boxIds)
+                    ->lockForUpdate()
+                    ->get();
+
+                if ($boxes->count() !== count($boxIds)) {
+                    throw ValidationException::withMessages(['boxes' => 'One or more selected boxes could not be found.']);
                 }
-                if (! in_array($booking->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected])) {
-                    throw ValidationException::withMessages(['boxes' => "Box {$box->tracking_number} cannot be collected until payment is complete."]);
+
+                $bookingIds = $boxes->pluck('booking_id')->filter()->unique();
+                $bookings = Booking::query()
+                    ->whereIn('id', $bookingIds)
+                    ->lockForUpdate()
+                    ->get()
+                    ->keyBy('id');
+
+                $runsheetBookingIds = $lockedRunsheet->bookings()
+                    ->whereIn('bookings.id', $bookingIds)
+                    ->pluck('bookings.id')
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                if (count($runsheetBookingIds) !== $bookingIds->count()) {
+                    Log::warning('[PickerController@collectBoxes] Booking mismatch', [
+                        'runsheet_id' => $lockedRunsheet->id,
+                        'runsheet_booking_ids' => $runsheetBookingIds,
+                        'box_booking_ids' => $bookingIds->all(),
+                    ]);
+                    throw ValidationException::withMessages(['boxes' => 'One or more selected boxes do not belong to this runsheet.']);
                 }
-            }
 
-            foreach ($boxes as $box) {
-                $this->boxRepo->updateStatus(
-                    $box,
-                    BoxStatus::Collected->value,
-                    'Batch collected from picker runsheet.',
-                    Auth::id(),
-                    pickupProof: $pickupProof,
-                );
-            }
+                foreach ($boxes as $box) {
+                    $booking = $bookings->get($box->booking_id);
+                    if (! $booking) {
+                        throw ValidationException::withMessages(['boxes' => "Booking for box {$box->tracking_number} could not be found."]);
+                    }
+                    if ($box->status !== BoxStatus::Pending) {
+                        $currentLabel = $box->status instanceof BoxStatus ? $box->status->label() : (string) $box->status;
+                        throw ValidationException::withMessages(['boxes' => "Box {$box->tracking_number} cannot be collected because its current status is '{$currentLabel}' (must be Pending)."]);
+                    }
+                    if (! in_array($booking->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)) {
+                        $paymentLabel = $booking->payment_status instanceof PaymentStatus ? $booking->payment_status->label() : (string) $booking->payment_status;
+                        throw ValidationException::withMessages(['boxes' => "Box {$box->tracking_number} cannot be collected until payment is completed (current payment: {$paymentLabel})."]);
+                    }
+                }
 
-            return $boxes->count();
-        });
+                foreach ($boxes as $box) {
+                    $this->boxRepo->updateStatus(
+                        $box,
+                        BoxStatus::Collected->value,
+                        'Batch collected from picker runsheet.',
+                        Auth::id(),
+                        pickupProof: $pickupProof,
+                    );
+                }
 
-        return redirect()->back()->with('success', "{$collectedCount} boxes collected successfully.");
+                return $boxes->count();
+            });
+
+            Log::info('[PickerController@collectBoxes] Successfully collected boxes', ['count' => $collectedCount]);
+
+            return redirect()->back()->with('success', "{$collectedCount} boxes collected successfully.");
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('[PickerController@collectBoxes] Exception during collection', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+
+            throw ValidationException::withMessages(['boxes' => 'Collection failed: ' . $e->getMessage()]);
+        }
     }
 
     public function updateBoxStatus(Request $request, Box $box)
@@ -467,7 +588,7 @@ class PickerController extends Controller
                     if ($existingBox) {
                         $fail("The serial number {$value} is already assigned to another box ({$existingBox->tracking_number}).");
                     }
-                }
+                },
             ],
         ]);
 
@@ -493,8 +614,6 @@ class PickerController extends Controller
         if (! $targetStatus) {
             return redirect()->back()->with('error', 'Selected tracking step has an invalid system status mapping.');
         }
-
-
 
         // Logic Protection: Prevent "Collected" if negative observations are present
         if ($targetStatus === BoxStatus::Collected) {
@@ -616,6 +735,14 @@ class PickerController extends Controller
             ]);
         }
 
+        if ($box->status === BoxStatus::Pending && $booking->declaration_form_status === 'missing') {
+            return response()->json([
+                'action' => 'missing_declaration',
+                'message' => 'Box scanned. Please upload the physical declaration form before collection.',
+                'box' => $this->scanBoxPayload($box),
+            ]);
+        }
+
         if ($box->status === BoxStatus::Pending) {
             return response()->json([
                 'action' => 'needs_review',
@@ -643,6 +770,16 @@ class PickerController extends Controller
             ? (float) $invoice->amount
             : (float) ($booking?->boxes?->sum('price_charged') ?? 0);
 
+        $isBeforeScheduled = false;
+        $scheduledDateFormatted = null;
+        if ($activeRunsheet && $booking) {
+            $futureDate = $this->resolveFutureScheduledPickupDate($booking, $activeRunsheet);
+            if ($futureDate) {
+                $isBeforeScheduled = true;
+                $scheduledDateFormatted = $futureDate->format('M d, Y');
+            }
+        }
+
         return [
             'id' => $box->id,
             'trackingNumber' => $box->tracking_number,
@@ -657,11 +794,16 @@ class PickerController extends Controller
                 'senderName' => trim(($booking->sender?->first_name ?? '').' '.($booking->sender?->last_name ?? '')) ?: 'Sender',
                 'boxesCount' => $booking->boxes?->count() ?? 0,
                 'totalAmount' => round($totalAmount, 2),
-                'paymentConsoleUrl' => $activeRunsheet ? route('picker.runsheet.payment', [
+                'isBeforeScheduledDate' => $isBeforeScheduled,
+                'scheduledPickupDate' => $scheduledDateFormatted,
+                'paymentDisabledReason' => $isBeforeScheduled
+                    ? sprintf('Cash on pickup cannot be collected before the scheduled pickup date (%s).', $scheduledDateFormatted)
+                    : null,
+                'paymentConsoleUrl' => ($activeRunsheet && ! $isBeforeScheduled) ? route('picker.runsheet.payment', [
                     'runsheet' => $activeRunsheet->id,
                     'booking' => $booking->id,
                 ]) : null,
-                'paymentPostUrl' => $activeRunsheet ? route('picker.runsheet.record-payment', [
+                'paymentPostUrl' => ($activeRunsheet && ! $isBeforeScheduled) ? route('picker.runsheet.record-payment', [
                     'runsheet' => $activeRunsheet->id,
                 ]) : null,
                 'uploadDeclarationUrl' => route('picker.box.upload-declaration', ['box' => $box->id]),
@@ -742,5 +884,27 @@ class PickerController extends Controller
 
             return $currentStatus->canTransitionTo($targetStatus);
         }));
+    }
+
+    public function resolveFutureScheduledPickupDate(Booking $booking, Runsheet $runsheet): ?Carbon
+    {
+        $timezone = config('app.timezone', 'Australia/Sydney');
+        $today = Carbon::today($timezone);
+
+        if ($booking->preferred_date) {
+            $bookingDate = Carbon::parse($booking->preferred_date, $timezone)->startOfDay();
+            if ($bookingDate->isAfter($today)) {
+                return $bookingDate;
+            }
+        }
+
+        if ($runsheet->scheduled_date) {
+            $runsheetDate = Carbon::parse($runsheet->scheduled_date, $timezone)->startOfDay();
+            if ($runsheetDate->isAfter($today)) {
+                return $runsheetDate;
+            }
+        }
+
+        return null;
     }
 }

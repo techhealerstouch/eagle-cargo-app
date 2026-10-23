@@ -29,6 +29,28 @@ import { humanize } from '@/lib/utils';
 
 import type { BreadcrumbItem } from '@/types';
 
+const isDateInFuture = (dateStr?: string | null): boolean => {
+    if (!dateStr) return false;
+    const clean = dateStr.split('T')[0].split(' ')[0];
+    const parts = clean.split('-');
+    if (parts.length !== 3) return false;
+    const target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return target.getTime() > today.getTime();
+};
+
+const formatPickupDate = (dateVal?: string | null): string => {
+    if (!dateVal) return '';
+    const clean = dateVal.split('T')[0].split(' ')[0];
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+    }
+    return dateVal;
+};
+
 const statusConfig: Record<
     string,
     { label: string; style: string; icon: any }
@@ -114,6 +136,27 @@ export default function RunsheetDetail({ runsheet }: { runsheet: any }) {
     );
     const [selectedBoxIds, setSelectedBoxIds] = useState<number[]>([]);
     const [collectModalOpen, setCollectModalOpen] = useState(false);
+    const [pickupNotes, setPickupNotes] = useState<Record<number, string>>({});
+    const [submittingNoteFor, setSubmittingNoteFor] = useState<number | null>(null);
+
+    const submitPickupNote = (bookingId: number) => {
+        const note = pickupNotes[bookingId]?.trim();
+        if (!note) {
+            toast.error('Enter a note before sending it to dispatch.');
+            return;
+        }
+
+        setSubmittingNoteFor(bookingId);
+        router.post(`/picker/runsheet/${runsheet.id}/notes`, { booking_id: bookingId, note }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setPickupNotes((current) => ({ ...current, [bookingId]: '' }));
+                toast.success('Pickup note sent to dispatch.');
+            },
+            onError: (errors) => toast.error(errors.note ?? errors.booking_id ?? 'Unable to send pickup note.'),
+            onFinish: () => setSubmittingNoteFor(null),
+        });
+    };
 
     useEffect(() => {
         const handleOnline = () => {
@@ -454,6 +497,22 @@ export default function RunsheetDetail({ runsheet }: { runsheet: any }) {
     const handleRecordPayment = (booking: any) => {
         if (!isOnline) {
             toast.error('Reconnect before recording payment.');
+
+            return;
+        }
+
+        const isBeforeScheduled = Boolean(
+            booking.is_before_scheduled_date ||
+            (booking.payment_status === 'cash_on_pickup' && (
+                isDateInFuture(booking.preferred_date) ||
+                isDateInFuture(runsheet.scheduled_date)
+            ))
+        );
+
+        if (isBeforeScheduled) {
+            const dateDisplay = booking.scheduled_pickup_date_formatted ||
+                formatPickupDate(booking.preferred_date || runsheet.scheduled_date);
+            toast.error(`Cash on pickup cannot be collected before the scheduled pickup date (${dateDisplay || 'scheduled date'}).`);
 
             return;
         }
@@ -1055,6 +1114,38 @@ export default function RunsheetDetail({ runsheet }: { runsheet: any }) {
                                             </div>
                                         </div>
 
+                                        <div className="border-b border-brand-warm/50 bg-amber-50/70 p-4 dark:bg-amber-950/20">
+                                            <div className="mb-2 flex items-center gap-2 text-amber-950 dark:text-amber-100">
+                                                <MessageCircle className="size-4" />
+                                                <span className="text-[10px] font-black tracking-widest uppercase">Dispatch notes</span>
+                                            </div>
+                                            {(runsheet.pickup_notes ?? [])
+                                                .filter((note: { booking_id: number }) => note.booking_id === booking.id)
+                                                .map((note: { id: number; note: string }) => (
+                                                    <p key={note.id} className="mb-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-brand-text shadow-xs dark:border-amber-900/60 dark:bg-zinc-900 dark:text-zinc-100">
+                                                        {note.note}
+                                                    </p>
+                                                ))}
+                                            <div className="flex flex-col gap-2 sm:flex-row">
+                                                <textarea
+                                                    value={pickupNotes[booking.id] ?? ''}
+                                                    onChange={(event) => setPickupNotes((current) => ({ ...current, [booking.id]: event.target.value }))}
+                                                    maxLength={2000}
+                                                    rows={2}
+                                                    placeholder="Report a pickup issue, special instruction, or unsuccessful visit to dispatch…"
+                                                    className="min-h-16 flex-1 rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs text-brand-text outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 dark:border-amber-900/60 dark:bg-zinc-900 dark:text-zinc-100"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    disabled={submittingNoteFor === booking.id || !(pickupNotes[booking.id] ?? '').trim()}
+                                                    onClick={() => submitPickupNote(booking.id)}
+                                                    className="rounded-xl bg-amber-700 px-4 py-2 text-[10px] font-black tracking-widest text-white uppercase transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {submittingNoteFor === booking.id ? 'Sending…' : 'Send note'}
+                                                </button>
+                                            </div>
+                                        </div>
+
                                         <div className="flex flex-1 flex-col divide-y divide-brand-warm/50">
                                             {booking.boxes?.map((box: any) => {
                                                 const config =
@@ -1138,22 +1229,46 @@ export default function RunsheetDetail({ runsheet }: { runsheet: any }) {
                                                         {totalAmount.toFixed(2)}
                                                     </div>
                                                 </div>
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.preventDefault();
-                                                        e.stopPropagation();
-                                                        handleRecordPayment(
-                                                            booking,
-                                                        );
-                                                    }}
-                                                    className="btn-primary flex items-center gap-2 bg-emerald-600 px-5 py-2.5 text-xs font-bold tracking-widest text-white uppercase shadow-md transition-all hover:bg-emerald-700 active:scale-95"
-                                                >
-                                                    <CheckCircle className="size-4" />
-                                                    {booking.payment_status ===
-                                                    'cash_on_pickup'
-                                                        ? 'Cash Collected'
-                                                        : 'Record Payment'}
-                                                </button>
+                                                {(() => {
+                                                    const isBeforeScheduled = Boolean(
+                                                        booking.is_before_scheduled_date ||
+                                                        (booking.payment_status === 'cash_on_pickup' && (
+                                                            isDateInFuture(booking.preferred_date) ||
+                                                            isDateInFuture(runsheet.scheduled_date)
+                                                        ))
+                                                    );
+                                                    const dateDisplay = booking.scheduled_pickup_date_formatted ||
+                                                        formatPickupDate(booking.preferred_date || runsheet.scheduled_date);
+
+                                                    return (
+                                                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                                            {isBeforeScheduled && (
+                                                                <span className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                                                                    Cash collection unlocks on pickup date ({dateDisplay}).
+                                                                </span>
+                                                            )}
+                                                            <button
+                                                                type="button"
+                                                                disabled={isBeforeScheduled}
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    e.stopPropagation();
+                                                                    handleRecordPayment(booking);
+                                                                }}
+                                                                className={`flex items-center gap-2 px-5 py-2.5 text-xs font-black tracking-widest uppercase shadow-md transition-all ${
+                                                                    isBeforeScheduled
+                                                                        ? 'cursor-not-allowed bg-zinc-300 text-zinc-500 opacity-60 shadow-none dark:bg-zinc-800 dark:text-zinc-500'
+                                                                        : 'btn-primary bg-emerald-600 text-white hover:bg-emerald-700 active:scale-95'
+                                                                }`}
+                                                            >
+                                                                <CheckCircle className="size-4" />
+                                                                {booking.payment_status === 'cash_on_pickup'
+                                                                    ? isBeforeScheduled ? 'Locked Until Pickup' : 'Collect Cash'
+                                                                    : 'Record Payment'}
+                                                            </button>
+                                                        </div>
+                                                    );
+                                                })()}
                                             </div>
                                         )}
                                     </div>
