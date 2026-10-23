@@ -68,6 +68,8 @@ export default function PaymentFlow({
     manualAmountCap: manualAmountCapProp,
     backUrl = '/dashboard',
     backLabel = 'Return to My Bookings',
+    isLocked = false,
+    lockMessage,
 }: PaymentFlowProps) {
     const isGuest = role === 'guest';
     const isSenderOrGuest = role === 'sender' || isGuest;
@@ -423,6 +425,8 @@ export default function PaymentFlow({
                     activeMethod={activeMethod}
                     endpoint={endpoint}
                     onSuccess={onSuccess}
+                    isLocked={isLocked}
+                    lockMessage={lockMessage}
                 />
             )}
 
@@ -435,3 +439,4 @@ export default function PaymentFlow({
         </div>
     );
 }
+

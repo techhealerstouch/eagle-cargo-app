@@ -11,6 +11,7 @@ import {
     Navigation,
     ArrowDown,
     ArrowUp,
+    MessageCircle,
 } from 'lucide-react';
 import { useState } from 'react';
 import Heading from '@/components/common/heading';
@@ -247,6 +248,27 @@ export default function Show({ runsheet }: ShowProps) {
                         </div>
                     </div>
                 </div>
+
+                {isPickup && (runsheet.pickup_notes ?? []).length > 0 && (
+                    <div className="card border-l-4 border-l-amber-500 p-6">
+                        <div className="mb-4 flex items-center gap-2">
+                            <MessageCircle className="size-5 text-amber-700" />
+                            <h3 className="font-serif text-xl font-bold text-brand-text">Picker updates</h3>
+                        </div>
+                        <div className="space-y-3">
+                            {runsheet.pickup_notes.map((note: { id: number; note: string; created_at: string; booking?: { reference_number?: string }; picker?: { name?: string } }) => (
+                                <article key={note.id} className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+                                    <div className="mb-1 flex flex-wrap items-center gap-x-2 text-xs font-bold text-brand-text">
+                                        <span>{note.booking?.reference_number ?? 'Pickup booking'}</span>
+                                        <span className="text-brand-text-mid">• {note.picker?.name ?? 'Picker'}</span>
+                                        <time className="text-brand-text-mid">• {new Date(note.created_at).toLocaleString('en-AU')}</time>
+                                    </div>
+                                    <p className="whitespace-pre-wrap text-sm text-brand-text-mid">{note.note}</p>
+                                </article>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Assigned Stops/Bookings */}
                 <div className="card mt-2">

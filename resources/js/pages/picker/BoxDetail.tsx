@@ -42,6 +42,8 @@ interface BoxDetailProps {
     lineItemsSnapshot: any[];
     adminTeamSnapshot: any;
     availableSerialNumbers: string[];
+    isBeforeScheduledDate?: boolean;
+    scheduledPickupDateFormatted?: string | null;
 }
 
 export default function BoxDetail({
@@ -50,6 +52,8 @@ export default function BoxDetail({
     activeRunsheetId,
     trackingSteps,
     availableSerialNumbers = [],
+    isBeforeScheduledDate = false,
+    scheduledPickupDateFormatted = null,
 }: BoxDetailProps) {
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Picker Dashboard', href: '/picker/dashboard' },
@@ -368,14 +372,32 @@ return;
                                         </p>
                                     </div>
                                     {activeRunsheetId && (
-                                        <button
-                                            type="button"
-                                            onClick={() => router.get(`/picker/runsheet/${activeRunsheetId}/payment/${box.booking?.id}`)}
-                                            className="w-full md:w-auto inline-flex items-center justify-center gap-3 rounded-2xl bg-emerald-600 px-8 py-4 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95"
-                                        >
-                                            <Banknote className="size-5" />
-                                            {box.booking?.payment_status === 'cash_on_pickup' ? 'Cash Collected' : 'Collect Payment'}
-                                        </button>
+                                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                                            {isBeforeScheduledDate && (
+                                                <span className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                                                    Cash collection unlocks on pickup date ({scheduledPickupDateFormatted || 'scheduled date'}).
+                                                </span>
+                                            )}
+                                            <button
+                                                type="button"
+                                                disabled={isBeforeScheduledDate}
+                                                onClick={() => {
+                                                    if (isBeforeScheduledDate) {
+                                                        toast.error(`Cash on pickup cannot be collected before the scheduled pickup date (${scheduledPickupDateFormatted || 'scheduled date'}).`);
+                                                        return;
+                                                    }
+                                                    router.get(`/picker/runsheet/${activeRunsheetId}/payment/${box.booking?.id}`);
+                                                }}
+                                                className={`w-full md:w-auto inline-flex items-center justify-center gap-3 rounded-2xl px-8 py-4 text-xs font-black uppercase tracking-widest text-white shadow-lg transition-all active:scale-95 ${
+                                                    isBeforeScheduledDate
+                                                        ? 'cursor-not-allowed bg-zinc-300 text-zinc-500 opacity-60 shadow-none dark:bg-zinc-800 dark:text-zinc-500'
+                                                        : 'bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700'
+                                                }`}
+                                            >
+                                                <Banknote className="size-5" />
+                                                {isBeforeScheduledDate ? 'Locked Until Pickup' : (box.booking?.payment_status === 'cash_on_pickup' ? 'Cash Collected' : 'Collect Payment')}
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                             </div>

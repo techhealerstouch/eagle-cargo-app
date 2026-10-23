@@ -26,6 +26,8 @@ interface Booking {
     declaration_data?: any;
     declaration_form_path?: string | null;
     declaration_form_status?: string;
+    is_before_scheduled_date?: boolean;
+    scheduled_pickup_date_formatted?: string | null;
 }
 export interface Invoice {
     id: number;
@@ -55,11 +57,39 @@ const TrustBadge = ({ icon: Icon, label }: { icon: any; label: string }) => (
     </div>
 );
 
+const isDateInFuture = (dateStr?: string | null): boolean => {
+    if (!dateStr) return false;
+    const clean = dateStr.split('T')[0].split(' ')[0];
+    const parts = clean.split('-');
+    if (parts.length !== 3) return false;
+    const target = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return target.getTime() > today.getTime();
+};
+
+const formatPickupDate = (dateVal?: string | null): string => {
+    if (!dateVal) return '';
+    const clean = dateVal.split('T')[0].split(' ')[0];
+    const parts = clean.split('-');
+    if (parts.length === 3) {
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        return d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+    }
+    return dateVal;
+};
+
 export default function PaymentConsole({
     booking: initialBooking, invoice, stripeKey, role, endpoint,
     backUrl = '/dashboard', bankDetails,
 }: SharedPaymentProps) {
     const booking = initialBooking || invoice?.booking;
+
+    const isBeforeScheduled = Boolean(
+        booking?.is_before_scheduled_date ||
+        (role === 'picker' && booking?.payment_status === 'cash_on_pickup' && isDateInFuture(booking?.preferred_date))
+    );
+    const scheduledDateDisplay = booking?.scheduled_pickup_date_formatted || formatPickupDate(booking?.preferred_date);
 
     const [alreadyPaidState, setAlreadyPaidState] = useState(false);
     const isPaid = booking?.payment_status === 'paid' || alreadyPaidState;
@@ -299,6 +329,8 @@ export default function PaymentConsole({
                                 isLoading={isLoadingSecret}
                                 backUrl={backUrl}
                                 backLabel={role === 'picker' ? 'Back to Runsheet' : role === 'admin' ? 'Back to Payments' : 'Go to Dashboard'}
+                                isLocked={isBeforeScheduled}
+                                lockMessage={isBeforeScheduled ? 'Locked Until Pickup Date (' + scheduledDateDisplay + ')' : undefined}
                                 onStripeLoadError={(message) => {
                                     if (!stripeAutoRetryUsed.current) {
                                         stripeAutoRetryUsed.current = true;
@@ -329,3 +361,5 @@ export default function PaymentConsole({
         </AppLayout>
     );
 }
+
+

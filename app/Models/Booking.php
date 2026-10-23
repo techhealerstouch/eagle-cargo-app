@@ -362,6 +362,12 @@ class Booking extends Model
             ->withTimestamps();
     }
 
+    /** @return HasMany<PickupNote, $this> */
+    public function pickupNotes(): HasMany
+    {
+        return $this->hasMany(PickupNote::class)->latest();
+    }
+
     public function scopePending($query)
     {
         return $query->where('status', 'pending');

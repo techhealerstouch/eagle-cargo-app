@@ -88,9 +88,12 @@ class UserController extends Controller
     public function store(StoreUserRequest $request)
     {
         $validated = $request->validated();
-        $userData = Arr::except($validated, ['area_id', 'pickup_zone_id', 'suburb', 'state', 'postcode']);
+        $userData = Arr::except($validated, ['area_id', 'pickup_zone_id', 'suburb', 'state', 'postcode', 'password_confirmation', 'send_welcome_email']);
 
-        $plainPassword = Str::random(12);
+        $plainPassword = !empty($validated['password'])
+            ? $validated['password']
+            : Str::random(12);
+
         $userData['password'] = Hash::make($plainPassword);
 
         // Create the User without firing events to prevent UserObserver
@@ -176,8 +179,14 @@ class UserController extends Controller
             ]);
         }
 
-        // Notify the user about their auto-generated credentials
-        $user->notify(new \App\Notifications\AccountCreatedByAdmin($user, $plainPassword));
+        // Notify the user about their default/generated credentials and portal access
+        $sendEmail = $request->has('send_welcome_email')
+            ? $request->boolean('send_welcome_email')
+            : true;
+
+        if ($sendEmail) {
+            $user->notify(new \App\Notifications\AccountCreatedByAdmin($user, $plainPassword));
+        }
 
         return redirect()->route('admin.users.index')->with('success', 'User created successfully.');
     }

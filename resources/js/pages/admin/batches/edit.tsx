@@ -613,9 +613,9 @@ export default function BatchesEdit({
                                                     <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
                                                         <CheckCircle2 className="size-4.5 text-emerald-600 mt-0.5 shrink-0" />
                                                         <div>
-                                                            <p className="text-xs font-bold text-emerald-900">Batch Destination & Unloading Complete</p>
+                                                            <p className="text-xs font-bold text-emerald-900">Manila Warehouse Devanning Hub â€” Container Lifecycle Complete</p>
                                                             <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
-                                                                Setting this status completes the container's journey and marks all boxes as <strong className="font-semibold">Received at Manila Warehouse (Unloaded)</strong> ready for provincial sorting and courier dispatch.
+                                                                Shipping containers devan and conclude their journey at the Manila Warehouse. All consolidated boxes have been received and unloaded. From this stage onward, tracking progresses per individual box â€” visit the <strong className="font-semibold">Boxes</strong> module to track domestic sorting, regional linehaul, and last-mile delivery.
                                                             </p>
                                                         </div>
                                                     </div>

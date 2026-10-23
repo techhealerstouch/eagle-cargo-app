@@ -30,6 +30,9 @@ class StoreUserRequest extends FormRequest
             'pickup_zone_id' => 'required_if:role,picker|nullable|exists:pickup_zones,id',
             'commission_type' => 'nullable|string|in:flat,size,percentage',
             'commission_rates' => 'nullable|array',
+            'password' => 'nullable|string|min:8|confirmed',
+            'password_confirmation' => 'nullable|string',
+            'send_welcome_email' => 'nullable|boolean',
         ];
     }
 

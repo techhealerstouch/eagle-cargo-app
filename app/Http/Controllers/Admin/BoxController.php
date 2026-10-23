@@ -163,10 +163,11 @@ class BoxController extends Controller
             $boxRepo->updateStatus(
                 $box,
                 $newStatus ?? $currentStatusVal,
-                'Status updated by Admin',
+                ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
                 Auth::id(),
                 deliveryOverrideReason: $overrideReason,
-                trackingStepKey: $trackingStepKey
+                trackingStepKey: $trackingStepKey,
+                bypassValidation: true,
             );
         } else {
             $box->update($validated);
@@ -242,7 +243,8 @@ class BoxController extends Controller
                         $targetStatus,
                         ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
                         $userId,
-                        trackingStepKey: $trackingStepKey
+                        trackingStepKey: $trackingStepKey,
+                        bypassValidation: true,
                     );
                 }
                 app(TrackingCacheService::class)->forgetBox($box);
@@ -355,7 +357,7 @@ class BoxController extends Controller
                 $trackingLogs[] = [
                     'box_id' => $box->id,
                     'status' => BoxStatus::LoadedToContainer->value,
-                    'tracking_step_key' => null,
+                    'tracking_step_key' => 'loading_container',
                     'description' => ($isTransfer ? "Transferred" : "Assigned") . " to batch: {$batch->batch_number}",
                     'location' => 'Warehouse',
                     'tracking_phase' => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
@@ -392,7 +394,7 @@ class BoxController extends Controller
 
             // Only advance status for boxes that are below LoadedToContainer
             if (!empty($advanceIds)) {
-                Box::whereIn('id', $advanceIds)->update(['status' => BoxStatus::LoadedToContainer->value]);
+                Box::whereIn('id', $advanceIds)->update(['status' => BoxStatus::LoadedToContainer->value, 'tracking_step_key' => 'loading_container']);
             }
 
             // Batch-insert tracking logs
@@ -406,7 +408,9 @@ class BoxController extends Controller
         foreach ($eligibleBoxes as $box) {
             $box->batch_id = $batch->id;
             if (in_array($box->id, $advanceIds, true)) {
+                $box->bypassStatusValidation = true;
                 $box->status = BoxStatus::LoadedToContainer;
+                $box->tracking_step_key = 'loading_container';
             }
             $trackingCacheService->forgetBox($box);
         }

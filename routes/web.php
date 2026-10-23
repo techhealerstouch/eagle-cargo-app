@@ -497,6 +497,7 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::get('/stripe-onboarding/success', [StripeOnboardingController::class, 'success'])->name('picker.stripe.onboarding.success');
         Route::get('/runsheets', [PickerController::class, 'runsheetIndex'])->name('picker.runsheets');
         Route::get('/runsheet/{runsheet}', [PickerController::class, 'runsheetShow'])->name('picker.runsheet');
+        Route::post('/runsheet/{runsheet}/notes', [PickerController::class, 'storePickupNote'])->middleware('throttle:ops-scan')->name('picker.runsheet.notes.store');
         Route::post('/runsheet/{runsheet}/start', [PickerController::class, 'startRunsheet'])->middleware('throttle:ops-scan')->name('picker.runsheet.start');
         Route::post('/runsheet/{runsheet}/complete', [PickerController::class, 'completeRunsheet'])->middleware('throttle:ops-scan')->name('picker.runsheet.complete');
         Route::get('/runsheet/{runsheet}/payment/{booking}', [PickerController::class, 'paymentConsole'])->name('picker.runsheet.payment');

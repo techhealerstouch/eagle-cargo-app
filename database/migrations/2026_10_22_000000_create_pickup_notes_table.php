@@ -1,0 +1,27 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::create('pickup_notes', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('runsheet_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('booking_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('picker_id')->constrained('users')->restrictOnDelete();
+            $table->text('note');
+            $table->timestamps();
+
+            $table->index(['runsheet_id', 'booking_id', 'created_at']);
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('pickup_notes');
+    }
+};

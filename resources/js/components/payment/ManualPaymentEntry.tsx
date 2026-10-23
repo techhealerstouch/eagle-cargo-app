@@ -13,6 +13,8 @@ interface ManualPaymentEntryProps {
     activeMethod: string;
     endpoint: string;
     onSuccess?: () => void;
+    isLocked?: boolean;
+    lockMessage?: string;
 }
 
 const createIdempotencyKey = (): string => {
@@ -31,6 +33,8 @@ export function ManualPaymentEntry({
     activeMethod,
     endpoint,
     onSuccess,
+    isLocked = false,
+    lockMessage,
 }: ManualPaymentEntryProps) {
     const initialIdempotencyKey = useRef<string>(createIdempotencyKey());
 
@@ -57,11 +61,10 @@ return;
         post(endpoint, {
             onSuccess: () => {
                 rotateManualIdempotencyKey();
-                toast.success(activeMethod === 'cash' ? 'Cash collected, redirecting to runsheet…' : 'Payment recorded, redirecting…');
 
                 if (onSuccess) {
-onSuccess();
-}
+                    onSuccess();
+                }
             },
         });
     };
@@ -91,9 +94,22 @@ onSuccess();
                     {errors.reference_number && <p className="text-red-500 text-[10px]">{errors.reference_number}</p>}
                 </div>
             </div>
-            <Button type="submit" disabled={processing}
-                className="w-full h-14 rounded-xl font-bold text-sm bg-zinc-900 text-white shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2">
-                {processing ? <><Loader2 className="animate-spin size-4" /> Redirecting…</> : <><Check className="size-4" /> {activeMethod === 'cash' ? 'Cash Collected' : 'Record Payment'}</>}
+            <Button
+                type="submit"
+                disabled={processing || isLocked}
+                className={`w-full h-14 rounded-xl font-bold text-sm shadow-lg transition-all flex items-center justify-center gap-2 ${
+                    isLocked
+                        ? 'bg-zinc-300 text-zinc-500 cursor-not-allowed shadow-none dark:bg-zinc-800 dark:text-zinc-500'
+                        : 'bg-zinc-900 text-white hover:bg-black hover:shadow-xl'
+                }`}
+            >
+                {processing ? (
+                    <><Loader2 className="animate-spin size-4" /> Redirecting…</>
+                ) : isLocked ? (
+                    lockMessage || 'Payment Collection Locked Until Pickup Date'
+                ) : (
+                    <><Check className="size-4" /> {activeMethod === 'cash' ? 'Cash Collected' : 'Record Payment'}</>
+                )}
             </Button>
         </form>
     );
