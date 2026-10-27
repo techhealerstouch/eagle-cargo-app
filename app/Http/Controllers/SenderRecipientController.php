@@ -4,8 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Area;
 use App\Models\Recipient;
-use App\Services\TransactionSnapshotService;
 use App\Rules\Phone;
+use App\Services\ReferenceDataService;
+use App\Services\TransactionSnapshotService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
@@ -13,6 +14,10 @@ use Inertia\Inertia;
 
 class SenderRecipientController extends Controller
 {
+    public function __construct(
+        private readonly ReferenceDataService $referenceData,
+    ) {}
+
     public function index(Request $request)
     {
         $sender = Auth::user()->sender;
@@ -27,7 +32,8 @@ class SenderRecipientController extends Controller
                         $recipientQuery->where('name', 'like', "%{$search}%")
                             ->orWhere('city', 'like', "%{$search}%")
                             ->orWhere('province', 'like', "%{$search}%")
-                            ->orWhere('phone_number', 'like', "%{$search}%");
+                            ->orWhere('phone_number', 'like', "%{$search}%")
+                            ->orWhere('secondary_phone_number', 'like', "%{$search}%");
                     });
                 })
                 ->latest()
@@ -47,7 +53,8 @@ class SenderRecipientController extends Controller
 
         return Inertia::render('sender/EditRecipient', [
             'recipient' => $recipient->load('area'),
-            'areas' => Area::where('is_active', true)->orderBy('name')->get(['id', 'name']),
+            'areas' => $this->referenceData->activeAreas(),
+            'provinces' => $this->referenceData->activeProvinces(),
         ]);
     }
 
@@ -117,13 +124,24 @@ class SenderRecipientController extends Controller
     {
         if ($request->filled('phone_number')) {
             $request->merge([
-                'phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('phone_number'))
+                'phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('phone_number')),
             ]);
         }
+
         if ($request->filled('secondary_phone_number')) {
             $request->merge([
-                'secondary_phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('secondary_phone_number'))
+                'secondary_phone_number' => preg_replace('/[\s\-\(\)]+/', '', $request->input('secondary_phone_number')),
             ]);
+        }
+
+        if ($request->filled('province') && (! $request->filled('area_id') || ! $request->input('area_id'))) {
+            $resolvedAreaId = $this->referenceData->resolveDestinationAreaId(
+                $request->input('province'),
+                $request->input('city')
+            );
+            if ($resolvedAreaId) {
+                $request->merge(['area_id' => $resolvedAreaId]);
+            }
         }
 
         return $request->validate([
@@ -139,11 +157,7 @@ class SenderRecipientController extends Controller
                 'nullable',
                 'string',
                 'max:50',
-                function ($attribute, $value, $fail) {
-                    if (! empty($value)) {
-                        (new Phone('secondary phone number'))->validate($attribute, $value, $fail);
-                    }
-                },
+                new Phone('secondary phone number'),
             ],
             'address' => ['required', 'string', 'max:500'],
             'city' => ['required', 'string', 'max:100'],

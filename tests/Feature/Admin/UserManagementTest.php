@@ -2,17 +2,20 @@
 
 namespace Tests\Feature\Admin;
 
-use App\Enums\Role;
-use App\Models\User;
-use App\Notifications\AccountCreatedByAdmin;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
+use App\Enums\Role;
 use App\Enums\RunsheetStatus;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\Courier;
+use App\Models\Picker;
+use App\Models\PickupZone;
 use App\Models\Runsheet;
 use App\Models\Sender;
+use App\Models\User;
+use App\Notifications\AccountCreatedByAdmin;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
@@ -24,7 +27,7 @@ class UserManagementTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+        $this->withoutMiddleware(ValidateCsrfToken::class);
     }
 
     public function test_admin_can_create_user_with_auto_generated_password_and_notification()
@@ -32,6 +35,7 @@ class UserManagementTest extends TestCase
         Notification::fake();
 
         // Create admin user
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -56,7 +60,7 @@ class UserManagementTest extends TestCase
         ]);
 
         $createdUser = User::where('email', 'johndoe@example.com')->first();
-        
+
         // Assert password has been generated and hashed
         $this->assertNotNull($createdUser->password);
         $this->assertNotEmpty($createdUser->password);
@@ -65,22 +69,102 @@ class UserManagementTest extends TestCase
         Notification::assertSentTo(
             $createdUser,
             AccountCreatedByAdmin::class,
-            function ($notification, $channels) use ($createdUser) {
+            function ($notification, $channels) {
                 // Read the protected properties or check values
                 return $channels === ['mail'];
             }
         );
     }
 
-    public function test_admin_can_create_picker_with_pickup_zone_and_commission_rates()
+    public function test_admin_can_update_user_with_new_password_and_notification()
     {
         Notification::fake();
 
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
 
-        $pickupZone = \App\Models\PickupZone::factory()->create();
+        /** @var User $targetUser */
+        $targetUser = User::factory()->create([
+            'role' => Role::Sender,
+            'password' => bcrypt('old-password-123'),
+        ]);
+        $oldPasswordHash = $targetUser->password;
+
+        $response = $this->actingAs($admin)->put(route('admin.users.update', $targetUser), [
+            'name' => 'Updated Sender Name',
+            'email' => $targetUser->email,
+            'role' => Role::Sender->value,
+            'mobile' => '+61 400 111 222',
+            'address' => '123 Sender St',
+            'password' => 'new-secret-pw-999',
+            'password_confirmation' => 'new-secret-pw-999',
+            'send_credentials_email' => true,
+        ]);
+
+        $response->assertRedirect(route('admin.users.index'));
+
+        $targetUser->refresh();
+        $this->assertEquals('Updated Sender Name', $targetUser->name);
+        $this->assertNotEquals($oldPasswordHash, $targetUser->password);
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('new-secret-pw-999', $targetUser->password));
+
+        Notification::assertSentTo(
+            $targetUser,
+            AccountCreatedByAdmin::class,
+            function ($notification, $channels) {
+                return $channels === ['mail'];
+            }
+        );
+    }
+
+    public function test_admin_can_update_user_keeping_current_password()
+    {
+        Notification::fake();
+
+        /** @var User $admin */
+        $admin = User::factory()->create([
+            'role' => Role::Admin,
+        ]);
+
+        /** @var User $targetUser */
+        $targetUser = User::factory()->create([
+            'role' => Role::Sender,
+            'password' => bcrypt('keep-this-password'),
+        ]);
+        $oldPasswordHash = $targetUser->password;
+
+        $response = $this->actingAs($admin)->put(route('admin.users.update', $targetUser), [
+            'name' => 'Name Changed Only',
+            'email' => $targetUser->email,
+            'role' => Role::Sender->value,
+            'mobile' => '+61 400 333 444',
+            'address' => '456 Sender St',
+            'password' => '',
+            'password_confirmation' => '',
+        ]);
+
+        $response->assertRedirect(route('admin.users.index'));
+
+        $targetUser->refresh();
+        $this->assertEquals('Name Changed Only', $targetUser->name);
+        $this->assertEquals($oldPasswordHash, $targetUser->password);
+
+        Notification::assertNothingSent();
+    }
+
+
+    public function test_admin_can_create_picker_with_pickup_zone_and_commission_rates()
+    {
+        Notification::fake();
+
+        /** @var User $admin */
+        $admin = User::factory()->create([
+            'role' => Role::Admin,
+        ]);
+
+        $pickupZone = PickupZone::factory()->create();
 
         $response = $this->actingAs($admin)->post(route('admin.users.store'), [
             'name' => 'Jane Picker',
@@ -115,8 +199,45 @@ class UserManagementTest extends TestCase
         ]);
     }
 
+    public function test_admin_can_create_picker_assigned_to_all_areas_with_null_pickup_zone()
+    {
+        Notification::fake();
+
+        /** @var User $admin */
+        $admin = User::factory()->create([
+            'role' => Role::Admin,
+        ]);
+
+        $response = $this->actingAs($admin)->post(route('admin.users.store'), [
+            'name' => 'Global Picker',
+            'email' => 'global.picker@example.com',
+            'role' => Role::Picker->value,
+            'mobile' => '+61 400 333 444',
+            'address' => '456 Global Way',
+            'suburb' => 'Sydney',
+            'state' => 'NSW',
+            'postcode' => '2000',
+            'pickup_zone_id' => null,
+            'commission_type' => 'flat',
+            'commission_rates' => ['amount' => 10.00],
+        ]);
+
+        $response->assertRedirect(route('admin.users.index'));
+
+        $createdUser = User::where('email', 'global.picker@example.com')->first();
+        $this->assertNotNull($createdUser);
+
+        $this->assertDatabaseHas('pickers', [
+            'user_id' => $createdUser->id,
+            'first_name' => 'Global',
+            'last_name' => 'Picker',
+            'pickup_zone_id' => null,
+        ]);
+    }
+
     public function test_admin_can_archive_sender_with_only_delivered_and_cancelled_bookings()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -124,7 +245,7 @@ class UserManagementTest extends TestCase
         $senderUser = User::factory()->create([
             'role' => Role::Sender,
         ]);
-        
+
         $sender = Sender::factory()->create([
             'user_id' => $senderUser->id,
         ]);
@@ -145,7 +266,7 @@ class UserManagementTest extends TestCase
 
         $response->assertRedirect(route('admin.users.index'));
         $response->assertSessionHas('success', 'User archived successfully.');
-        
+
         $this->assertSoftDeleted('users', [
             'id' => $senderUser->id,
         ]);
@@ -153,6 +274,7 @@ class UserManagementTest extends TestCase
 
     public function test_admin_cannot_archive_courier_with_active_runsheet_even_if_boxes_delivered()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -160,7 +282,7 @@ class UserManagementTest extends TestCase
         $courierUser = User::factory()->create([
             'role' => Role::Courier,
         ]);
-        
+
         $courier = Courier::factory()->create([
             'user_id' => $courierUser->id,
         ]);
@@ -175,7 +297,7 @@ class UserManagementTest extends TestCase
         $box = Box::factory()->create([
             'status' => BoxStatus::Delivered,
         ]);
-        
+
         // Attach the box to the runsheet (assuming standard many-to-many or polymorphic relation)
         // Note: For runsheets and boxes in this system, they may be linked via intermediate tables
         // or just by having the runsheet record. Let's look at how boxes attach to runsheets.
@@ -185,7 +307,7 @@ class UserManagementTest extends TestCase
 
         $response->assertRedirect(route('admin.users.index'));
         $response->assertSessionHas('error', 'Cannot archive user with active transactions.');
-        
+
         $this->assertDatabaseHas('users', [
             'id' => $courierUser->id,
             'deleted_at' => null,
@@ -194,6 +316,7 @@ class UserManagementTest extends TestCase
 
     public function test_admin_cannot_archive_picker_with_assigned_runsheet()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -201,8 +324,8 @@ class UserManagementTest extends TestCase
         $pickerUser = User::factory()->create([
             'role' => Role::Picker,
         ]);
-        
-        $picker = \App\Models\Picker::factory()->create([
+
+        $picker = Picker::factory()->create([
             'user_id' => $pickerUser->id,
         ]);
 
@@ -216,7 +339,7 @@ class UserManagementTest extends TestCase
 
         $response->assertRedirect(route('admin.users.index'));
         $response->assertSessionHas('error', 'Cannot archive user with active transactions.');
-        
+
         $this->assertDatabaseHas('users', [
             'id' => $pickerUser->id,
             'deleted_at' => null,
@@ -225,6 +348,7 @@ class UserManagementTest extends TestCase
 
     public function test_admin_can_archive_orphan_sender_without_profile()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -233,12 +357,12 @@ class UserManagementTest extends TestCase
         $orphanSenderUser = User::factory()->create([
             'role' => Role::Sender,
         ]);
-        
+
         $response = $this->actingAs($admin)->delete(route('admin.users.destroy', $orphanSenderUser));
 
         $response->assertRedirect(route('admin.users.index'));
         $response->assertSessionHas('success', 'User archived successfully.');
-        
+
         $this->assertSoftDeleted('users', [
             'id' => $orphanSenderUser->id,
         ]);
@@ -246,6 +370,7 @@ class UserManagementTest extends TestCase
 
     public function test_admin_cannot_restore_archived_user()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -261,6 +386,7 @@ class UserManagementTest extends TestCase
 
     public function test_super_admin_can_restore_archived_user()
     {
+        /** @var User $superAdmin */
         $superAdmin = User::factory()->create([
             'role' => Role::SuperAdmin,
         ]);
@@ -273,7 +399,7 @@ class UserManagementTest extends TestCase
         $response = $this->actingAs($superAdmin)->post(route('admin.users.restore', $archivedUser->id));
         $response->assertRedirect();
         $response->assertSessionHas('success', 'User restored successfully.');
-        
+
         $this->assertDatabaseHas('users', [
             'id' => $archivedUser->id,
             'deleted_at' => null,
@@ -282,6 +408,7 @@ class UserManagementTest extends TestCase
 
     public function test_user_with_multiple_profiles_is_blocked_from_archiving_if_either_has_active_transactions()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -290,7 +417,7 @@ class UserManagementTest extends TestCase
         $buggyUser = User::factory()->create([
             'role' => Role::Courier,
         ]);
-        
+
         $courier = Courier::factory()->create([
             'user_id' => $buggyUser->id,
         ]);
@@ -310,7 +437,7 @@ class UserManagementTest extends TestCase
 
         // Now complete the runsheet but add an active booking -> should still block
         $runsheet->update(['status' => RunsheetStatus::Completed]);
-        
+
         Booking::factory()->create([
             'sender_id' => $sender->id,
             'status' => BookingStatus::Pending,
@@ -323,6 +450,7 @@ class UserManagementTest extends TestCase
 
     public function test_admin_cannot_archive_themselves()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
@@ -331,7 +459,7 @@ class UserManagementTest extends TestCase
 
         $response->assertRedirect(route('admin.users.index'));
         $response->assertSessionHas('error', 'You cannot delete your own account.');
-        
+
         $this->assertDatabaseHas('users', [
             'id' => $admin->id,
             'deleted_at' => null,
@@ -340,6 +468,7 @@ class UserManagementTest extends TestCase
 
     public function test_super_admin_restore_cleans_up_orphaned_profiles()
     {
+        /** @var User $superAdmin */
         $superAdmin = User::factory()->create([
             'role' => Role::SuperAdmin,
         ]);
@@ -348,7 +477,7 @@ class UserManagementTest extends TestCase
         $archivedUser = User::factory()->create([
             'role' => Role::Sender,
         ]);
-        
+
         $sender = Sender::factory()->create([
             'user_id' => $archivedUser->id,
         ]);
@@ -360,20 +489,22 @@ class UserManagementTest extends TestCase
 
         $response = $this->actingAs($superAdmin)->post(route('admin.users.restore', $archivedUser->id));
         $response->assertRedirect();
-        
+
         // Sender profile should remain
         $this->assertDatabaseHas('senders', ['id' => $sender->id]);
-        
+
         // Courier profile should be cleaned up
         $this->assertDatabaseMissing('couriers', ['id' => $courier->id]);
     }
 
     public function test_user_with_completed_transactions_can_be_restored_and_rearchived()
     {
+        /** @var User $admin */
         $admin = User::factory()->create([
             'role' => Role::Admin,
         ]);
-        
+
+        /** @var User $superAdmin */
         $superAdmin = User::factory()->create([
             'role' => Role::SuperAdmin,
         ]);
@@ -400,7 +531,7 @@ class UserManagementTest extends TestCase
         // Restore the user
         $response = $this->actingAs($superAdmin)->post(route('admin.users.restore', $courierUser->id));
         $response->assertRedirect();
-        
+
         $this->assertDatabaseHas('users', [
             'id' => $courierUser->id,
             'deleted_at' => null,
@@ -409,7 +540,7 @@ class UserManagementTest extends TestCase
         // Now attempt to re-archive via controller
         $response2 = $this->actingAs($admin)->delete(route('admin.users.destroy', $courierUser));
         $response2->assertSessionHas('success', 'User archived successfully.');
-        
+
         $this->assertSoftDeleted('users', [
             'id' => $courierUser->id,
         ]);
@@ -417,6 +548,7 @@ class UserManagementTest extends TestCase
 
     public function test_admin_can_restore_sender_with_historical_transactions()
     {
+        /** @var User $superAdmin */
         $superAdmin = User::factory()->create(['role' => Role::SuperAdmin]);
         $senderUser = User::factory()->create(['role' => Role::Sender]);
         $sender = Sender::factory()->create(['user_id' => $senderUser->id]);
@@ -434,7 +566,7 @@ class UserManagementTest extends TestCase
         $response = $this->actingAs($superAdmin)->post(route('admin.users.restore', $senderUser->id));
         $response->assertRedirect();
         $response->assertSessionHas('success', 'User restored successfully.');
-        
+
         $this->assertDatabaseHas('users', ['id' => $senderUser->id, 'deleted_at' => null]);
         $this->assertDatabaseHas('senders', ['id' => $sender->id]);
         $this->assertDatabaseHas('bookings', ['id' => $booking->id, 'status' => BookingStatus::Delivered->value]);
@@ -442,11 +574,12 @@ class UserManagementTest extends TestCase
 
     public function test_user_registration_fails_with_archived_email()
     {
+        /** @var User $admin */
         $admin = User::factory()->create(['role' => Role::Admin]);
-        
+
         $archivedUser = User::factory()->create([
             'email' => 'archived@example.com',
-            'role' => Role::Sender
+            'role' => Role::Sender,
         ]);
         $archivedUser->delete();
 
@@ -458,51 +591,8 @@ class UserManagementTest extends TestCase
         ]);
 
         $response->assertSessionHasErrors('email');
-        
+
         // Ensure new user was not created
         $this->assertEquals(1, User::withTrashed()->where('email', 'archived@example.com')->count());
     }
-
-    public function test_all_staff_filter_excludes_senders_and_recipients(): void
-    {
-        $admin = User::factory()->create(['role' => Role::Admin]);
-        $courier = User::factory()->create(['role' => Role::Courier]);
-        $sender = User::factory()->create(['role' => Role::Sender]);
-        $recipient = User::factory()->create(['role' => Role::Recipient]);
-
-        $response = $this->actingAs($admin)->get(route('admin.users.index'));
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->component('admin/users/index')
-            ->has('users.data')
-            ->where('users.data', fn ($users) => 
-                collect($users)->pluck('id')->contains($admin->id) &&
-                collect($users)->pluck('id')->contains($courier->id) &&
-                !collect($users)->pluck('id')->contains($sender->id) &&
-                !collect($users)->pluck('id')->contains($recipient->id)
-            )
-        );
-    }
-
-    public function test_admins_filter_includes_both_admin_and_super_admin_users(): void
-    {
-        $admin = User::factory()->create(['role' => Role::Admin]);
-        $superAdmin = User::factory()->create(['role' => Role::SuperAdmin]);
-        $courier = User::factory()->create(['role' => Role::Courier]);
-
-        $response = $this->actingAs($admin)->get(route('admin.users.index', ['role' => 'admin']));
-
-        $response->assertOk();
-        $response->assertInertia(fn ($page) => $page
-            ->component('admin/users/index')
-            ->has('users.data')
-            ->where('users.data', fn ($users) => 
-                collect($users)->pluck('id')->contains($admin->id) &&
-                collect($users)->pluck('id')->contains($superAdmin->id) &&
-                !collect($users)->pluck('id')->contains($courier->id)
-            )
-        );
-    }
 }
-

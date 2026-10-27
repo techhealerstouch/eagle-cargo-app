@@ -260,6 +260,10 @@ class CourierController extends Controller
                 }
             }],
             'courier_notes' => 'nullable|string',
+            'recipient_name' => 'nullable|string|max:150',
+            'recipient_relationship' => 'nullable|string|max:100',
+            'recipient_id_type' => 'nullable|string|max:100',
+            'recipient_id_number' => 'nullable|string|max:100',
             'area_milestone_id' => ['nullable', Rule::exists('area_milestones', 'id')],
             'delivery_proof' => ['nullable', 'file', 'mimes:jpeg,jpg,png,pdf', 'max:3072'],
             'signature' => ['nullable', 'string'],
@@ -320,7 +324,29 @@ class CourierController extends Controller
             ? $box->status->value
             : (string) $box->status;
 
-        $notes = $validated['courier_notes'];
+        $notes = $validated['courier_notes'] ?? '';
+        if (($validated['tracking_step_key'] ?? '') === 'delivered') {
+            $podParts = [];
+            if (! empty($validated['recipient_name'])) {
+                $podParts[] = "Delivered to {$validated['recipient_name']}";
+            }
+            if (! empty($validated['recipient_relationship'])) {
+                $podParts[] = "({$validated['recipient_relationship']})";
+            }
+            if (! empty($validated['recipient_id_type']) && ! in_array($validated['recipient_id_type'], ['None / Verbal Confirmation', 'None'])) {
+                $idInfo = "ID: {$validated['recipient_id_type']}";
+                if (! empty($validated['recipient_id_number'])) {
+                    $idInfo .= " - {$validated['recipient_id_number']}";
+                }
+                $podParts[] = "[{$idInfo}]";
+            }
+
+            if (! empty($podParts)) {
+                $podSummary = implode(' ', $podParts);
+                $notes = $notes ? "{$podSummary}. {$notes}" : $podSummary;
+            }
+        }
+
         if ($trackingLabel) {
             $notes = $notes ? "{$trackingLabel} - {$notes}" : "{$trackingLabel}";
         }

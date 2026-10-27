@@ -495,12 +495,14 @@ class DataIntegrityController extends Controller
             $dbStatus = 'down';
         }
 
-        // 2. Queue / Failed Jobs check
+        // 2. Queue / Failed Jobs check (recent failures within 24 hours to avoid stale false alarms)
         $queueStatus = 'healthy';
         $failedJobsCount = 0;
         try {
             if (Schema::hasTable('failed_jobs')) {
-                $failedJobsCount = DB::table('failed_jobs')->count();
+                $failedJobsCount = DB::table('failed_jobs')
+                    ->where('failed_at', '>=', now()->subHours(24))
+                    ->count();
                 if ($failedJobsCount > 0) {
                     $queueStatus = 'warning';
                 }
@@ -547,6 +549,9 @@ class DataIntegrityController extends Controller
         $privilegedAccountsWithoutTwoFactor = User::query()
             ->whereIn('role', ['admin', 'super_admin'])
             ->whereNull('two_factor_confirmed_at')
+            ->when(! app()->isProduction() && ! app()->runningUnitTests(), function ($query) {
+                $query->whereNotIn('email', ['admin@example.com', 'superadmin@example.com']);
+            })
             ->count();
 
         return [

@@ -168,14 +168,14 @@ export default function AdminEnquiriesIndex({
 
     // Reply form handling
     const { data, setData, patch, processing, reset } = useForm({
-        admin_notes: selectedEnquiry?.admin_notes || '',
+        admin_notes: '',
         is_read: true,
     });
 
     // Update reply textarea when active target enquiry changes
     useEffect(() => {
-        setData('admin_notes', selectedEnquiry?.admin_notes || '');
-    }, [selectedEnquiry?.id]);
+        setData('admin_notes', '');
+    }, [selectedThread?.id, selectedEnquiry?.id]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -247,8 +247,11 @@ export default function AdminEnquiriesIndex({
         patch(`/admin/enquiries/${selectedEnquiry.id}`, {
             preserveScroll: true,
             onSuccess: () => {
+                setData('admin_notes', '');
+                reset('admin_notes');
                 toast.success('Reply saved and sent to customer.');
-            },
+                setTimeout(scrollToBottom, 100);
+            }
         });
     };
 
@@ -755,6 +758,12 @@ export default function AdminEnquiriesIndex({
                                                 rows={3}
                                                 value={data.admin_notes}
                                                 onChange={(e) => setData('admin_notes', e.target.value)}
+                                          onKeyDown={(e) => {
+                                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                                  e.preventDefault();
+                                                  handleSendReply(e);
+                                              }
+                                          }}
                                                 placeholder={`Type your reply to ${activeThread.name}... This reply will appear directly in their customer chat desk.`}
                                                 disabled={processing}
                                                 className="w-full resize-none rounded-2xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50/70 dark:bg-zinc-950/60 p-3 text-sm text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:border-brand-rust focus:bg-white dark:focus:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-brand-rust/20 transition-all shadow-inner disabled:opacity-60"
@@ -767,7 +776,7 @@ export default function AdminEnquiriesIndex({
                                             </span>
 
                                             <div className="flex items-center gap-2 ml-auto">
-                                                {selectedEnquiry?.admin_notes && (
+                                                {data.admin_notes.trim().length > 0 && (
                                                     <button
                                                         type="button"
                                                         onClick={() => setData('admin_notes', '')}

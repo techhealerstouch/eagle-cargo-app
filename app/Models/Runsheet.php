@@ -23,6 +23,12 @@ class Runsheet extends Model
         'area_description',
         'status',
         'type',
+        'warehouse_drop_initiated_at',
+        'warehouse_drop_bay',
+        'warehouse_drop_notes',
+        'warehouse_drop_photo_path',
+        'warehouse_verified_at',
+        'warehouse_verified_by',
     ];
 
     protected function casts(): array
@@ -31,6 +37,8 @@ class Runsheet extends Model
             'scheduled_date' => 'datetime',
             'status' => RunsheetStatus::class,
             'type' => RunsheetType::class,
+            'warehouse_drop_initiated_at' => 'datetime',
+            'warehouse_verified_at' => 'datetime',
         ];
     }
 
@@ -44,6 +52,11 @@ class Runsheet extends Model
         return $this->belongsTo(User::class, 'picker_id');
     }
 
+    public function warehouseVerifiedBy()
+    {
+        return $this->belongsTo(User::class, 'warehouse_verified_by');
+    }
+
     public function bookings()
     {
         return $this->belongsToMany(Booking::class)
@@ -53,6 +66,7 @@ class Runsheet extends Model
             ->orderBy('bookings.created_at')
             ->orderBy('bookings.id');
     }
+
     public function boxes()
     {
         return $this->belongsToMany(Box::class, 'box_runsheet')
@@ -67,5 +81,11 @@ class Runsheet extends Model
     public function pickupNotes(): HasMany
     {
         return $this->hasMany(PickupNote::class)->latest();
+    }
+
+    /** @return HasMany<OperationalThread, $this> */
+    public function operationalThreads(): HasMany
+    {
+        return $this->hasMany(OperationalThread::class)->latest('last_message_at');
     }
 }

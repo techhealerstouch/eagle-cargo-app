@@ -4,7 +4,6 @@ import {
     Plus,
     Pencil,
     Eye,
-    ScanLine,
     Sparkles,
     Ship,
 } from 'lucide-react';
@@ -17,7 +16,6 @@ import Pagination, { type PaginationData } from '@/components/common/pagination'
 import SearchFilter from '@/components/common/search-filter';
 import TableSelectionBar from '@/components/common/table-selection-bar';
 import BatchBulkUpdateModal from '@/components/admin/batch-bulk-update-modal';
-import BatchTrackingModal from '@/components/admin/batch-tracking-modal';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -82,8 +80,6 @@ export default function BatchesIndex({
     const [isGlobalSelection, setIsGlobalSelection] = useState(false);
     const [isBatchBulkUpdateModalOpen, setIsBatchBulkUpdateModalOpen] = useState(false);
 
-    // Tracking update state
-    const [trackingBatch, setTrackingBatch] = useState<BatchData | null>(null);
     const [generateTemplateBatch, setGenerateTemplateBatch] = useState<BatchData | null>(null);
     const [confirmCloseBatch, setConfirmCloseBatch] = useState<BatchData | null>(null);
     const [isConfirmingClose, setIsConfirmingClose] = useState(false);
@@ -279,16 +275,7 @@ export default function BatchesIndex({
                                                                 <Ship className="size-3.5" />
                                                             </button>
                                                         )}
-                                                        {!['open', 'loading', 'ready_to_close'].includes(batch.status) && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setTrackingBatch(batch)}
-                                                                title="Update Tracking"
-                                                                className="h-8 w-8 rounded-lg border border-border bg-card text-brand-text-mid hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-950/30 hover:border-green-300 dark:hover:border-green-700 transition-all flex items-center justify-center shadow-2xs"
-                                                            >
-                                                                <ScanLine className="size-3.5" />
-                                                            </button>
-                                                        )}
+
                                                         <button
                                                             type="button"
                                                             onClick={() => setGenerateTemplateBatch(batch)}
@@ -367,21 +354,12 @@ export default function BatchesIndex({
                     isGlobalSelection={isGlobalSelection}
                     filters={filters}
                     batchesData={batches.data}
-                    trackingPhases={trackingPhases}
                     onSuccessCallback={() => {
                         setSelectedIds([]);
                         setIsGlobalSelection(false);
                     }}
                 />
             </div>
-
-            <BatchTrackingModal
-                isOpen={!!trackingBatch}
-                onClose={() => setTrackingBatch(null)}
-                batch={trackingBatch}
-                trackingPhases={trackingPhases}
-                onSuccessCallback={() => setTrackingBatch(null)}
-            />
 
             <Dialog open={!!confirmCloseBatch} onOpenChange={(open) => !open && setConfirmCloseBatch(null)}>
                 <DialogContent>

@@ -27,8 +27,9 @@ class UpdateUserRequest extends FormRequest
             'state' => 'nullable|string|max:50',
             'postcode' => 'nullable|string|max:20',
             'password' => 'nullable|string|min:8|confirmed',
+            'send_credentials_email' => 'nullable|boolean',
             'area_id' => 'nullable|exists:areas,id',
-            'pickup_zone_id' => 'required_if:role,picker|nullable|exists:pickup_zones,id',
+            'pickup_zone_id' => 'nullable|exists:pickup_zones,id',
             'commission_type' => 'nullable|string|in:flat,size,percentage',
             'commission_rates' => 'nullable|array',
         ];

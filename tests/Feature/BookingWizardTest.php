@@ -6,6 +6,7 @@ use App\Models\Area;
 use App\Models\Booking;
 use App\Models\BoxPrice;
 use App\Models\BoxType;
+use App\Models\PickupZone;
 use App\Models\Sender;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -20,9 +21,10 @@ class BookingWizardTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
     }
 
-#[Test]
+    #[Test]
     public function it_injects_sender_profile_into_the_booking_create_props()
     {
         /** @var User $user */
@@ -48,7 +50,7 @@ class BookingWizardTest extends TestCase
             );
     }
 
-#[Test]
+    #[Test]
     public function it_injects_sender_profile_into_the_booking_edit_props()
     {
         /** @var User $user */
@@ -77,15 +79,22 @@ class BookingWizardTest extends TestCase
             );
     }
 
-#[Test]
+    #[Test]
     public function it_can_handle_wizard_submission_with_sender_details()
     {
         /** @var User $user */
         $user = User::factory()->create();
 
-        $area = Area::create(['name' => 'Test Area', 'is_active' => true]);
+        $pickupZone = PickupZone::firstOrCreate([], ['name' => 'Zone 1', 'is_active' => true]);
+        $area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        \App\Models\Province::firstOrCreate(['name' => 'Metro Manila'], ['area_id' => $area->id, 'is_active' => true]);
         $boxType = BoxType::create(['name' => 'Test Box', 'is_active' => true]);
-        BoxPrice::create(['area_id' => $area->id, 'box_type_id' => $boxType->id, 'price' => 100.00]);
+        BoxPrice::create([
+            'pickup_zone_id' => $pickupZone->id,
+            'area_id' => $area->id,
+            'box_type_id' => $boxType->id,
+            'price' => 100.00
+        ]);
 
         $payload = [
             'first_name' => 'John',
@@ -96,6 +105,8 @@ class BookingWizardTest extends TestCase
             'suburb' => 'Sydney',
             'state' => 'NSW',
             'postcode' => '2000',
+            'pickup_zone_id' => $pickupZone->id,
+            'booking_type' => 'home_pickup',
             'payment_method' => 'stripe',
             'preferred_date' => now()->addDays(2)->toDateString(),
             'boxes' => [
@@ -126,5 +137,37 @@ class BookingWizardTest extends TestCase
         $this->assertDatabaseHas('boxes', [
             'price_charged' => 100.00,
         ]);
+    }
+
+    #[Test]
+    public function it_passes_rate_calculator_query_params_into_booking_props()
+    {
+        /** @var User $user */
+        $user = User::factory()->create();
+
+        $queryParams = [
+            'suburb' => 'Richmond',
+            'postcode' => '3121',
+            'state' => 'VIC',
+            'pickup_zone_id' => '2',
+            'box_type_id' => '3',
+            'area_id' => '1',
+            'province' => 'Metro Manila',
+        ];
+
+        $response = $this->actingAs($user)->get(route('book', $queryParams));
+
+        $response->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('sender/Book')
+                ->has('initialQuery')
+                ->where('initialQuery.suburb', 'Richmond')
+                ->where('initialQuery.postcode', '3121')
+                ->where('initialQuery.state', 'VIC')
+                ->where('initialQuery.pickup_zone_id', '2')
+                ->where('initialQuery.box_type_id', '3')
+                ->where('initialQuery.area_id', '1')
+                ->where('initialQuery.province', 'Metro Manila')
+            );
     }
 }

@@ -41,6 +41,34 @@ class GuestBookingTest extends TestCase
         $response->assertInertia(fn ($page) => $page->component('guest/Book'));
     }
 
+    public function test_guest_booking_inherits_rate_calculator_query_params(): void
+    {
+        $queryParams = [
+            'suburb' => 'Richmond',
+            'postcode' => '3121',
+            'state' => 'VIC',
+            'pickup_zone_id' => '2',
+            'box_type_id' => '3',
+            'area_id' => '1',
+            'province' => 'Metro Manila',
+        ];
+
+        $response = $this->get(route('guest.book', $queryParams));
+
+        $response->assertOk();
+        $response->assertInertia(fn ($page) => $page
+            ->component('guest/Book')
+            ->has('initialQuery')
+            ->where('initialQuery.suburb', 'Richmond')
+            ->where('initialQuery.postcode', '3121')
+            ->where('initialQuery.state', 'VIC')
+            ->where('initialQuery.pickup_zone_id', '2')
+            ->where('initialQuery.box_type_id', '3')
+            ->where('initialQuery.area_id', '1')
+            ->where('initialQuery.province', 'Metro Manila')
+        );
+    }
+
     public function test_bot_honeypot_trap_silently_redirects(): void
     {
         $response = $this->post(route('guest.bookings.store'), [

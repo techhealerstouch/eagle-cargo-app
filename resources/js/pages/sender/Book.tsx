@@ -303,13 +303,14 @@ interface PageProps {
     logistics?: any;
     activePromotions?: any[];
     isGuest?: boolean;
+    initialQuery?: Record<string, string>;
 }
 
 export default function Book(props?: PageProps) {
   const pageProps = usePage().props as any;
   const mergedProps = { ...pageProps, ...(props || {}) };
   const isGuest = Boolean(props?.isGuest || mergedProps.isGuest || !mergedProps.auth?.user);
-  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [] } = mergedProps;
+  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [], initialQuery } = mergedProps;
 
   const depotAddress = logistics?.depotAddress || '6 Ivan St, Arundel QLD 4214';
   const depotInstructions = logistics?.depotInstructions || '';
@@ -317,8 +318,129 @@ export default function Book(props?: PageProps) {
   const senderCountry = editingBooking?.sender?.country || sender?.country || 'Australia';
   const senderCountryCode = COUNTRIES.find(c => c.name === senderCountry)?.code || 'AU';
 
+  const resolveZoneIdForSuburb = useCallback((suburbStr: string) => {
+    if (!suburbStr || typeof suburbStr !== 'string') return '';
+    const searchStr = suburbStr.toLowerCase().trim();
+    if (!searchStr) return '';
+
+    // 1. Check active suburbs list
+    const found = (suburbs || []).find(
+      (s: any) => s.name?.toLowerCase().trim() === searchStr
+    );
+    if (found?.pickup_zone_id) {
+      return String(found.pickup_zone_id);
+    }
+
+    // 2. Check each pickup zone's suburbs list
+    for (const zone of (pickupZones || [])) {
+      if (zone.suburbs && Array.isArray(zone.suburbs)) {
+        const matches = zone.suburbs.some((s: any) => {
+          const name = typeof s === 'string' ? s : (s.name || '');
+          return name.toLowerCase().trim() === searchStr;
+        });
+        if (matches) {
+          return String(zone.id);
+        }
+      }
+    }
+
+    // 3. Suburb keyword in zone name fallback (e.g. Geelong in Ballarat/Geelong zone)
+    for (const zone of (pickupZones || [])) {
+      const zoneNameLower = (zone.name || '').toLowerCase();
+      if (searchStr.length >= 4 && zoneNameLower.includes(searchStr)) {
+        return String(zone.id);
+      }
+    }
+
+    return '';
+  }, [suburbs, pickupZones]);
+
+  // Backward compatibility alias
+  const detectPickupZoneBySuburb = resolveZoneIdForSuburb;
+
+  const queryParams = useMemo(() => {
+    const q: Record<string, string> = { ...(initialQuery || {}) };
+    if (typeof window !== 'undefined') {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        ['suburb', 'postcode', 'state', 'pickup_zone_id', 'box_type_id', 'area_id', 'province'].forEach((k) => {
+          const val = sp.get(k);
+          if (val && !q[k]) q[k] = val;
+        });
+      } catch {
+        // Ignore URL parsing errors
+      }
+    }
+    return q;
+  }, [initialQuery]);
+
+  const resolvedQueryProvince = useMemo(() => {
+    if (queryParams.province) {
+      const match = (provinces || []).find(
+        (p: any) => p.name?.toLowerCase().trim() === queryParams.province.toLowerCase().trim()
+      );
+      if (match) return match.name;
+    }
+    if (queryParams.area_id) {
+      const matchingProvs = (provinces || []).filter(
+        (p: any) => p.area_id?.toString() === queryParams.area_id.toString()
+      );
+      if (matchingProvs.length === 1) {
+        return matchingProvs[0].name;
+      }
+      const area = (areas || []).find((a: any) => a.id?.toString() === queryParams.area_id.toString());
+      if (area) {
+        const nameMatch = (provinces || []).find(
+          (p: any) => p.name?.toLowerCase().trim() === area.name?.toLowerCase().trim()
+        );
+        if (nameMatch) return nameMatch.name;
+      }
+    }
+    return queryParams.province || '';
+  }, [queryParams.province, queryParams.area_id, provinces, areas]);
+
+  const resolvedQueryAreaId = useMemo(() => {
+    if (queryParams.area_id) {
+      return String(queryParams.area_id);
+    }
+    if (resolvedQueryProvince) {
+      const prov = (provinces || []).find(
+        (p: any) => p.name?.toLowerCase().trim() === resolvedQueryProvince.toLowerCase().trim()
+      );
+      if (prov?.area_id) return String(prov.area_id);
+    }
+    return '';
+  }, [queryParams.area_id, resolvedQueryProvince, provinces]);
+
+  const resolvedQueryZoneId = useMemo(() => {
+    if (queryParams.pickup_zone_id) {
+      return String(queryParams.pickup_zone_id);
+    }
+    if (queryParams.suburb) {
+      return resolveZoneIdForSuburb(queryParams.suburb);
+    }
+    return '';
+  }, [queryParams.pickup_zone_id, queryParams.suburb, resolveZoneIdForSuburb]);
+
+  const resolvedQueryPostcode = useMemo(() => {
+    if (queryParams.postcode) return queryParams.postcode;
+    if (queryParams.suburb) {
+      const found = (suburbs || []).find(
+        (s: any) => s.name?.toLowerCase().trim() === queryParams.suburb.toLowerCase().trim()
+      );
+      if (found?.postcode) return String(found.postcode);
+    }
+    return '';
+  }, [queryParams.postcode, queryParams.suburb, suburbs]);
+
+  const hasCustomSuburbQuery = Boolean(
+    queryParams.suburb &&
+    sender?.suburb &&
+    queryParams.suburb.toLowerCase().trim() !== sender.suburb.toLowerCase().trim()
+  );
+
   const [currentStep, setCurrentStep] = useState(1);
-  const [isEditingSender, setIsEditingSender] = useState(isGuest || !sender || !sender.address);
+  const [isEditingSender, setIsEditingSender] = useState(isGuest || !sender || !sender.address || hasCustomSuburbQuery);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [draftId, setDraftId] = useState<number | null>(draftBooking?.id || null);
   const [savingDraft, setSavingDraft] = useState(false);
@@ -378,48 +500,6 @@ export default function Book(props?: PageProps) {
       return time;
     }
   };
-
-
-
-  const resolveZoneIdForSuburb = useCallback((suburbStr: string) => {
-    if (!suburbStr || typeof suburbStr !== 'string') return '';
-    const searchStr = suburbStr.toLowerCase().trim();
-    if (!searchStr) return '';
-
-    // 1. Check active suburbs list
-    const found = (suburbs || []).find(
-      (s: any) => s.name?.toLowerCase().trim() === searchStr
-    );
-    if (found?.pickup_zone_id) {
-      return String(found.pickup_zone_id);
-    }
-
-    // 2. Check each pickup zone's suburbs list
-    for (const zone of (pickupZones || [])) {
-      if (zone.suburbs && Array.isArray(zone.suburbs)) {
-        const matches = zone.suburbs.some((s: any) => {
-          const name = typeof s === 'string' ? s : (s.name || '');
-          return name.toLowerCase().trim() === searchStr;
-        });
-        if (matches) {
-          return String(zone.id);
-        }
-      }
-    }
-
-    // 3. Suburb keyword in zone name fallback (e.g. Geelong in Ballarat/Geelong zone)
-    for (const zone of (pickupZones || [])) {
-      const zoneNameLower = (zone.name || '').toLowerCase();
-      if (searchStr.length >= 4 && zoneNameLower.includes(searchStr)) {
-        return String(zone.id);
-      }
-    }
-
-    return '';
-  }, [suburbs, pickupZones]);
-
-  // Backward compatibility alias
-  const detectPickupZoneBySuburb = resolveZoneIdForSuburb;
 
   const parseLogisticsWindows = useCallback((rawWindowsInput: any) => {
     const recurring: any[] = [];
@@ -692,12 +772,12 @@ export default function Book(props?: PageProps) {
     mobile: sender?.mobile || '',
     secondary_mobile: sender?.secondary_mobile || '',
     address: sender?.address || '',
-    suburb: sender?.suburb || '',
-    state: sender?.state || 'NSW',
-    postcode: sender?.postcode || '',
+    suburb: queryParams.suburb || sender?.suburb || '',
+    state: queryParams.state || (queryParams.suburb ? 'VIC' : (sender?.state || 'NSW')),
+    postcode: resolvedQueryPostcode || sender?.postcode || '',
     latitude: sender?.latitude || null,
     longitude: sender?.longitude || null,
-    pickup_zone_id: editingBooking?.pickup_zone_id?.toString() || (!isGuest && !isEditingSender && sender?.pickup_zone_id ? sender.pickup_zone_id.toString() : (sender?.suburb ? resolveZoneIdForSuburb(sender.suburb) : '') || ''),
+    pickup_zone_id: editingBooking?.pickup_zone_id?.toString() || (!isGuest && !isEditingSender && sender?.pickup_zone_id ? sender.pickup_zone_id.toString() : (resolvedQueryZoneId || (sender?.suburb ? resolveZoneIdForSuburb(sender.suburb) : '') || '')),
     website: '',
 
     // Shared Booking Data
@@ -720,15 +800,15 @@ export default function Book(props?: PageProps) {
         recipient_email: '',
         recipient_address: '',
         recipient_city: '',
-        recipient_province: '',
+        recipient_province: resolvedQueryProvince || '',
         recipient_zip_code: '',
         recipient_phone: '',
         recipient_secondary_phone: '',
         recipient_landmarks: '',
         recipient_latitude: null,
         recipient_longitude: null,
-        area_id: '',
-        box_type_id: '',
+        area_id: resolvedQueryAreaId || '',
+        box_type_id: queryParams.box_type_id ? String(queryParams.box_type_id) : '',
         is_custom_size: false,
         custom_length: '',
         custom_width: '',
@@ -760,6 +840,63 @@ export default function Book(props?: PageProps) {
 
     return () => clearTimeout(timer);
   }, [data.email, isGuest]);
+
+  // Pre-fill booking fields from Rate Calculator URL parameters
+  useEffect(() => {
+    if (hasAppliedQueryDefaults.current || editingBooking) {
+      return;
+    }
+    hasAppliedQueryDefaults.current = true;
+
+    const hasQueryParams = Boolean(
+      queryParams.suburb ||
+      queryParams.postcode ||
+      queryParams.pickup_zone_id ||
+      queryParams.box_type_id ||
+      queryParams.area_id ||
+      queryParams.province ||
+      resolvedQueryZoneId ||
+      resolvedQueryAreaId ||
+      resolvedQueryProvince
+    );
+
+    if (!hasQueryParams) return;
+
+    if (queryParams.suburb && sender?.suburb && queryParams.suburb.toLowerCase().trim() !== sender.suburb.toLowerCase().trim()) {
+      setIsEditingSender(true);
+    }
+
+    setData((prev: any) => {
+      const updated = { ...prev };
+      if (queryParams.suburb) updated.suburb = queryParams.suburb;
+      if (queryParams.state) {
+        updated.state = queryParams.state;
+      } else if (queryParams.suburb && !updated.state) {
+        updated.state = 'VIC';
+      }
+      if (resolvedQueryPostcode) updated.postcode = resolvedQueryPostcode;
+      if (resolvedQueryZoneId) {
+        updated.pickup_zone_id = resolvedQueryZoneId;
+      }
+
+      if (queryParams.box_type_id || resolvedQueryAreaId || resolvedQueryProvince) {
+        updated.boxes = (prev.boxes || []).map((b: any, idx: number) => {
+          if (idx === 0) {
+            return {
+              ...b,
+              box_type_id: queryParams.box_type_id ? String(queryParams.box_type_id) : b.box_type_id,
+              is_custom_size: queryParams.box_type_id ? false : b.is_custom_size,
+              area_id: resolvedQueryAreaId || b.area_id,
+              recipient_province: resolvedQueryProvince || b.recipient_province,
+            };
+          }
+          return b;
+        });
+      }
+
+      return updated;
+    });
+  }, [editingBooking, queryParams, resolvedQueryZoneId, resolvedQueryAreaId, resolvedQueryProvince, resolvedQueryPostcode, sender, setData]);
 
   const detectedZoneId = useMemo(() => {
     if (!data.suburb) return '';
@@ -858,12 +995,8 @@ export default function Book(props?: PageProps) {
       if (detected && detected !== data.pickup_zone_id) {
         setData('pickup_zone_id', detected);
       }
-    } else if (!data.suburb && isEditingSender) {
-      if (data.pickup_zone_id) {
-        setData('pickup_zone_id', '');
-      }
     }
-  }, [data.suburb, data.booking_type, resolveZoneIdForSuburb, isEditingSender]);
+  }, [data.suburb, data.booking_type, resolveZoneIdForSuburb]);
 
   useEffect(() => {
     if (!activeLogistics) return;
@@ -1207,12 +1340,23 @@ export default function Book(props?: PageProps) {
         ? updatedData(currentDraft)
         : updatedData;
 
+      const mergedDraft = { ...nextDraft };
+      if (mergedDraft.boxes && mergedDraft.boxes.length > 0 && (queryParams.box_type_id || resolvedQueryAreaId || resolvedQueryProvince)) {
+        mergedDraft.boxes = [...mergedDraft.boxes];
+        mergedDraft.boxes[0] = {
+          ...mergedDraft.boxes[0],
+          ...(queryParams.box_type_id ? { box_type_id: String(queryParams.box_type_id), is_custom_size: false } : {}),
+          ...(resolvedQueryAreaId ? { area_id: resolvedQueryAreaId } : {}),
+          ...(resolvedQueryProvince ? { recipient_province: resolvedQueryProvince } : {}),
+        };
+      }
+
       return {
         ...currentData,
-        ...nextDraft,
+        ...mergedDraft,
       };
     });
-  }, [setData]);
+  }, [setData, queryParams.box_type_id, resolvedQueryAreaId, resolvedQueryProvince]);
 
   const hasMeaningfulDraftData = useCallback((draftData: typeof bookingDraftData) => {
     const hasSenderDetails = [
@@ -1345,6 +1489,16 @@ export default function Book(props?: PageProps) {
     hasAppliedDraftSource.current = true;
     const dd = draftBooking.draft_data;
 
+    const restoredBoxes = dd.boxes && dd.boxes.length > 0 ? [...dd.boxes] : [];
+    if (restoredBoxes.length > 0 && (queryParams.box_type_id || resolvedQueryAreaId || resolvedQueryProvince)) {
+      restoredBoxes[0] = {
+        ...restoredBoxes[0],
+        ...(queryParams.box_type_id ? { box_type_id: String(queryParams.box_type_id), is_custom_size: false } : {}),
+        ...(resolvedQueryAreaId ? { area_id: resolvedQueryAreaId } : {}),
+        ...(resolvedQueryProvince ? { recipient_province: resolvedQueryProvince } : {}),
+      };
+    }
+
     setData((currentData: any) => ({
       ...currentData,
       booking_type: dd.booking_type || currentData.booking_type,
@@ -1353,9 +1507,13 @@ export default function Book(props?: PageProps) {
       notes: dd.notes || currentData.notes,
       empty_box_count: dd.empty_box_count ?? currentData.empty_box_count,
       empty_box_fee: dd.empty_box_fee ?? currentData.empty_box_fee,
-      boxes: dd.boxes && dd.boxes.length > 0 ? dd.boxes : currentData.boxes,
+      suburb: queryParams.suburb || currentData.suburb,
+      state: queryParams.state || (queryParams.suburb ? 'VIC' : currentData.state),
+      postcode: resolvedQueryPostcode || currentData.postcode,
+      pickup_zone_id: resolvedQueryZoneId || currentData.pickup_zone_id,
+      boxes: restoredBoxes.length > 0 ? restoredBoxes : currentData.boxes,
     }));
-  }, [draftBooking, editingBooking, cloneSource, setData]);
+  }, [draftBooking, editingBooking, cloneSource, setData, queryParams, resolvedQueryAreaId, resolvedQueryProvince, resolvedQueryZoneId, resolvedQueryPostcode]);
 
   useEffect(() => {
     if (!editingBooking || hasAppliedEditSource.current) {
@@ -1407,36 +1565,6 @@ export default function Book(props?: PageProps) {
       })) : prev.boxes,
     }));
   }, [editingBooking, sender, pickupZones, setData]);
-
-  useEffect(() => {
-    if (hasAppliedQueryDefaults.current) {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    const boxTypeId = params.get('box_type_id');
-    const areaId = params.get('area_id');
-    const suburbParam = params.get('suburb');
-    const pickupZoneIdParam = params.get('pickup_zone_id');
-    const provinceParam = params.get('province');
-
-    if (!boxTypeId && !areaId && !suburbParam && !provinceParam) {
-      return;
-    }
-
-    hasAppliedQueryDefaults.current = true;
-    setData((currentData: any) => ({
-      ...currentData,
-      suburb: suburbParam || currentData.suburb || '',
-      pickup_zone_id: pickupZoneIdParam || currentData.pickup_zone_id || '',
-      boxes: [{
-        ...(currentData.boxes?.[0] ?? {}),
-        box_type_id: boxTypeId || currentData.boxes?.[0]?.box_type_id || '',
-        area_id: areaId || currentData.boxes?.[0]?.area_id || '',
-        recipient_province: provinceParam || currentData.boxes?.[0]?.recipient_province || '',
-      }],
-    }));
-  }, [setData]);
 
   useEffect(() => {
     if (!cloneSource || hasAppliedCloneSource.current || !Array.isArray(cloneSource.boxes)) {
@@ -1888,7 +2016,7 @@ return 0;
 
       // Normalize field names
       if (field === 'area id') {
-field = 'destination area';
+field = 'destination province';
 }
 
       if (field === 'box type id') {
@@ -2079,7 +2207,7 @@ if (step === 2) {
       data.boxes.forEach((box, i) => {
         // Always required: area_id
         if (!box.area_id) {
-            setError(`boxes.${i}.area_id` as any, 'Destination Area is required');
+            setError(`boxes.${i}.area_id` as any, 'Recipient province is required');
             hasErrors = true;
         }
 
@@ -3198,7 +3326,7 @@ if (step === 2) {
                                         type="button"
                                         onClick={() => {
                                           if (!hasPrice) {
-                                            toast.error('Unable to select this box size — no price is configured for this destination area. Please contact customer support.');
+                                            toast.error('Unable to select this box size — no price is configured for this destination province. Please contact customer support.');
                                             return;
                                           }
                                           updateBox(index, 'box_type_id', bt.id.toString());
@@ -3350,7 +3478,7 @@ if (step === 2) {
                                           </div>
                                         ) : !box.area_id ? (
                                           <p className="text-[10px] text-amber-600 dark:text-amber-400 border-t border-sky-200 dark:border-sky-800/50 pt-1.5">
-                                            Select a destination area to see the estimated cost.
+                                            Select a recipient with a valid province to see the estimated cost.
                                           </p>
                                         ) : (
                                           <p className="text-[10px] text-amber-600 dark:text-amber-400 border-t border-sky-200 dark:border-sky-800/50 pt-1.5">
@@ -3614,8 +3742,8 @@ if (step === 2) {
 
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                                 <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Destination Area</p>
-                                  <p className="font-semibold text-zinc-800 dark:text-zinc-200">{areaName}</p>
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Destination</p>
+                                  <p className="font-semibold text-zinc-800 dark:text-zinc-200">{recProvince || areaName}</p>
                                 </div>
 
                                 {box.is_custom_size ? (

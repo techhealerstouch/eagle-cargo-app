@@ -66,6 +66,58 @@ class SecurityHealthMonitoringTest extends TestCase
         ]);
     }
 
+    public function test_allows_legitimate_filenames_with_dots_and_references(): void
+    {
+        $legitimateFilenames = [
+            'SQUARE.0829 Gerelle  Bumaya payment.jpg',
+            'receipt_2026.08.29.jpg',
+            'invoice.v1.0.pdf',
+            'proof.of.payment.png',
+        ];
+
+        foreach ($legitimateFilenames as $filename) {
+            $file = UploadedFile::fake()->create($filename, 50, 'image/jpeg');
+
+            $validator = Validator::make(
+                ['document' => $file],
+                ['document' => [new SecureFile]],
+            );
+
+            $this->assertTrue($validator->passes(), "Expected '{$filename}' to pass SecureFile validation, but it failed: ".implode(', ', $validator->errors()->all()));
+        }
+
+        $this->assertDatabaseMissing('data_integrity_warnings', [
+            'type' => 'suspicious_file_upload',
+        ]);
+    }
+
+    public function test_blocks_double_extension_attacks_with_executable_scripts(): void
+    {
+        $maliciousFiles = [
+            'shell.php.jpg',
+            'exploit.phar.png',
+            'script.sh.pdf',
+            'payload.bat.jpeg',
+        ];
+
+        foreach ($maliciousFiles as $filename) {
+            $file = UploadedFile::fake()->create($filename, 24, 'image/jpeg');
+
+            $validator = Validator::make(
+                ['document' => $file],
+                ['document' => [new SecureFile]],
+            );
+
+            $this->assertTrue($validator->fails(), "Expected '{$filename}' to be blocked, but it passed.");
+        }
+
+        $this->assertDatabaseHas('data_integrity_warnings', [
+            'type' => 'suspicious_file_upload',
+            'severity' => 'high',
+            'is_resolved' => false,
+        ]);
+    }
+
     public function test_system_health_exposes_and_filters_security_incidents(): void
     {
         $admin = User::factory()->superAdmin()->withTwoFactor()->create();

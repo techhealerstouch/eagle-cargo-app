@@ -43,14 +43,25 @@ class BatchObserver
      */
     public function created(Batch $batch): void
     {
+        \App\Http\Controllers\PublicScheduleAndRateController::forgetUpcomingBatchesCache();
         app(\App\Services\CalendarEventService::class)->syncBatchEvents($batch);
     }
 
     /**
      * Handle the Batch "updated" event.
      */
+    
+    /**
+     * Handle the Batch "deleted" event.
+     */
+    public function deleted(Batch $batch): void
+    {
+        \App\Http\Controllers\PublicScheduleAndRateController::forgetUpcomingBatchesCache();
+        app(TrackingCacheService::class)->forgetBatch($batch);
+    }
     public function updated(Batch $batch): void
     {
+        \App\Http\Controllers\PublicScheduleAndRateController::forgetUpcomingBatchesCache();
         app(TrackingCacheService::class)->forgetBatch($batch);
         app(\App\Services\CalendarEventService::class)->syncBatchEvents($batch);
 
