@@ -11,6 +11,7 @@ use App\Models\Area;
 use App\Models\Courier;
 use App\Models\PickupZone;
 use App\Models\User;
+use App\Notifications\AccountCreatedByAdmin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -266,7 +267,7 @@ class UserController extends Controller
     public function update(UpdateUserRequest $request, User $user)
     {
         $validated = $request->validated();
-        $userData = Arr::except($validated, ['area_id', 'pickup_zone_id', 'suburb', 'state', 'postcode']);
+        $userData = Arr::except($validated, ['area_id', 'pickup_zone_id', 'suburb', 'state', 'postcode', 'password_confirmation', 'send_credentials_email']);
 
         // Prevent users from changing their own role
         $changedOwnRole = false;
@@ -277,13 +278,19 @@ class UserController extends Controller
             unset($userData['role']);
         }
 
+        $plainPassword = null;
         if (empty($userData['password'])) {
             unset($userData['password']);
         } else {
-            $userData['password'] = Hash::make($userData['password']);
+            $plainPassword = $userData['password'];
+            $userData['password'] = Hash::make($plainPassword);
         }
 
         $user->update($userData);
+
+        if (!empty($plainPassword) && $request->boolean('send_credentials_email')) {
+            $user->notify(new AccountCreatedByAdmin($user, $plainPassword));
+        }
 
         $parts = explode(' ', $user->name);
         $firstName = collect($parts)->first() ?: 'User';
@@ -375,7 +382,7 @@ class UserController extends Controller
     {
         // Prevent self-deletion
         if ($user->id === $request->user()?->id) {
-            return redirect()->back()->with('error', 'You cannot delete your own account.');
+            return redirect()->back(fallback: route('admin.users.index'))->with('error', 'You cannot delete your own account.');
         }
 
         return \Illuminate\Support\Facades\DB::transaction(function () use ($user) {
@@ -383,17 +390,17 @@ class UserController extends Controller
             $lockedUser = User::lockForUpdate()->find($user->id);
 
             if (! $lockedUser) {
-                return redirect()->back()->with('error', 'User not found or already deleted.');
+                return redirect()->back(fallback: route('admin.users.index'))->with('error', 'User not found or already deleted.');
             }
 
             // Prevent deletion if the user has active transactions
             if ($lockedUser->hasActiveTransactions()) {
-                return redirect()->back()->with('error', 'Cannot archive user with active transactions.');
+                return redirect()->back(fallback: route('admin.users.index'))->with('error', 'Cannot archive user with active transactions.');
             }
 
             $lockedUser->delete();
 
-            return redirect()->back()->with('success', 'User archived successfully.');
+            return redirect()->back(fallback: route('admin.users.index'))->with('success', 'User archived successfully.');
         });
     }
 
@@ -422,6 +429,6 @@ class UserController extends Controller
 
         $user->restore();
 
-        return redirect()->back()->with('success', 'User restored successfully.');
+        return redirect()->back(fallback: route('admin.users.index'))->with('success', 'User restored successfully.');
     }
 }

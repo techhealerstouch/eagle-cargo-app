@@ -5,16 +5,17 @@ namespace Tests\Feature;
 use App\Enums\BatchStatus;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
+use App\Enums\PaymentStatus;
+use App\Events\SystemHealthUpdated;
+use App\Jobs\AuditDataIntegrityJob;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
-use App\Models\BoxType;
 use App\Models\DataIntegrityWarning;
-use App\Models\Invoice;
-use App\Models\Recipient;
-use App\Models\Sender;
 use App\Services\DataIntegrityService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class DataIntegritySystemTest extends TestCase
@@ -77,7 +78,9 @@ class DataIntegritySystemTest extends TestCase
 
     public function test_detects_orphan_boxes_not_in_batch(): void
     {
+        $booking = Booking::factory()->paid()->create(['status' => BookingStatus::Confirmed]);
         $box = Box::factory()->create([
+            'booking_id' => $booking->id,
             'status' => BoxStatus::ReceivedByWarehouse,
             'batch_id' => null,
             'created_at' => now()->subHours(48),
@@ -98,7 +101,9 @@ class DataIntegritySystemTest extends TestCase
 
     public function test_does_not_flag_recent_orphan_boxes(): void
     {
+        $booking = Booking::factory()->paid()->create(['status' => BookingStatus::Confirmed]);
         Box::factory()->create([
+            'booking_id' => $booking->id,
             'status' => BoxStatus::ReceivedByWarehouse,
             'batch_id' => null,
             'created_at' => now()->subHours(2), // Less than 24h
@@ -263,24 +268,14 @@ class DataIntegritySystemTest extends TestCase
     // 7. Real-Time Anomaly Detection & Events
     // ---------------------------------------------------------------
 
-    public function test_dispatches_audit_job_and_creates_warnings_in_realtime(): void
-    {
-        \Illuminate\Support\Facades\Queue::fake();
-
-        Booking::factory()->create([
-            'status' => BookingStatus::Confirmed,
-            'declaration_form_status' => 'missing',
-        ]);
-
-        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\AuditDataIntegrityJob::class);
-    }
-
     public function test_executes_audit_job_synchronously_to_produce_warnings(): void
     {
         $booking = Booking::factory()->create([
             'status' => BookingStatus::Confirmed,
             'declaration_form_status' => 'missing',
         ]);
+
+        AuditDataIntegrityJob::dispatchSync();
 
         $this->assertDatabaseHas('data_integrity_warnings', [
             'type' => 'missing_declaration',
@@ -291,9 +286,21 @@ class DataIntegritySystemTest extends TestCase
         ]);
     }
 
+    public function test_dispatches_audit_job_and_creates_warnings_in_realtime(): void
+    {
+        Queue::fake();
+
+        Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'declaration_form_status' => 'missing',
+        ]);
+
+        Queue::assertPushed(AuditDataIntegrityJob::class);
+    }
+
     public function test_broadcasts_system_health_updated_event(): void
     {
-        \Illuminate\Support\Facades\Event::fake([\App\Events\SystemHealthUpdated::class]);
+        Event::fake([SystemHealthUpdated::class]);
 
         DataIntegrityWarning::create([
             'type' => 'missing_declaration',
@@ -304,6 +311,98 @@ class DataIntegritySystemTest extends TestCase
             'message' => 'Test warning',
         ]);
 
-        \Illuminate\Support\Facades\Event::assertDispatched(\App\Events\SystemHealthUpdated::class);
+        Event::assertDispatched(SystemHealthUpdated::class);
+    }
+
+    // ---------------------------------------------------------------
+    // 8. False Positive Prevention & Real-World Logistics Invariants
+    // ---------------------------------------------------------------
+
+    public function test_does_not_flag_stale_scan_for_boxes_in_sailed_batches(): void
+    {
+        $batch = Batch::factory()->create([
+            'status' => BatchStatus::Sailed,
+        ]);
+
+        $booking = Booking::factory()->paid()->create(['status' => BookingStatus::Shipped]);
+
+        Box::factory()->create([
+            'booking_id' => $booking->id,
+            'batch_id' => $batch->id,
+            'status' => BoxStatus::InTransit,
+            'created_at' => now()->subDays(10),
+            'updated_at' => now()->subDays(10),
+        ]);
+
+        $service = app(DataIntegrityService::class);
+        $count = $service->checkStaleScans();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_does_not_flag_empty_box_orders_as_box_count_mismatch_or_missing_declaration(): void
+    {
+        Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'empty_box_count' => 3,
+            'declaration_form_status' => 'missing',
+        ]);
+
+        $service = app(DataIntegrityService::class);
+
+        $mismatchCount = $service->checkBoxCountMismatches();
+        $declarationCount = $service->checkMissingDeclarations();
+
+        $this->assertSame(0, $mismatchCount);
+        $this->assertSame(0, $declarationCount);
+    }
+
+    public function test_does_not_flag_overdue_loading_for_unpaid_or_held_boxes(): void
+    {
+        $unpaidBooking = Booking::factory()->create([
+            'status' => BookingStatus::Confirmed,
+            'payment_status' => PaymentStatus::Pending,
+        ]);
+
+        Box::factory()->create([
+            'booking_id' => $unpaidBooking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'batch_id' => null,
+            'created_at' => now()->subHours(48),
+            'updated_at' => now()->subHours(48),
+        ]);
+
+        $heldBooking = Booking::factory()->paid()->create(['status' => BookingStatus::Confirmed]);
+        Box::factory()->create([
+            'booking_id' => $heldBooking->id,
+            'status' => BoxStatus::Held,
+            'batch_id' => null,
+            'created_at' => now()->subHours(48),
+            'updated_at' => now()->subHours(48),
+        ]);
+
+        $service = app(DataIntegrityService::class);
+        $count = $service->checkOverdueLoading();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_warehouse_intake_grace_period_prevents_false_missing_location_warnings(): void
+    {
+        config(['logistics.sla_hours.warehouse_intake_grace' => 2]);
+
+        $booking = Booking::factory()->paid()->create(['status' => BookingStatus::Confirmed]);
+        Box::factory()->create([
+            'booking_id' => $booking->id,
+            'status' => BoxStatus::ReceivedByWarehouse,
+            'warehouse_location' => null,
+            'created_at' => now()->subMinutes(30),
+            'updated_at' => now()->subMinutes(30),
+        ]);
+
+        $service = app(DataIntegrityService::class);
+        $count = $service->checkMissingWarehouseLocations();
+
+        $this->assertSame(0, $count);
     }
 }

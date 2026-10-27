@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
-import { Save, ArrowLeft, User, ShieldCheck, Mail, Lock, Info, Phone, MapPin, ChevronDown, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Save, ArrowLeft, User, ShieldCheck, Mail, Lock, Info, Phone, MapPin, ChevronDown, Loader2, CheckCircle2, AlertCircle, KeyRound, Sparkles, Copy, Check, Eye, EyeOff, RefreshCw, Send } from 'lucide-react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,6 @@ import CommissionCalculatorForm from '@/components/admin/users/commission-calcul
 import PhoneInput from '@/components/ui/PhoneInput';
 import { useEmailValidator } from '@/hooks/use-email-validator';
 import { toast } from 'sonner';
-
 
 const ROLE_CONFIG: Record<string, { label: string; bg: string; text: string; border: string }> = {
     sender: { label: 'CUSTOMER (SENDER)', bg: 'bg-blue-50/80', text: 'text-blue-700', border: 'border-blue-200' },
@@ -82,16 +81,76 @@ export default function UsersEdit({
     areas?: { id: number; name: string }[];
     pickupZones?: PickupZoneItem[];
 }) {
-    const { auth, return_url } = usePage<{ auth: any; return_url?: string }>().props;
+    const { auth, return_url } = usePage<any>().props;
     const isSuperAdmin = auth?.user?.role === 'super_admin';
     const isOwnProfile = auth?.user?.id === user.id;
     const [rawJsonMode, setRawJsonMode] = useState(false);
 
-    const emailValidator = useEmailValidator({
-        initialEmail: user.email,
-        ignoreUserId: user.id,
-        endpoint: '/admin/users/check-email',
-    });
+    // Password generation state
+    const [passwordMode, setPasswordMode] = useState<'keep' | 'auto' | 'manual'>('keep');
+    const [showPassword, setShowPassword] = useState(false);
+    const [copiedPassword, setCopiedPassword] = useState(false);
+    const [sendCredentialsEmail, setSendCredentialsEmail] = useState(true);
+
+    const generateSecurePassword = (length = 12) => {
+        const uppers = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        const lowers = 'abcdefghijkmnpqrstuvwxyz';
+        const numbers = '23456789';
+        const all = uppers + lowers + numbers;
+
+        const arr = new Uint32Array(length);
+        window.crypto.getRandomValues(arr);
+
+        const result = [
+            uppers[arr[0] % uppers.length],
+            lowers[arr[1] % lowers.length],
+            numbers[arr[2] % numbers.length],
+        ];
+
+        for (let i = 3; i < length; i++) {
+            result.push(all[arr[i] % all.length]);
+        }
+
+        for (let i = result.length - 1; i > 0; i--) {
+            const j = arr[i] % (i + 1);
+            [result[i], result[j]] = [result[j], result[i]];
+        }
+
+        return result.join('');
+    };
+
+    const handleSelectAutoPassword = () => {
+        const generated = generateSecurePassword();
+        setData((prev) => ({
+            ...prev,
+            password: generated,
+            password_confirmation: generated,
+        }));
+        setPasswordMode('auto');
+        setShowPassword(true);
+        toast.info('Auto-generated secure password created.');
+    };
+
+    const handleSelectKeepPassword = () => {
+        setPasswordMode('keep');
+        setData((prev) => ({
+            ...prev,
+            password: '',
+            password_confirmation: '',
+        }));
+    };
+
+    const handleSelectManualPassword = () => {
+        setPasswordMode('manual');
+    };
+
+    const handleCopyPassword = () => {
+        if (!data.password) return;
+        navigator.clipboard.writeText(data.password);
+        setCopiedPassword(true);
+        toast.success('Password copied to clipboard!');
+        setTimeout(() => setCopiedPassword(false), 2000);
+    };
 
     // Initial rates extraction for visual form
     const initialRates = user.commission_rates || {};
@@ -120,6 +179,14 @@ export default function UsersEdit({
         commission_rates: user.commission_rates ? JSON.stringify(user.commission_rates, null, 2) : '{\n  "amount": 5.0\n}',
     });
 
+    const emailValidator = useEmailValidator({
+        email: data.email,
+        initialEmail: user.email,
+        ignoreUserId: user.id,
+        endpoint: '/admin/users/check-email',
+        debounceMs: 400,
+    });
+
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
         { title: 'User Management', href: return_url || '/admin/users' },
@@ -145,22 +212,16 @@ export default function UsersEdit({
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
-        if (!data.name.trim()) {
-            toast.error('Full Name is required.');
-            return;
+        if (emailValidator.isChecking) {
+            toast.loading('Validating email availability...', { id: 'edit-email-loader' });
         }
 
-        if (!data.email.trim()) {
-            toast.error('Email Address is required.');
-            return;
-        }
+        const isEmailOk = await emailValidator.validateEmailAsync();
+        toast.dismiss('edit-email-loader');
 
-        if (data.email.trim().toLowerCase() !== user.email.trim().toLowerCase()) {
-            const isEmailAvailable = await emailValidator.validateEmailAsync(data.email);
-            if (!isEmailAvailable) {
-                toast.error(emailValidator.message || 'Cannot save changes: This email address is already registered to another user.');
-                return;
-            }
+        if (!isEmailOk) {
+            toast.error(`Cannot save changes: ${emailValidator.errorMessage || 'This email address is already registered.'}`);
+            return;
         }
         
         let finalRates: any = null;
@@ -169,7 +230,7 @@ export default function UsersEdit({
                 try {
                     finalRates = JSON.parse(data.commission_rates);
                 } catch (err) {
-                    toast.error('Invalid JSON format in Commission Rates.');
+                    toast.error('Cannot save changes: Invalid JSON syntax in Commission Rates.');
                     return;
                 }
             } else {
@@ -195,16 +256,18 @@ export default function UsersEdit({
             commission_type: data.role === 'picker' ? data.commission_type : null,
             area_id: data.role === 'courier' ? data.area_id : null,
             pickup_zone_id: data.role === 'picker' ? data.pickup_zone_id : null,
-            ...(return_url ? { return_to: return_url } : {}),
+            password: passwordMode === 'keep' ? '' : data.password,
+            password_confirmation: passwordMode === 'keep' ? '' : data.password_confirmation,
+            send_credentials_email: passwordMode !== 'keep' && sendCredentialsEmail,
         }));
         
         put(`/admin/users/${user.id}`, {
             onError: (errs) => {
-                const firstError = Object.values(errs)[0];
-                toast.error(firstError || 'Failed to update user profile. Please check the form.');
+                const firstErr = Object.values(errs)[0];
+                toast.error(typeof firstErr === 'string' ? `Update failed: ${firstErr}` : 'Update failed. Please review the errors in the form.');
             },
             onSuccess: () => {
-                toast.success('User updated successfully.');
+                toast.success('Account updated successfully!');
             },
         });
     };
@@ -219,7 +282,7 @@ export default function UsersEdit({
                 <div className="flex flex-col md:flex-row md:items-start justify-between gap-6 border-b border-border pb-8">
                     <div className="flex items-center gap-4">
                         <Link
-                            href={return_url || '/admin/users'}
+                            href={return_url || "/admin/users"}
                             className="mt-1 rounded-xl p-2.5 bg-card border border-border text-muted-foreground transition-all hover:bg-muted/50 hover:text-foreground shadow-sm"
                         >
                             <ArrowLeft className="size-5" />
@@ -293,62 +356,70 @@ export default function UsersEdit({
                             {/* Email Address & User Role Grid */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
-                                    <Label htmlFor="email" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
-                                        EMAIL ADDRESS <span className="text-red-500">*</span>
-                                    </Label>
+                                    <div className="flex items-center justify-between">
+                                        <Label htmlFor="email" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
+                                            EMAIL ADDRESS <span className="text-red-500">*</span>
+                                        </Label>
+                                        {emailValidator.isChecking && (
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                                                <Loader2 className="size-3 animate-spin" /> Checking...
+                                            </span>
+                                        )}
+                                        {emailValidator.isValid && data.email.trim() && (
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
+                                                <CheckCircle2 className="size-3" /> Available
+                                            </span>
+                                        )}
+                                    </div>
                                     <div className="relative">
                                         <Mail className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
                                         <Input
                                             id="email"
                                             type="email"
-                                            className={`h-12 rounded-xl border bg-card pl-11 pr-11 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 transition-all shadow-2xs ${
-                                                emailValidator.isChecking
-                                                    ? 'border-amber-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20'
-                                                    : emailValidator.status === 'valid' && data.email.trim().toLowerCase() !== user.email.trim().toLowerCase()
-                                                      ? 'border-emerald-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20'
-                                                      : emailValidator.status === 'invalid' || emailValidator.status === 'error'
-                                                        ? 'border-red-500 focus:border-red-500 focus:ring-2 focus:ring-red-500/20'
-                                                        : 'border-border focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust'
+                                            className={`h-12 rounded-xl bg-card pl-11 pr-11 text-xs font-semibold text-foreground placeholder:text-muted-foreground/60 transition-all shadow-2xs ${
+                                                (errors.email || emailValidator.isInvalid)
+                                                    ? 'border-red-500 focus:ring-2 focus:ring-red-500/20 focus:border-red-500'
+                                                    : emailValidator.isValid && data.email.trim()
+                                                    ? 'border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500'
+                                                    : emailValidator.isChecking
+                                                    ? 'border-amber-400 focus:ring-2 focus:ring-amber-400/20 focus:border-amber-400'
+                                                    : 'border-border focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust'
                                             }`}
                                             value={data.email}
-                                            onChange={(e) => {
-                                                setData('email', e.target.value);
-                                                emailValidator.checkEmail(e.target.value);
-                                            }}
-                                            onBlur={() => {
-                                                if (data.email.trim()) {
-                                                    emailValidator.validateEmailAsync(data.email);
-                                                }
-                                            }}
+                                            onChange={(e) => setData('email', e.target.value)}
                                             placeholder="user@example.com"
                                             maxLength={255}
                                             required
                                         />
-                                        <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center pointer-events-none">
-                                            {emailValidator.isChecking && (
-                                                <Loader2 className="size-4 animate-spin text-amber-500" />
-                                            )}
-                                            {!emailValidator.isChecking && emailValidator.status === 'valid' && data.email.trim().toLowerCase() !== user.email.trim().toLowerCase() && (
-                                                <CheckCircle2 className="size-4 text-emerald-500" />
-                                            )}
-                                            {!emailValidator.isChecking && (emailValidator.status === 'invalid' || emailValidator.status === 'error') && (
+                                        {emailValidator.isChecking && (
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2" title="Checking availability...">
+                                                <Loader2 className="size-4 text-amber-500 animate-spin" />
+                                            </div>
+                                        )}
+                                        {emailValidator.isValid && data.email.trim() && (
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2" title="Email is available">
+                                                <CheckCircle2 className="size-4 text-emerald-600" />
+                                            </div>
+                                        )}
+                                        {(errors.email || emailValidator.isInvalid) && (
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2" title="Validation error">
                                                 <AlertCircle className="size-4 text-red-500" />
-                                            )}
-                                        </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    {/* Status messages */}
-                                    {emailValidator.status === 'valid' && emailValidator.message && data.email.trim().toLowerCase() !== user.email.trim().toLowerCase() && (
+                                    {(errors.email || (emailValidator.isInvalid && emailValidator.errorMessage)) && (
+                                        <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50/90 p-3 text-red-800 shadow-2xs animate-in fade-in duration-200">
+                                            <AlertCircle className="size-4 shrink-0 text-red-600 mt-0.5" />
+                                            <div className="text-xs font-semibold leading-relaxed">
+                                                <span className="font-extrabold uppercase tracking-wider block text-[10px] text-red-700">Email Validation Error</span>
+                                                {errors.email || emailValidator.errorMessage}
+                                            </div>
+                                        </div>
+                                    )}
+                                    {!errors.email && !emailValidator.isInvalid && emailValidator.isValid && data.email.trim() && data.email.trim().toLowerCase() !== user.email.toLowerCase() && (
                                         <p className="text-[11px] font-bold text-emerald-600 ml-0.5 uppercase tracking-wider flex items-center gap-1.5">
-                                            <span>✓</span> {emailValidator.message}
+                                            <span>Email address is available</span>
                                         </p>
-                                    )}
-                                    {(emailValidator.status === 'invalid' || emailValidator.status === 'error') && emailValidator.message && (
-                                        <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">
-                                            {emailValidator.message}
-                                        </p>
-                                    )}
-                                    {!(emailValidator.status === 'invalid' || emailValidator.status === 'error') && errors.email && (
-                                        <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{errors.email}</p>
                                     )}
                                 </div>
 
@@ -537,7 +608,7 @@ export default function UsersEdit({
                                     <>
                                         <div className="space-y-2 md:col-span-2 transition-all duration-300 animate-in fade-in">
                                             <Label htmlFor="pickup_zone_id" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5 flex items-center justify-between">
-                                                <span>ASSIGNED PICKUP AREA / ZONE <span className="text-red-500">*</span></span>
+                                                <span>ASSIGNED PICKUP AREA / ZONE</span>
                                             </Label>
                                             <div className="relative">
                                                 <select
@@ -546,9 +617,8 @@ export default function UsersEdit({
                                                     className="flex h-12 w-full rounded-xl border border-border bg-card px-4 pr-10 text-xs font-bold uppercase tracking-wider text-foreground focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all shadow-2xs appearance-none cursor-pointer"
                                                     value={data.pickup_zone_id}
                                                     onChange={(e) => setData('pickup_zone_id', e.target.value)}
-                                                    required
                                                 >
-                                                    <option value="">SELECT REQUIRED PICKUP AREA / ZONE</option>
+                                                    <option value="">ALL AREAS / ZONES (GLOBAL)</option>
                                                     {pickupZones.map((zone) => (
                                                         <option key={zone.id} value={String(zone.id)}>
                                                             {zone.name.toUpperCase()} {zone.suburbs && zone.suburbs.length > 0 ? `(${zone.suburbs.length} SUBURBS)` : ''}
@@ -560,7 +630,7 @@ export default function UsersEdit({
                                             {errors.pickup_zone_id && (
                                                 <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{errors.pickup_zone_id}</p>
                                             )}
-                                            {data.pickup_zone_id && (() => {
+                                            {data.pickup_zone_id ? (() => {
                                                 const selectedZone = pickupZones.find(z => String(z.id) === data.pickup_zone_id);
                                                 if (selectedZone?.suburbs && selectedZone.suburbs.length > 0) {
                                                     return (
@@ -574,7 +644,14 @@ export default function UsersEdit({
                                                     );
                                                 }
                                                 return null;
-                                            })()}
+                                            })() : (
+                                                <div className="mt-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
+                                                    <span className="font-bold block mb-0.5">All Pickup Areas / Global Territory</span>
+                                                    <span className="leading-relaxed text-[11px] opacity-90">
+                                                        This picker is assigned to all areas and can handle collections across any pickup zone.
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
 
                                         <div className="space-y-3 md:col-span-2 transition-all duration-300 animate-in fade-in pt-2">
@@ -604,65 +681,277 @@ export default function UsersEdit({
 
                         {/* SECTION 4: PASSWORD SETTINGS */}
                         <div className="space-y-4 pt-2">
-                            <div className="border-b border-border/50 pb-2.5">
+                            <div className="border-b border-border/50 pb-2.5 flex items-center justify-between">
                                 <h3 className="text-[11px] font-extrabold uppercase tracking-[0.2em] text-foreground">
                                     4. PASSWORD SETTINGS (OPTIONAL)
                                 </h3>
+                                {passwordMode !== 'keep' && (
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectKeepPassword}
+                                        className="text-xs text-muted-foreground hover:text-foreground font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                    >
+                                        Revert to Keep Current
+                                    </button>
+                                )}
                             </div>
 
-                            <div className="rounded-2xl border border-border/60 bg-muted/30 p-5 space-y-4 shadow-2xs">
-                                <div className="flex items-center gap-2">
-                                    <Info className="size-4 text-muted-foreground/70" />
-                                    <p className="text-xs font-normal text-muted-foreground">
-                                        Leave password fields empty to keep the user's current password.
-                                    </p>
+                            <div className="space-y-4">
+                                {/* Mode Selection Cards */}
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                    {/* Option 1: Keep Current */}
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectKeepPassword}
+                                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                                            passwordMode === 'keep'
+                                                ? 'border-brand-navy bg-brand-navy/5 ring-1 ring-brand-navy/20 dark:bg-brand-navy/20'
+                                                : 'border-border bg-card hover:bg-muted/30'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                            <Lock className={`size-4 ${passwordMode === 'keep' ? 'text-brand-navy' : 'text-muted-foreground'}`} />
+                                            <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                                Keep Current Password
+                                            </span>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-normal">
+                                            Active password remains unchanged. No credential reset.
+                                        </p>
+                                    </button>
+
+                                    {/* Option 2: Auto-Generate (Like on Sender) */}
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectAutoPassword}
+                                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                                            passwordMode === 'auto'
+                                                ? 'border-emerald-600 bg-emerald-500/10 ring-1 ring-emerald-500/30 dark:bg-emerald-950/30'
+                                                : 'border-border bg-card hover:bg-muted/30'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                            <ShieldCheck className={`size-4 ${passwordMode === 'auto' ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`} />
+                                            <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                                                Auto-Generate
+                                                <span className="px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 text-[9px] font-extrabold uppercase">
+                                                    Sender Style
+                                                </span>
+                                            </span>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-normal">
+                                            Creates a secure 12-character random password automatically.
+                                        </p>
+                                    </button>
+
+                                    {/* Option 3: Manual Entry */}
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectManualPassword}
+                                        className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
+                                            passwordMode === 'manual'
+                                                ? 'border-brand-rust bg-brand-rust/5 ring-1 ring-brand-rust/20 dark:bg-brand-rust/20'
+                                                : 'border-border bg-card hover:bg-muted/30'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2 mb-1.5">
+                                            <KeyRound className={`size-4 ${passwordMode === 'manual' ? 'text-brand-rust' : 'text-muted-foreground'}`} />
+                                            <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                                Set Manually
+                                            </span>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-normal">
+                                            Specify a custom password directly for manual onboarding.
+                                        </p>
+                                    </button>
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="password" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
-                                            NEW PASSWORD
-                                        </Label>
-                                        <div className="relative">
-                                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
-                                            <Input
-                                                id="password"
-                                                type="password"
-                                                className="h-12 rounded-xl border-border bg-card pl-11 pr-4 text-xs font-semibold text-foreground focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all shadow-2xs"
-                                                value={data.password}
-                                                onChange={(e) => setData('password', e.target.value)}
-                                                placeholder="Optional: min 8 characters"
-                                            />
-                                        </div>
-                                        {errors.password && (
-                                            <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{errors.password}</p>
-                                        )}
+                                {/* Mode Body: Keep Current */}
+                                {passwordMode === 'keep' && (
+                                    <div className="rounded-2xl border border-border/60 bg-muted/20 p-4 flex items-center gap-3 shadow-2xs">
+                                        <Info className="size-4 text-muted-foreground shrink-0" />
+                                        <p className="text-xs text-muted-foreground">
+                                            The user's current password will be preserved. No changes will be applied to their authentication credentials upon saving.
+                                        </p>
                                     </div>
+                                )}
 
-                                    <div className="space-y-2">
-                                        <Label htmlFor="password_confirmation" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
-                                            CONFIRM NEW PASSWORD
-                                        </Label>
-                                        <div className="relative">
-                                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
-                                            <Input
-                                                id="password_confirmation"
-                                                type="password"
-                                                className="h-12 rounded-xl border-border bg-card pl-11 pr-4 text-xs font-semibold text-foreground focus:ring-2 focus:ring-brand-rust/20 focus:border-brand-rust transition-all shadow-2xs"
-                                                value={data.password_confirmation}
-                                                onChange={(e) => setData('password_confirmation', e.target.value)}
-                                                placeholder="Repeat password"
-                                            />
+                                {/* Mode Body: Auto-Generate */}
+                                {passwordMode === 'auto' && (
+                                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-950/20 p-5 space-y-4 shadow-2xs animate-in fade-in duration-200">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400" />
+                                                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                                                        Auto-Generated Credentials
+                                                    </h4>
+                                                </div>
+                                                <p className="text-[11px] text-muted-foreground mt-0.5">
+                                                    Cryptographically secure 12-character password ready for the user.
+                                                </p>
+                                            </div>
+
+                                            <div className="flex items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={handleSelectAutoPassword}
+                                                    className="h-8 text-xs font-semibold gap-1.5 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/50"
+                                                >
+                                                    <RefreshCw className="size-3" />
+                                                    <span>Regenerate</span>
+                                                </Button>
+
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    onClick={handleCopyPassword}
+                                                    className="h-8 text-xs font-bold gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs"
+                                                >
+                                                    {copiedPassword ? (
+                                                        <>
+                                                            <Check className="size-3.5" />
+                                                            <span>Copied!</span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Copy className="size-3.5" />
+                                                            <span>Copy Password</span>
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            </div>
+                                        </div>
+
+                                        {/* Display Password in Monospace Box */}
+                                        <div className="p-3.5 rounded-xl bg-background border border-emerald-500/20 flex items-center justify-between gap-3 shadow-inner">
+                                            <div className="flex items-center gap-3">
+                                                <Lock className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                                <span className="font-mono text-sm sm:text-base font-bold tracking-widest text-foreground select-all">
+                                                    {showPassword ? data.password : '••••••••••••'}
+                                                </span>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                                                title={showPassword ? 'Hide password' : 'Show password'}
+                                            >
+                                                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                                            </button>
+                                        </div>
+
+                                        {/* Email Dispatch Checkbox */}
+                                        <div className="pt-2 border-t border-border/50">
+                                            <label className="flex items-start gap-3 cursor-pointer group">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={sendCredentialsEmail}
+                                                    onChange={(e) => setSendCredentialsEmail(e.target.checked)}
+                                                    className="size-4 mt-0.5 rounded border-border text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                                                />
+                                                <div className="space-y-0.5">
+                                                    <span className="text-xs font-bold text-foreground group-hover:text-emerald-600 transition-colors flex items-center gap-1.5">
+                                                        <Send className="size-3.5 text-muted-foreground" />
+                                                        Send updated login credentials & portal access instructions via email immediately
+                                                    </span>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        The user ({user.email}) will receive an official notification with their new temporary password and dashboard login link.
+                                                    </p>
+                                                </div>
+                                            </label>
                                         </div>
                                     </div>
-                                </div>
+                                )}
+
+                                {/* Mode Body: Manual Entry */}
+                                {passwordMode === 'manual' && (
+                                    <div className="rounded-2xl border border-border/60 bg-muted/20 p-5 space-y-4 shadow-2xs animate-in fade-in duration-200">
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-xs text-muted-foreground">
+                                                Enter a custom password for the user (minimum 8 characters).
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={handleSelectAutoPassword}
+                                                className="inline-flex items-center gap-1 text-xs font-bold text-brand-rust hover:underline cursor-pointer"
+                                            >
+                                                <Sparkles className="size-3" />
+                                                Switch to Auto-Generate
+                                            </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="space-y-1.5">
+                                                <Label htmlFor="password" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
+                                                    NEW PASSWORD *
+                                                </Label>
+                                                <div className="relative">
+                                                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
+                                                    <Input
+                                                        id="password"
+                                                        type="password"
+                                                        value={data.password}
+                                                        onChange={(e) => setData('password', e.target.value)}
+                                                        placeholder="Minimum 8 characters"
+                                                        className="h-11 rounded-xl bg-background pl-11 text-sm font-medium"
+                                                    />
+                                                </div>
+                                                {errors.password && (
+                                                    <p className="text-[11px] font-bold text-red-500 ml-0.5 uppercase tracking-wider">{errors.password}</p>
+                                                )}
+                                            </div>
+
+                                            <div className="space-y-1.5">
+                                                <Label htmlFor="password_confirmation" className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-muted-foreground ml-0.5">
+                                                    CONFIRM NEW PASSWORD *
+                                                </Label>
+                                                <div className="relative">
+                                                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
+                                                    <Input
+                                                        id="password_confirmation"
+                                                        type="password"
+                                                        value={data.password_confirmation}
+                                                        onChange={(e) => setData('password_confirmation', e.target.value)}
+                                                        placeholder="Repeat new password"
+                                                        className="h-11 rounded-xl bg-background pl-11 text-sm font-medium"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Email Dispatch Checkbox */}
+                                        <div className="pt-2 border-t border-border/50">
+                                            <label className="flex items-start gap-3 cursor-pointer group">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={sendCredentialsEmail}
+                                                    onChange={(e) => setSendCredentialsEmail(e.target.checked)}
+                                                    className="size-4 mt-0.5 rounded border-border text-brand-rust focus:ring-brand-rust/20 cursor-pointer"
+                                                />
+                                                <div className="space-y-0.5">
+                                                    <span className="text-xs font-bold text-foreground group-hover:text-brand-rust transition-colors flex items-center gap-1.5">
+                                                        <Send className="size-3.5 text-muted-foreground" />
+                                                        Send login credentials & portal access instructions via email immediately
+                                                    </span>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        The user ({user.email}) will receive an official notification with their new credentials and dashboard login link.
+                                                    </p>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
                         {/* Footer Action Buttons */}
                         <div className="flex items-center justify-end gap-5 pt-8 border-t border-border/50">
                             <Link
-                                href={return_url || '/admin/users'}
+                                href={return_url || "/admin/users"}
                                 className="px-6 py-3 rounded-xl text-xs font-extrabold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
                             >
                                 CANCEL

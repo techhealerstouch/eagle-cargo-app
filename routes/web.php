@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PublicScheduleAndRateController;
 use App\Http\Controllers\SenderCalendarController;
 
 
@@ -41,9 +42,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
-Route::get('/', function () {
-    return inertia('welcome');
-})->name('welcome');
+Route::get('/', [PublicScheduleAndRateController::class, 'welcome'])->name('welcome');
 
 Route::get('/uploads/{path}', function (string $path) {
     $relativePath = ltrim($path, '/');
@@ -231,7 +230,7 @@ Route::get('/bookings/{booking}', function ($booking) {
 
 // Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
 Route::inertia('/about', 'marketing/about')->name('about');
-Route::inertia('/services', 'marketing/services')->name('services');
+Route::get('/services', [PublicScheduleAndRateController::class, 'services'])->name('services');
 Route::inertia('/faq', 'marketing/faq')->name('faq');
 Route::get('/contact', function (\App\Services\SettingsService $settingsService) {
     if (\Illuminate\Support\Facades\Auth::check() && \Illuminate\Support\Facades\Auth::user()->role === \App\Enums\Role::Sender) {
@@ -386,6 +385,9 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::post('batches/{batch}/tracking-phase', [BatchController::class, 'bulkUpdateTrackingPhase'])
             ->middleware('throttle:admin-mutations')
             ->name('batches.bulkUpdateTrackingPhase');
+        Route::patch('batches/{batch}/quick-update', [BatchController::class, 'quickUpdate'])
+            ->middleware('throttle:admin-mutations')
+            ->name('batches.quickUpdate');
         Route::get('batches/{batch}/available-boxes', [BatchController::class, 'availableBoxes'])->name('batches.availableBoxes');
     });
 
@@ -500,6 +502,7 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::post('/runsheet/{runsheet}/notes', [PickerController::class, 'storePickupNote'])->middleware('throttle:ops-scan')->name('picker.runsheet.notes.store');
         Route::post('/runsheet/{runsheet}/start', [PickerController::class, 'startRunsheet'])->middleware('throttle:ops-scan')->name('picker.runsheet.start');
         Route::post('/runsheet/{runsheet}/complete', [PickerController::class, 'completeRunsheet'])->middleware('throttle:ops-scan')->name('picker.runsheet.complete');
+        Route::post('/runsheet/{runsheet}/initialize-warehouse-drop', [PickerController::class, 'initializeWarehouseDrop'])->middleware('throttle:ops-scan')->name('picker.runsheet.initialize-warehouse-drop');
         Route::get('/runsheet/{runsheet}/payment/{booking}', [PickerController::class, 'paymentConsole'])->name('picker.runsheet.payment');
         Route::post('/runsheet/{runsheet}/record-payment', [PickerController::class, 'recordPayment'])->middleware('throttle:payments')->name('picker.runsheet.record-payment');
         Route::post('/runsheet/{runsheet}/collect-boxes', [PickerController::class, 'collectBoxes'])->middleware('throttle:ops-scan')->name('picker.runsheet.collect-boxes');
@@ -514,6 +517,7 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
     Route::middleware(['role:warehouse,admin,super_admin'])->prefix('warehouse')->group(function () {
         Route::get('/dashboard', [WarehouseController::class, 'dashboard'])->name('warehouse.dashboard');
         Route::post('/receive', [WarehouseController::class, 'receiveBox'])->middleware('throttle:ops-scan')->name('warehouse.receive');
+        Route::post('/runsheet/{runsheet}/verify-drop', [WarehouseController::class, 'verifyDriverDrop'])->middleware('throttle:ops-scan')->name('warehouse.runsheet.verify-drop');
         Route::post('/load', [WarehouseController::class, 'loadBox'])->middleware('throttle:ops-scan')->name('warehouse.load');
         Route::post('/load-batch', [WarehouseController::class, 'loadBatch'])->middleware('throttle:ops-scan')->name('warehouse.load-batch');
         Route::post('/unload', [WarehouseController::class, 'unloadBox'])->middleware('throttle:ops-scan')->name('warehouse.unload');

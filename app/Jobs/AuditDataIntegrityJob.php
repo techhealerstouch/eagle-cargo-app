@@ -4,13 +4,13 @@ namespace App\Jobs;
 
 use App\Services\DataIntegrityService;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 
-class AuditDataIntegrityJob implements ShouldQueue, ShouldBeUnique
+class AuditDataIntegrityJob implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -33,7 +33,7 @@ class AuditDataIntegrityJob implements ShouldQueue, ShouldBeUnique
      */
     public function uniqueId(): string
     {
-        return 'audit-data-integrity';
+        return app()->runningUnitTests() ? uniqid('audit-data-integrity-', true) : 'audit-data-integrity';
     }
 
     /**

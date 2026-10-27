@@ -197,7 +197,7 @@ export const DeclarationAlert: React.FC<DeclarationAlertProps> = ({
                                                 <div className="space-y-1">
                                                     <p className="font-semibold text-zinc-900 dark:text-zinc-100">Check the sender's email inbox</p>
                                                     <p className="text-zinc-500 dark:text-zinc-400">
-                                                        Search for <strong>"Love Balikbayan Cargo"</strong> or <strong>"Booking Confirmation"</strong>. Check the spam or junk folder if you can't find it.
+                                                        Search for <strong>"Eagle Express Cargo"</strong> or <strong>"Booking Confirmation"</strong>. Check the spam or junk folder if you can't find it.
                                                     </p>
                                                     {senderEmailMasked && (
                                                         <div className="inline-flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20 font-medium">

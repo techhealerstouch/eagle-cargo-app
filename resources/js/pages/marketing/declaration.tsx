@@ -1,8 +1,9 @@
-import { Head, useForm, Link, usePage } from '@inertiajs/react';
-import { ArrowRight, CheckCircle2, ChevronLeft, FileText, Package2, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import React, { useEffect, useRef, useState } from 'react';
+import { Head, useForm, Link } from '@inertiajs/react';
+import { ArrowRight, CheckCircle2, ChevronLeft, FileText, Package2, Plus, ShieldCheck, Trash2, AlertTriangle, AlertCircle, Sparkles, Info } from 'lucide-react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import SignaturePad from 'signature_pad';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 
 import DeclarationTerms from '@/components/common/declaration-terms';
 import AppLayout from '@/layouts/app-layout';
@@ -10,7 +11,7 @@ import MarketingLayout from '@/layouts/marketing-layout';
 import PhoneInput from '@/components/ui/PhoneInput';
 import { validatePhone, COUNTRIES } from '@/lib/countries';
 import declarationRoutes from '@/routes/track/declaration';
-import type { BreadcrumbItem, SharedData } from '@/types';
+import type { BreadcrumbItem } from '@/types';
 
 interface Booking {
     id: number;
@@ -191,7 +192,7 @@ function StepIndicator({ step }: { step: number }) {
     ];
 
     return (
-        <div className="grid grid-cols-2 gap-2 sm:gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {steps.map((item) => {
                 const isActive = step === item.id;
                 const isDone = step > item.id;
@@ -199,27 +200,29 @@ function StepIndicator({ step }: { step: number }) {
                 return (
                     <div
                         key={item.id}
-                        className={`rounded-2xl border p-2.5 sm:p-4 transition-all ${isActive
-                                ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/20'
+                        className={`rounded-2xl border p-4 transition-all ${
+                            isActive
+                                ? 'border-sky-500 bg-sky-50'
                                 : isDone
-                                    ? 'border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20'
-                                    : 'border-zinc-200 bg-white dark:bg-zinc-900'
-                            }`}
+                                    ? 'border-emerald-300 bg-emerald-50'
+                                    : 'border-zinc-200 bg-white'
+                        }`}
                     >
-                        <div className="flex items-center gap-2 sm:gap-3">
+                        <div className="flex items-center gap-3">
                             <div
-                                className={`flex h-7 w-7 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full text-xs sm:text-sm font-bold ${isDone
+                                className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold ${
+                                    isDone
                                         ? 'bg-emerald-500 text-white'
                                         : isActive
                                             ? 'bg-sky-500 text-white'
                                             : 'bg-zinc-200 text-zinc-600'
-                                    }`}
+                                }`}
                             >
-                                {isDone ? <CheckCircle2 className="size-3.5 sm:size-4" /> : item.id}
+                                {isDone ? <CheckCircle2 className="size-4" /> : item.id}
                             </div>
-                            <div className="min-w-0">
-                                <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-zinc-500 truncate">Step {item.id} of 2</p>
-                                <p className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">{item.label}</p>
+                            <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Step {item.id} of 2</p>
+                                <p className="text-sm font-semibold text-zinc-900">{item.label}</p>
                             </div>
                         </div>
                     </div>
@@ -264,19 +267,11 @@ function Field({
     );
 }
 
-export default function DeclarationForm({
-    booking,
-    declarationSettings,
-    isGuest = false,
-    guestToken,
-    guestAccessQuery = null,
-}: Props) {
-    const { auth } = usePage<SharedData>().props;
-    const isUserGuest = isGuest || !auth?.user;
-    const Layout = isUserGuest ? MarketingLayout : AppLayout;
+export default function DeclarationForm({ booking, declarationSettings, isGuest = false, guestToken = null, guestAccessQuery = null }: Props) {
+    const Layout = isGuest ? MarketingLayout : AppLayout;
 
     const breadcrumbs: BreadcrumbItem[] = [
-        { title: 'Track', href: '/track' },
+        { title: isGuest ? 'Track' : 'Dashboard', href: isGuest ? '/track' : '/dashboard' },
         { title: 'Declaration', href: '#' },
     ];
 
@@ -324,6 +319,8 @@ export default function DeclarationForm({
             boxes: initialBoxes,
             certification: {
                 no_prohibited: Boolean(savedDeclaration.certification?.no_prohibited),
+                no_commercial: Boolean(savedDeclaration.certification?.no_commercial ?? true),
+                qfwa_acknowledged: Boolean(savedDeclaration.certification?.qfwa_acknowledged ?? true),
                 agree_terms: Boolean(savedDeclaration.certification?.agree_terms),
                 signed_by: initialSignedBy,
                 date_signed: toDateInputValue(savedDeclaration.certification?.date_signed) || todayIsoDate(),
@@ -331,6 +328,31 @@ export default function DeclarationForm({
             },
         },
     });
+
+    // Real-time calculation of total declared value across all boxes for BOC CMTA compliance
+    const totalDeclaredAud = useMemo(() => {
+        let sum = 0;
+        (data.declaration_data.boxes || []).forEach((box: any) => {
+            (box.items || []).forEach((item: any) => {
+                const v = parseFloat(item.value || '0');
+                const q = parseInt(item.qty || '1', 10);
+                if (!isNaN(v) && v > 0) {
+                    sum += v * (isNaN(q) || q < 1 ? 1 : q);
+                }
+            });
+        });
+        return Math.round(sum * 100) / 100;
+    }, [data.declaration_data.boxes]);
+
+    const totalDeclaredPhp = useMemo(() => {
+        return Math.round(totalDeclaredAud * 37.5);
+    }, [totalDeclaredAud]);
+
+    const bocLimitPhp = 150000;
+    const bocLimitAud = Math.round(bocLimitPhp / 37.5); // ~$4,000 AUD
+    const exemptionPercentage = Math.min(100, Math.round((totalDeclaredPhp / bocLimitPhp) * 100));
+    const isOverLimit = totalDeclaredPhp > bocLimitPhp;
+    const isApproachingLimit = !isOverLimit && totalDeclaredPhp >= 100000;
 
     const clearError = (key: string) => {
         if (!localErrors[key]) {
@@ -665,6 +687,14 @@ export default function DeclarationForm({
                         nextErrors[`boxes.${boxIndex}.items.${itemIndex}.qty`] = 'Quantity must be greater than 0.';
                     }
                 }
+
+                const valStr = toText(item.value).trim();
+                if (valStr !== '') {
+                    const val = Number(valStr);
+                    if (!Number.isFinite(val) || val < 0) {
+                        nextErrors[`boxes.${boxIndex}.items.${itemIndex}.value`] = 'Value must be a non-negative number.';
+                    }
+                }
             });
         });
 
@@ -685,6 +715,14 @@ export default function DeclarationForm({
 
         if (!cert.no_prohibited) {
             nextErrors['certification.no_prohibited'] = 'Please confirm prohibited items declaration.';
+        }
+
+        if (!cert.no_commercial) {
+            nextErrors['certification.no_commercial'] = 'Please certify that items are personal effects and not for commercial resale.';
+        }
+
+        if (!cert.qfwa_acknowledged) {
+            nextErrors['certification.qfwa_acknowledged'] = 'Please confirm the duty-free exemption acknowledgment.';
         }
 
         if (!cert.agree_terms) {
@@ -754,11 +792,11 @@ export default function DeclarationForm({
 
         transform((payload) => ({
             ...payload,
+            token: guestToken || payload.token || '',
             declaration_data: nextDeclaration,
-            token: guestToken || '',
         }));
 
-        post(`${declarationRoutes.save().url}${guestAccessQuery || ""}`, {
+        post(`${declarationRoutes.save().url}${guestAccessQuery || ''}`, {
             onError: () => toast.error('Submission failed. Please check your details and try again.'),
             onFinish: () => {
                 transform((payload) => payload);
@@ -771,7 +809,7 @@ export default function DeclarationForm({
     const certification = data.declaration_data.certification;
 
     return (
-        <Layout {...(!isUserGuest ? { breadcrumbs } : {})}>
+        <Layout breadcrumbs={breadcrumbs}>
             <Head title={declarationSettings.headerText} />
 
             <div className="min-h-screen bg-zinc-50">
@@ -901,8 +939,100 @@ export default function DeclarationForm({
                                 <section className="space-y-5 rounded-3xl border border-zinc-200 bg-white p-6 md:p-8">
                                     <SectionHeader title="Boxes — Recipients & Packing List" subtitle="Each box has its own recipient and packing list for customs declaration." />
 
+                                    {/* BOC Duty-Free Exemption Monitor */}
+                                    <div className={cn(
+                                        "rounded-2xl border p-5 transition-all",
+                                        isOverLimit 
+                                            ? "bg-rose-50/70 border-rose-300"
+                                            : isApproachingLimit
+                                                ? "bg-amber-50/70 border-amber-300"
+                                                : "bg-gradient-to-r from-emerald-50/70 to-blue-50/70 border-emerald-200/80"
+                                    )}>
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                                            <div className="flex items-center gap-2.5">
+                                                <div className={cn(
+                                                    "size-9 rounded-xl flex items-center justify-center shrink-0",
+                                                    isOverLimit ? "bg-rose-100 text-rose-700" : isApproachingLimit ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
+                                                )}>
+                                                    <ShieldCheck className="size-5" />
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-xs sm:text-sm font-bold text-zinc-900">
+                                                        BOC Duty-Free Personal Effects Allowance Monitor
+                                                    </h4>
+                                                    <p className="text-[11px] text-zinc-500">
+                                                        Republic Act No. 10863 (CMTA) &bull; Up to ₱150,000 PHP annual duty-free exemption
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {/* Live Total Declared */}
+                                            <div className="text-left sm:text-right">
+                                                <span className="block text-[10px] uppercase font-bold text-zinc-400 tracking-wider">
+                                                    Total Declared Cargo Value
+                                                </span>
+                                                <span className="text-base sm:text-lg font-extrabold text-zinc-900">
+                                                    ${totalDeclaredAud.toFixed(2)} AUD <span className="text-xs font-semibold text-zinc-500">(≈ ₱{totalDeclaredPhp.toLocaleString()} PHP)</span>
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Progress Bar */}
+                                        <div className="space-y-1.5">
+                                            <div className="flex items-center justify-between text-[11px]">
+                                                <span className="font-semibold text-zinc-600">
+                                                    {isOverLimit 
+                                                        ? `Exceeds ₱150k exemption by ₱${(totalDeclaredPhp - bocLimitPhp).toLocaleString()} PHP`
+                                                        : `₱${(bocLimitPhp - totalDeclaredPhp).toLocaleString()} PHP (~$${(bocLimitAud - totalDeclaredAud).toFixed(0)} AUD) remaining in tax-free ceiling`
+                                                    }
+                                                </span>
+                                                <span className="font-bold text-zinc-700">
+                                                    {exemptionPercentage}% of ₱150,000
+                                                </span>
+                                            </div>
+                                            <div className="w-full h-2 rounded-full bg-zinc-200/80 overflow-hidden">
+                                                <div 
+                                                    className={cn(
+                                                        "h-full rounded-full transition-all duration-300",
+                                                        isOverLimit ? "bg-rose-500" : isApproachingLimit ? "bg-amber-500" : "bg-emerald-500"
+                                                    )}
+                                                    style={{ width: `${exemptionPercentage}%` }}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        {/* Advisory Alert */}
+                                        <div className="mt-3 flex items-start gap-2 text-xs">
+                                            {isOverLimit ? (
+                                                <AlertTriangle className="size-4 text-rose-600 shrink-0 mt-0.5" />
+                                            ) : isApproachingLimit ? (
+                                                <AlertCircle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                                            ) : (
+                                                <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                                            )}
+                                            <span className={cn(
+                                                "text-[11px] leading-relaxed",
+                                                isOverLimit ? "text-rose-700 font-medium" : isApproachingLimit ? "text-amber-800" : "text-zinc-600"
+                                            )}>
+                                                {isOverLimit
+                                                    ? "Items exceeding the ₱150,000 PHP annual duty-free threshold may be assessed for standard Philippine Bureau of Customs duties and VAT upon arrival at Port of Manila."
+                                                    : isApproachingLimit
+                                                        ? "You are nearing the ₱150,000 duty-free personal effects ceiling. Ensure all declared goods are for personal/household use and not commercial quantities."
+                                                        : "Under Philippine Customs Administrative Order (CAO) 01-2016, your personal goods are 100% tax and duty-free exempt as long as individual items are not in commercial quantities."
+                                                }
+                                            </span>
+                                        </div>
+                                    </div>
+
                                     <div className="space-y-5">
-                                        {data.declaration_data.boxes.map((box: any, boxIndex: number) => (
+                                        {data.declaration_data.boxes.map((box: any, boxIndex: number) => {
+                                            const boxDeclaredVal = (box.items || []).reduce((acc: number, it: any) => {
+                                                const v = parseFloat(it.value || '0');
+                                                const q = parseInt(it.qty || '1', 10);
+                                                return acc + (isNaN(v) || v <= 0 ? 0 : v * (isNaN(q) || q < 1 ? 1 : q));
+                                            }, 0);
+
+                                            return (
                                             <div key={box.id} className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 md:p-5">
                                                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                                                     <div className="flex items-center gap-2">
@@ -916,7 +1046,9 @@ export default function DeclarationForm({
                                                         ) : null}
                                                     </div>
 
-                                                    {/* Box removal disabled to adopt booking data */}
+                                                    <span className="text-xs font-bold text-zinc-600">
+                                                        Box Declared: ${boxDeclaredVal.toFixed(2)} AUD
+                                                    </span>
                                                 </div>
 
                                                 {/* Per-box Recipient */}
@@ -967,23 +1099,24 @@ export default function DeclarationForm({
 
                                                 {/* Packing List */}
                                                 <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-zinc-600">📦 Packing List</p>
-                                                <div className="hidden grid-cols-[1fr_1fr_120px_44px] gap-3 px-1 pb-2 md:grid">
+                                                <div className="hidden grid-cols-[1fr_1fr_90px_110px_44px] gap-3 px-1 pb-2 md:grid">
                                                     <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Item Name</p>
-                                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Description</p>
-                                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 text-center">Qty (Optional)</p>
+                                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Description / Category</p>
+                                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 text-center">Qty</p>
+                                                    <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 text-right">Est. Value ($ AUD)</p>
                                                     <p />
                                                 </div>
 
                                                 <div className="space-y-3">
                                                     {box.items.map((item: any, itemIndex: number) => (
-                                                        <div key={item.id} className="grid grid-cols-1 gap-3 rounded-xl border border-zinc-200 bg-white p-3 md:grid-cols-[1fr_1fr_120px_44px] md:items-start md:border-0 md:bg-transparent md:p-0">
+                                                        <div key={item.id} className="grid grid-cols-1 gap-3 rounded-xl border border-zinc-200 bg-white p-3 md:grid-cols-[1fr_1fr_90px_110px_44px] md:items-start md:border-0 md:bg-transparent md:p-0">
                                                             <div className="flex flex-col">
                                                                 <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 md:hidden">Item Name</label>
                                                                 <input
                                                                     className={baseInputClass}
                                                                     value={item.name}
                                                                     onChange={(event) => updateItemField(boxIndex, itemIndex, 'name', event.target.value)}
-                                                                    placeholder="e.g. Shoes"
+                                                                    placeholder="e.g. Shoes, Clothes, Canned Goods"
                                                                     title="Item Name"
                                                                 />
                                                                 {getError(`boxes.${boxIndex}.items.${itemIndex}.name`) ? (
@@ -1026,7 +1159,7 @@ export default function DeclarationForm({
                                                             </div>
 
                                                             <div>
-                                                                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 md:hidden">Qty (Optional)</label>
+                                                                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 md:hidden">Qty</label>
                                                                 <input
                                                                     type="number"
                                                                     min={1}
@@ -1035,10 +1168,30 @@ export default function DeclarationForm({
                                                                     onChange={(event) => updateItemField(boxIndex, itemIndex, 'qty', event.target.value)}
                                                                     aria-label={`Quantity for box ${boxIndex + 1}, item ${itemIndex + 1}`}
                                                                     title="Item quantity"
-                                                                    placeholder="Optional"
+                                                                    placeholder="1"
                                                                 />
                                                                 {getError(`boxes.${boxIndex}.items.${itemIndex}.qty`) ? (
                                                                     <p className="mt-1 text-xs font-medium text-red-600">{getError(`boxes.${boxIndex}.items.${itemIndex}.qty`)}</p>
+                                                                ) : null}
+                                                            </div>
+
+                                                            <div>
+                                                                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 md:hidden">Est. Value ($ AUD)</label>
+                                                                <div className="relative">
+                                                                    <span className="absolute left-3 top-3.5 text-xs text-zinc-400 font-semibold">$</span>
+                                                                    <input
+                                                                        type="number"
+                                                                        step="0.01"
+                                                                        min="0"
+                                                                        className={`${baseInputClass} pl-6 text-right`}
+                                                                        value={item.value || ''}
+                                                                        onChange={(event) => updateItemField(boxIndex, itemIndex, 'value', event.target.value)}
+                                                                        placeholder="0.00"
+                                                                        title="Estimated item value in AUD"
+                                                                    />
+                                                                </div>
+                                                                {getError(`boxes.${boxIndex}.items.${itemIndex}.value`) ? (
+                                                                    <p className="mt-1 text-xs font-medium text-red-600">{getError(`boxes.${boxIndex}.items.${itemIndex}.value`)}</p>
                                                                 ) : null}
                                                             </div>
 
@@ -1065,7 +1218,8 @@ export default function DeclarationForm({
                                                     <Plus className="size-4" /> Add Item
                                                 </button>
                                             </div>
-                                        ))}
+                                        );
+                                    })}
                                     </div>
 
                                     <p className="text-sm text-zinc-500">
@@ -1148,7 +1302,7 @@ export default function DeclarationForm({
                                                 className={baseInputClass}
                                                 value={shipment.office_date}
                                                 disabled
-                                                onChange={() => { }}
+                                                onChange={() => {}}
                                                 title="Date Processed"
                                             />
                                         </Field>
@@ -1199,6 +1353,42 @@ export default function DeclarationForm({
                                     </label>
                                     {getError('certification.no_prohibited') ? (
                                         <p className="text-xs font-medium text-red-600">{getError('certification.no_prohibited')}</p>
+                                    ) : null}
+
+                                    <label className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50/50 p-4">
+                                        <input
+                                            type="checkbox"
+                                            className="mt-1 h-4 w-4 rounded text-amber-600 focus:ring-amber-500"
+                                            checked={certification.no_commercial}
+                                            onChange={(event) => setCertificationField('no_commercial', event.target.checked)}
+                                        />
+                                        <div className="space-y-0.5">
+                                            <span className="text-sm font-medium text-amber-950">Non-Commercial Contents Certification (BOC CMTA RA 10863)</span>
+                                            <p className="text-xs text-amber-900/80">
+                                                I certify that all contents in this shipment are personal and household effects, pasalubong, or gifts, and are NOT in commercial quantities for resale or barter.
+                                            </p>
+                                        </div>
+                                    </label>
+                                    {getError('certification.no_commercial') ? (
+                                        <p className="text-xs font-medium text-red-600">{getError('certification.no_commercial')}</p>
+                                    ) : null}
+
+                                    <label className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50/50 p-4">
+                                        <input
+                                            type="checkbox"
+                                            className="mt-1 h-4 w-4 rounded text-sky-600 focus:ring-sky-500"
+                                            checked={certification.qfwa_acknowledged}
+                                            onChange={(event) => setCertificationField('qfwa_acknowledged', event.target.checked)}
+                                        />
+                                        <div className="space-y-0.5">
+                                            <span className="text-sm font-medium text-sky-950">QFWA ₱150,000 Duty-Free Privilege Acknowledgment</span>
+                                            <p className="text-xs text-sky-900/80">
+                                                I confirm that I am a Qualified Filipino While Abroad (QFWA / OFW / dual citizen / non-resident Filipino) claiming personal effects duty-free exemption up to ₱150,000 PHP per calendar year (max 3 avails/year) under CAO 01-2016 / CMO 18-2018.
+                                            </p>
+                                        </div>
+                                    </label>
+                                    {getError('certification.qfwa_acknowledged') ? (
+                                        <p className="text-xs font-medium text-red-600">{getError('certification.qfwa_acknowledged')}</p>
                                     ) : null}
 
                                     <label className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-4">

@@ -1,3 +1,4 @@
+import React, { useMemo } from 'react';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { Save, ArrowLeft, Building2 } from 'lucide-react';
 import Heading from '@/components/common/heading';
@@ -6,7 +7,7 @@ import { validatePhone } from '@/lib/countries';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
 
-export default function EditRecipient({ recipient, areas }: any) {
+export default function EditRecipient({ recipient, areas, provinces = [] }: any) {
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Home', href: '/dashboard' },
         { title: 'Recipients', href: '/recipients' },
@@ -26,22 +27,47 @@ export default function EditRecipient({ recipient, areas }: any) {
         area_id: recipient.area_id || '',
     });
 
+    const handleProvinceChange = (provinceName: string) => {
+        const prov = (provinces || []).find((p: any) => p.name?.toLowerCase().trim() === provinceName.toLowerCase().trim());
+        setData((prev: any) => ({
+            ...prev,
+            province: provinceName,
+            ...(prov?.area_id ? { area_id: String(prov.area_id) } : {}),
+        }));
+    };
+
+    const resolvedAreaName = useMemo(() => {
+        if (data.area_id) {
+            const found = (areas || []).find((a: any) => a.id.toString() === data.area_id.toString());
+            if (found) return found.name;
+        }
+        return recipient?.area?.name || '';
+    }, [data.area_id, areas, recipient]);
+
     const submit = (e: React.FormEvent) => {
         e.preventDefault();
         clearErrors();
 
-        const phoneError = validatePhone(data.phone_number, 'Phone Number', 'PH');
-        if (phoneError) {
-            setError('phone_number', phoneError);
-            return;
+        let hasErrors = false;
+
+        if (data.phone_number) {
+            const phoneError = validatePhone(data.phone_number, 'Phone Number', 'PH');
+            if (phoneError) {
+                setError('phone_number', phoneError);
+                hasErrors = true;
+            }
         }
 
         if (data.secondary_phone_number) {
-            const secPhoneError = validatePhone(data.secondary_phone_number, 'Secondary Phone', 'PH');
-            if (secPhoneError) {
-                setError('secondary_phone_number', secPhoneError);
-                return;
+            const secondaryPhoneError = validatePhone(data.secondary_phone_number, 'Secondary Phone Number', 'PH');
+            if (secondaryPhoneError) {
+                setError('secondary_phone_number', secondaryPhoneError);
+                hasErrors = true;
             }
+        }
+
+        if (hasErrors) {
+            return;
         }
 
         put(`/recipients/${recipient.id}`);
@@ -86,16 +112,6 @@ export default function EditRecipient({ recipient, areas }: any) {
                                     {errors.name && <p className="mt-2 text-sm text-red-600">{errors.name}</p>}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Email Address</label>
-                                    <input
-                                        type="email"
-                                        className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-rust focus:border-brand-rust outline-none transition-all"
-                                        value={data.email}
-                                        onChange={(e) => setData('email', e.target.value)}
-                                    />
-                                    {errors.email && <p className="mt-2 text-sm text-red-600">{errors.email}</p>}
-                                </div>
-                                <div>
                                     <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Primary Phone Number</label>
                                     <PhoneInput
                                         value={data.phone_number}
@@ -105,15 +121,26 @@ export default function EditRecipient({ recipient, areas }: any) {
                                     {errors.phone_number && <p className="mt-2 text-sm text-red-600">{errors.phone_number}</p>}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">
-                                        Secondary Phone Number <span className="text-zinc-400 font-normal text-xs">(Optional)</span>
-                                    </label>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300">Secondary Contact Number</label>
+                                        <span className="text-[10px] text-zinc-400 font-medium">Optional</span>
+                                    </div>
                                     <PhoneInput
                                         value={data.secondary_phone_number}
                                         onChange={(val) => setData('secondary_phone_number', val)}
                                         defaultCountryCode="PH"
                                     />
                                     {errors.secondary_phone_number && <p className="mt-2 text-sm text-red-600">{errors.secondary_phone_number}</p>}
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Email Address</label>
+                                    <input
+                                        type="email"
+                                        className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-rust focus:border-brand-rust outline-none transition-all"
+                                        value={data.email}
+                                        onChange={(e) => setData('email', e.target.value)}
+                                    />
+                                    {errors.email && <p className="mt-2 text-sm text-red-600">{errors.email}</p>}
                                 </div>
                             </div>
                         </div>
@@ -147,13 +174,29 @@ export default function EditRecipient({ recipient, areas }: any) {
                                 
                                 <div>
                                     <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2">Province *</label>
-                                    <input
-                                        type="text"
-                                        className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-rust focus:border-brand-rust outline-none transition-all"
-                                        value={data.province}
-                                        onChange={(e) => setData('province', e.target.value)}
-                                        required
-                                    />
+                                    {provinces && provinces.length > 0 ? (
+                                        <select
+                                            className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-rust focus:border-brand-rust outline-none transition-all cursor-pointer"
+                                            value={data.province}
+                                            onChange={(e) => handleProvinceChange(e.target.value)}
+                                            required
+                                        >
+                                            <option value="" disabled>Select Province...</option>
+                                            {provinces.map((prov: any) => (
+                                                <option key={prov.id} value={prov.name}>
+                                                    {prov.name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-rust focus:border-brand-rust outline-none transition-all"
+                                            value={data.province}
+                                            onChange={(e) => handleProvinceChange(e.target.value)}
+                                            required
+                                        />
+                                    )}
                                     {errors.province && <p className="mt-2 text-sm text-red-600">{errors.province}</p>}
                                 </div>
                                 
@@ -169,25 +212,15 @@ export default function EditRecipient({ recipient, areas }: any) {
                                 </div>
 
                                 <div>
-                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2 flex items-center gap-2">
-                                        Service Area *
+                                    <label className="block text-sm font-bold text-zinc-700 dark:text-zinc-300 mb-2 flex items-center justify-between">
+                                        <span>Delivery Zone</span>
+                                        <span className="text-xs font-normal text-zinc-400">Auto-resolved from province</span>
                                     </label>
-                                    <div className="relative">
-                                        <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
-                                        <select
-                                            className="w-full pl-10 pr-4 py-3 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm focus:ring-2 focus:ring-brand-rust focus:border-brand-rust outline-none transition-all appearance-none"
-                                            value={data.area_id}
-                                            onChange={(e) => setData('area_id', e.target.value)}
-                                            required
-                                        >
-                                            <option value="" disabled>Select Area</option>
-                                            {areas.map((area: any) => (
-                                                <option key={area.id} value={area.id}>
-                                                    {area.name}
-                                                </option>
-                                            ))}
-                                        </select>
+                                    <div className="flex items-center gap-2 px-4 py-3 bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                                        <Building2 className="w-4 h-4 text-zinc-400 shrink-0" />
+                                        <span>{resolvedAreaName || 'Assigned automatically'}</span>
                                     </div>
+                                    <input type="hidden" name="area_id" value={data.area_id} />
                                     {errors.area_id && <p className="mt-2 text-sm text-red-600">{errors.area_id}</p>}
                                 </div>
 

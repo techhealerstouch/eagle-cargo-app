@@ -16,6 +16,8 @@ import {
     Loader2,
     MapPin,
     Package,
+    Pencil,
+    RefreshCw,
     Search,
     ShieldCheck,
     Ship,
@@ -29,6 +31,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { toast } from 'sonner';
+import UpdateBatchModal from '@/components/admin/update-batch-modal';
 import ConfirmModal from '@/components/common/confirm-modal';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
@@ -98,6 +101,8 @@ interface BatchData {
     seal_number: string | null;
     container_size: string | null;
     vessel_name: string | null;
+    voyage_number?: string | null;
+    eta_at?: string | null;
     status: string;
     current_box_count: number;
     capacity_boxes: number | null;
@@ -232,6 +237,7 @@ export default function BatchShow({
     const [showBatchFullConfirm, setShowBatchFullConfirm] = useState(false);
     const [isArrivalModalOpen, setIsArrivalModalOpen] = useState(false);
     const [isQuickTrackingModalOpen, setIsQuickTrackingModalOpen] = useState(false);
+    const [isUpdateBatchModalOpen, setIsUpdateBatchModalOpen] = useState(false);
     const [isBulkLoadModalOpen, setIsBulkLoadModalOpen] = useState(false);
     const [bulkTrackingNumbers, setBulkTrackingNumbers] = useState('');
     const [skippedReasonsToShow, setSkippedReasonsToShow] = useState<string[] | null>(null);
@@ -640,6 +646,15 @@ export default function BatchShow({
 
                         <button
                             type="button"
+                            onClick={() => setIsUpdateBatchModalOpen(true)}
+                            className="h-11 px-5 rounded-xl bg-brand-rust text-white text-xs font-semibold uppercase tracking-wide shadow-md shadow-brand-rust/10 transition-all hover:bg-brand-rust/90 active:scale-[0.98] flex items-center gap-2 cursor-pointer"
+                        >
+                            <RefreshCw className="size-3.5" />
+                            Update Batch
+                        </button>
+
+                        <button
+                            type="button"
                             onClick={() => setShowBatchFullConfirm(true)}
                             className="h-11 px-5 rounded-xl bg-brand-warm/20 border border-border text-brand-rust text-xs font-semibold uppercase tracking-wide transition-all hover:bg-brand-warm/30 active:scale-[0.98] flex items-center gap-2 cursor-pointer"
                         >
@@ -649,8 +664,9 @@ export default function BatchShow({
 
                         <Link
                             href={`/admin/batches/${batch.id}/edit`}
-                            className="h-11 px-6 rounded-xl bg-brand-rust text-white text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all hover:bg-brand-rust/90 active:scale-[0.98] flex items-center gap-2"
+                            className="h-11 px-5 rounded-xl border border-border bg-card text-brand-text-mid text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all hover:bg-brand-warm/20 hover:text-brand-text active:scale-[0.98] flex items-center gap-2"
                         >
+                            <Pencil className="size-3.5" />
                             Edit Batch
                         </Link>
                     </div>
@@ -1551,6 +1567,13 @@ export default function BatchShow({
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            <UpdateBatchModal
+                isOpen={isUpdateBatchModalOpen}
+                onClose={() => setIsUpdateBatchModalOpen(false)}
+                batch={batch}
+                trackingPhases={trackingPhases}
+            />
         </AppLayout>
     );
 }

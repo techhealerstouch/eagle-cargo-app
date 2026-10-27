@@ -4,8 +4,6 @@ import { AlertTriangle, Trash2, RefreshCw } from 'lucide-react';
 import BulkUpdateModal, { BulkUpdateAction } from '@/components/common/bulk-update-modal';
 import { Label } from '@/components/ui/label';
 
-import type { TrackingPhaseOption } from '@/components/admin/batch-tracking-modal';
-
 interface BatchBulkUpdateModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -14,7 +12,6 @@ interface BatchBulkUpdateModalProps {
     filters: any;
     onSuccessCallback?: () => void;
     batchesData?: BatchData[];
-    trackingPhases?: TrackingPhaseOption[];
 }
 
 interface BatchData {
@@ -30,70 +27,6 @@ export default function BatchBulkUpdateModal(props: BatchBulkUpdateModalProps) {
     const singleBatch = !props.isGlobalSelection && props.selectedIds.length === 1 ? selectedBatches[0] : undefined;
 
     const actions: BulkUpdateAction[] = [
-        {
-            id: 'tracking_phase',
-            label: 'Update Tracking Milestone',
-            icon: RefreshCw,
-            description: 'Advance all boxes across the selected batches to a container milestone (e.g. Under Customs Clearance, Released by BOC, Received at Manila Warehouse).',
-            endpoint: '/admin/batches/bulk-update-tracking-phase',
-            getPayload: (formState) => ({
-                tracking_phase: formState.tracking_phase,
-                description: formState.description || undefined,
-                status_filter: props.filters?.status || undefined,
-            }),
-            renderForm: (formState, setFormState) => {
-                const availablePhases = (props.trackingPhases ?? []).filter(
-                    (phase) => phase.value !== 'delivered'
-                );
-
-                return (
-                    <div className="space-y-4">
-                        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
-                            {props.isGlobalSelection
-                                ? 'Applying milestone to all batches matching current filters.'
-                                : singleBatch
-                                    ? `Applying milestone to Batch ${singleBatch.batch_number}.`
-                                    : `Applying milestone to ${props.selectedIds.length} selected batches.`}
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="batch-bulk-tracking-phase" className="text-xs font-semibold text-brand-text">
-                                Target Container Milestone
-                            </Label>
-                            <select
-                                id="batch-bulk-tracking-phase"
-                                className="flex h-10 w-full rounded-xl border border-border bg-card px-3 text-xs text-brand-text focus:outline-none focus:ring-2 focus:ring-ring shadow-2xs transition-all"
-                                value={formState.tracking_phase || ''}
-                                onChange={(e) => setFormState({ ...formState, tracking_phase: e.target.value })}
-                            >
-                                <option value="" disabled>Select container milestone...</option>
-                                {availablePhases.map((phase) => (
-                                    <option key={phase.value} value={phase.value}>
-                                        {phase.group ? `${phase.group} - ` : ''}{phase.label}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                        <div className="space-y-2">
-                            <Label htmlFor="batch-bulk-tracking-desc" className="text-xs font-semibold text-brand-text">
-                                Description / Notes (Optional)
-                            </Label>
-                            <input
-                                id="batch-bulk-tracking-desc"
-                                type="text"
-                                maxLength={500}
-                                placeholder="Example: Cleared by BOC and released to local warehouse..."
-                                value={formState.description || ''}
-                                onChange={(e) => setFormState({ ...formState, description: e.target.value })}
-                                className="flex h-10 w-full rounded-xl border border-border bg-card px-3 text-xs text-brand-text focus:outline-none focus:ring-2 focus:ring-ring shadow-2xs transition-all"
-                            />
-                        </div>
-                        <p className="text-[11px] text-zinc-500">
-                            ℹ️ Note: Batches that are still Open or Loading, or already past the selected milestone, will be skipped automatically.
-                        </p>
-                    </div>
-                );
-            },
-        },
         {
             id: 'status',
             label: 'Update Status / Reopen',

@@ -3,7 +3,6 @@ import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { GlobalLoadingSpinner } from '@/components/common/global-loading-spinner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { initializeTheme } from '@/hooks/use-appearance';
@@ -39,7 +38,6 @@ createInertiaApp({
             <StrictMode>
                 <TooltipProvider delayDuration={0}>
                     <App {...props} />
-                    <GlobalLoadingSpinner />
                     <Toaster position="top-right" richColors expand={true} />
                 </TooltipProvider>
             </StrictMode>,

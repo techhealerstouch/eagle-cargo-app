@@ -1,5 +1,5 @@
 import { Head, useForm, usePage } from '@inertiajs/react';
-import { Clock, ArrowUpCircle, CheckCircle, Truck, Warehouse, MapPin, X, Phone, MessageSquare, Eraser, Navigation, Camera, Loader2, Edit3 } from 'lucide-react';
+import { Clock, ArrowUpCircle, CheckCircle, Truck, Warehouse, MapPin, X, Phone, MessageSquare, Eraser, Navigation, Camera, Loader2, Edit3, UserCheck, ShieldCheck } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import SignaturePad from 'signature_pad';
 import { toast } from 'sonner';
@@ -42,10 +42,17 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
     const appName = settings?.appName || 'App';
     const [isConsoleOpen, setIsConsoleOpen] = useState(false);
 
+    const defaultRecipientName = box.recipient?.name ||
+        [box.recipient?.first_name, box.recipient?.last_name].filter(Boolean).join(' ') || '';
+
     const { data, setData, post, processing, errors } = useForm({
         _method: 'put',
         tracking_step_key: trackingSteps.length > 0 ? trackingSteps[0].key : '',
         courier_notes: '',
+        recipient_name: defaultRecipientName,
+        recipient_relationship: 'Consignee (Self)',
+        recipient_id_type: 'National ID (PhilSys)',
+        recipient_id_number: '',
         delivery_proof: null as File | null,
         signature: '', // Base64 signature
     });
@@ -258,7 +265,7 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                 </div>
 
                 {/* Timeline */}
-                <div className="card p-8 bg-white/70 backdrop-blur-xl">
+                <div className="card p-8 bg-white/70 backdrop-blur-xl dark:bg-zinc-900/50">
                     <h3 className="font-serif text-xl font-bold text-brand-text mb-8 flex items-center gap-3">
                         <Clock className="size-6 text-brand-secondary" />
                         Tracking History
@@ -318,31 +325,32 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
 
                 {/* Tracking Console Modal */}
                 <Dialog open={isConsoleOpen} onOpenChange={setIsConsoleOpen}>
-                    <DialogContent className="max-w-5xl p-6 lg:p-12 border-none bg-transparent shadow-none ring-0 focus:ring-0 overflow-y-auto overflow-x-hidden max-h-[95vh] custom-scrollbar [&>button]:hidden">
+                    <DialogContent className="w-[94vw] sm:max-w-4xl lg:max-w-5xl p-0 border-none bg-transparent shadow-none ring-0 focus:ring-0 overflow-y-auto overflow-x-hidden max-h-[92vh] custom-scrollbar [&>button]:hidden">
                         <DialogTitle className="sr-only">Tracking Console</DialogTitle>
                         <DialogDescription className="sr-only">Update tracking state for this box</DialogDescription>
-                        <div className={`card relative border-none bg-white p-8 lg:p-14 lg:px-16 shadow-[0_0_100px_rgba(0,0,0,0.2)] transition-all duration-500 overflow-hidden ${
-                            data.tracking_step_key === 'delivered' ? 'ring-8 ring-emerald-500/10' :
-                            data.tracking_step_key === 'cancelled' ? 'ring-8 ring-red-500/10' :
-                            'ring-8 ring-brand-navy/5'
+                        <div className={`card relative border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-10 lg:p-12 shadow-2xl transition-all duration-500 overflow-hidden rounded-3xl ${
+                            data.tracking_step_key === 'delivered' ? 'ring-8 ring-emerald-500/10 border-emerald-500' :
+                            data.tracking_step_key === 'cancelled' ? 'ring-8 ring-rose-500/10 border-rose-500' :
+                            'ring-8 ring-slate-100 dark:ring-slate-800/40'
                         }`}>
                             {/* Background Status Indicator */}
-                            <div className="absolute -bottom-4 -right-4 text-[100px] lg:text-[140px] font-black text-brand-text/[0.015] italic font-serif pointer-events-none uppercase leading-none select-none truncate">
+                            <div className="absolute -bottom-4 -right-4 text-[100px] lg:text-[140px] font-black text-slate-900/[0.02] dark:text-white/[0.02] italic font-serif pointer-events-none uppercase leading-none select-none truncate">
                                 {humanize(data.tracking_step_key || box.status)}
                             </div>
 
                             <div className="relative z-10">
-                                <div className="flex items-center justify-between mb-10">
+                                <div className="flex items-center justify-between mb-8 sm:mb-10">
                                     <div className="space-y-1">
-                                        <h3 className="font-serif text-3xl font-bold text-brand-text flex items-center gap-3">
-                                            <Navigation className="size-8 text-brand-navy" />
+                                        <h3 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white flex items-center gap-3">
+                                            <Navigation className="size-7 sm:size-8 text-amber-500" />
                                             Tracking Console
                                         </h3>
-                                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground">Logistics • Box {box.tracking_number}</p>
+                                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">Logistics • Box {box.tracking_number}</p>
                                     </div>
                                     <button
                                         onClick={() => setIsConsoleOpen(false)}
-                                        className="size-10 rounded-full bg-brand-warm/50 flex items-center justify-center text-brand-text hover:bg-brand-warm transition-all"
+                                        aria-label="Close tracking console"
+                                        className="size-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                                     >
                                         <X className="size-5" />
                                     </button>
@@ -354,7 +362,7 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                         <div className="lg:col-span-6 space-y-8">
                                             {/* Step 1: Quick Actions */}
                                             <div className="space-y-4">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-brand-text-mid ml-1">Step 1: Select Status</label>
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 ml-1">Step 1: Select Status</label>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                     {trackingSteps?.map((step) => {
                                                         const isSelected = data.tracking_step_key === step.key;
@@ -365,13 +373,13 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                                                 key={step.key}
                                                                 type="button"
                                                                 onClick={() => setData('tracking_step_key', step.key)}
-                                                                className={`flex items-center gap-4 p-4 rounded-lg border-2 transition-all group ${
+                                                                className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all group ${
                                                                     isSelected
-                                                                        ? 'border-brand-navy bg-brand-navy text-white shadow-md ring-4 ring-brand-navy/10'
-                                                                        : 'border-brand-sand/20 bg-brand-warm/10 text-brand-text hover:border-brand-navy/30 hover:bg-white'
+                                                                        ? 'border-slate-900 dark:border-brand-primary bg-slate-900 dark:bg-brand-primary text-white shadow-xl ring-8 ring-slate-900/10 dark:ring-brand-primary/10'
+                                                                        : 'border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/50 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800'
                                                                 }`}
                                                             >
-                                                                <div className={`p-2 rounded-md ${isSelected ? 'bg-brand-secondary/20 text-brand-secondary' : 'bg-white text-brand-text-mid shadow-xs'}`}>
+                                                                <div className={`p-2 rounded-xl ${isSelected ? 'bg-white/20 text-white' : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 shadow-xs'}`}>
                                                                     <StepIcon className="size-5 transition-transform group-hover:scale-110" />
                                                                 </div>
                                                                 <span className="text-[10px] font-black uppercase tracking-widest text-left leading-tight">{step.label}</span>
@@ -381,9 +389,106 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                                 </div>
                                             </div>
 
-                                            {/* Step 2: Observations */}
+                                             {/* POD Recipient Verification Section (Active when Delivered) */}
+                                            {data.tracking_step_key === 'delivered' && (
+                                                <div className="space-y-4 rounded-2xl border-2 border-emerald-500/30 bg-emerald-50/20 dark:bg-emerald-950/20 p-4 animate-in fade-in duration-300">
+                                                    <div className="flex items-center justify-between">
+                                                        <label className="text-[10px] font-black uppercase tracking-widest text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                                                            <UserCheck className="size-3.5 text-emerald-600" />
+                                                            Step 2: Proof of Delivery (POD) Identification
+                                                        </label>
+                                                        {defaultRecipientName && data.recipient_name !== defaultRecipientName && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setData('recipient_name', defaultRecipientName);
+                                                                    setData('recipient_relationship', 'Consignee (Self)');
+                                                                }}
+                                                                className="text-[9px] font-bold text-emerald-700 underline hover:text-emerald-900"
+                                                            >
+                                                                Reset to Consignee
+                                                            </button>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1">
+                                                                Received By (Full Name) *
+                                                            </label>
+                                                            <input
+                                                                type="text"
+                                                                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
+                                                                value={data.recipient_name}
+                                                                onChange={(e) => setData('recipient_name', e.target.value)}
+                                                                placeholder="Full name of person receiving box"
+                                                            />
+                                                        </div>
+
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1">
+                                                                Relationship to Consignee
+                                                            </label>
+                                                            <select
+                                                                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
+                                                                value={data.recipient_relationship}
+                                                                onChange={(e) => setData('recipient_relationship', e.target.value)}
+                                                            >
+                                                                <option value="Consignee (Self)">Consignee (Self / Addressee)</option>
+                                                                <option value="Spouse">Spouse / Partner</option>
+                                                                <option value="Parent">Parent (Mother / Father)</option>
+                                                                <option value="Child">Child (Son / Daughter)</option>
+                                                                <option value="Sibling">Sibling (Brother / Sister)</option>
+                                                                <option value="Authorized Relative">Authorized Relative / Household</option>
+                                                                <option value="House Helper / Staff">House Helper / Caretaker</option>
+                                                                <option value="Building Security / Guard">Building Security / Front Desk</option>
+                                                                <option value="Neighbor">Neighbor</option>
+                                                                <option value="Other">Other Authorized Person</option>
+                                                            </select>
+                                                        </div>
+
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1">
+                                                                Government ID Type
+                                                            </label>
+                                                            <select
+                                                                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
+                                                                value={data.recipient_id_type}
+                                                                onChange={(e) => setData('recipient_id_type', e.target.value)}
+                                                            >
+                                                                <option value="National ID (PhilSys)">National ID (PhilSys)</option>
+                                                                <option value="Driver's License (LTO)">Driver's License (LTO)</option>
+                                                                <option value="UMID / SSS / GSIS">UMID / SSS / GSIS</option>
+                                                                <option value="Philippine Passport">Philippine Passport</option>
+                                                                <option value="Postal ID / Barangay ID">Postal ID / Barangay ID</option>
+                                                                <option value="Senior Citizen / PWD ID">Senior Citizen / PWD ID</option>
+                                                                <option value="Company / School ID">Company / School ID</option>
+                                                                <option value="Other Valid Govt ID">Other Valid Govt ID</option>
+                                                                <option value="None / Verbal Confirmation">None / Verbal Confirmation</option>
+                                                            </select>
+                                                        </div>
+
+                                                        <div>
+                                                            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300 mb-1">
+                                                                ID Number / Last 4 Digits
+                                                            </label>
+                                                            <input
+                                                                type="text"
+                                                                className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 focus:outline-none"
+                                                                value={data.recipient_id_number}
+                                                                onChange={(e) => setData('recipient_id_number', e.target.value)}
+                                                                placeholder="e.g. 1234 or ID number"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Step 3: Observations */}
                                             <div className="space-y-4">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-brand-text-mid ml-1">Step 2: Observations</label>
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 ml-1">
+                                                    {data.tracking_step_key === 'delivered' ? 'Step 3: Courier Observations' : 'Step 2: Observations'}
+                                                </label>
                                                 <div className="flex flex-wrap gap-2 mb-4">
                                                     {[
                                                         { label: 'Recipient Not Home', icon: '🏠' },
@@ -398,8 +503,8 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                                             onClick={() => setData('courier_notes', chip.label)}
                                                             className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${
                                                                 data.courier_notes === chip.label
-                                                                    ? 'bg-brand-secondary text-white border-brand-secondary shadow-md'
-                                                                    : 'bg-brand-warm/30 border-brand-sand/20 text-brand-text hover:bg-brand-warm'
+                                                                    ? 'bg-amber-500 dark:bg-amber-600 text-slate-950 dark:text-white border-amber-500 shadow-md font-black'
+                                                                    : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-750'
                                                             }`}
                                                         >
                                                             <span className="mr-1.5">{chip.icon}</span>
@@ -413,7 +518,7 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                                     onChange={(e) => setData('courier_notes', e.target.value)}
                                                     placeholder="Add custom delivery observations..."
                                                     rows={2}
-                                                    className="w-full rounded-lg border-2 border-brand-sand/30 bg-brand-warm/10 p-4 text-sm font-medium focus:border-brand-navy focus:ring-4 focus:ring-brand-navy/5 transition-all outline-none"
+                                                    className="w-full rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 p-4 text-sm font-medium text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-brand-primary dark:focus:border-brand-primary focus:ring-8 focus:ring-brand-primary/10 transition-all outline-none"
                                                 />
                                             </div>
                                         </div>
@@ -422,11 +527,13 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                         <div className="lg:col-span-6 space-y-8">
                                             {/* Photo Booth */}
                                             <div className="space-y-4">
-                                                <label className="text-[10px] font-black uppercase tracking-widest text-brand-text-mid ml-1">Step 3: Delivery Proof</label>
+                                                <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 ml-1">
+                                                    {data.tracking_step_key === 'delivered' ? 'Step 4: Delivery Proof Photo' : 'Step 3: Delivery Proof'}
+                                                </label>
                                                 {isDeliveryStep && !hasStoredProof && (
-                                                    <p className="text-xs font-bold text-amber-700">A proof photo or file is required before submitting Delivered.</p>
+                                                    <p className="text-xs font-bold text-amber-700 dark:text-amber-400">A proof photo or file is required before submitting Delivered.</p>
                                                 )}
-                                                <div className="group relative aspect-video rounded-xl border-4 border-dashed border-brand-sand/50 bg-brand-warm/10 flex flex-col items-center justify-center overflow-hidden transition-all hover:border-brand-navy/30">
+                                                <div className="group relative aspect-video rounded-2xl border-4 border-dashed border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center overflow-hidden transition-all hover:border-slate-400 dark:hover:border-slate-600">
                                                     {data.delivery_proof ? (
                                                         <div className="relative w-full h-full">
                                                             <img
@@ -438,17 +545,18 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                                                 type="button"
                                                                 onClick={() => setData('delivery_proof', null)}
                                                                 title="Remove delivery proof photo"
-                                                                className="absolute top-4 right-4 size-10 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md hover:bg-red-600 transition-all active:scale-90"
+                                                                aria-label="Remove delivery proof photo"
+                                                                className="absolute top-4 right-4 size-10 rounded-full bg-rose-500 text-white flex items-center justify-center shadow-md hover:bg-rose-600 transition-all active:scale-90"
                                                             >
                                                                 <X className="size-5" />
                                                             </button>
                                                         </div>
                                                     ) : (
                                                         <>
-                                                            <div className="p-4 rounded-lg bg-white shadow-xs mb-3 group-hover:scale-110 transition-transform">
-                                                                <Camera className="size-8 text-brand-navy" />
+                                                            <div className="p-4 rounded-2xl bg-white dark:bg-slate-750 text-slate-800 dark:text-slate-100 shadow-md mb-3 group-hover:scale-110 transition-transform">
+                                                                <Camera className="size-8 text-amber-500" />
                                                             </div>
-                                                            <p className="text-[10px] font-black uppercase tracking-widest text-brand-text">Snap Proof Photo</p>
+                                                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-900 dark:text-white">Snap Proof Photo</p>
                                                             <input
                                                                 type="file"
                                                                 accept="image/*"
@@ -460,38 +568,38 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                                         </>
                                                     )}
                                                 </div>
-                                                {errors.delivery_proof && <p className="text-xs font-bold text-red-600">{errors.delivery_proof}</p>}
+                                                {errors.delivery_proof && <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{errors.delivery_proof}</p>}
                                             </div>
 
                                             {/* Signature Pad */}
                                             {data.tracking_step_key === 'delivered' && (
                                                 <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-500">
                                                     <div className="flex items-center justify-between">
-                                                        <label className="text-[10px] font-black uppercase tracking-widest text-brand-text-mid ml-1">Step 4: Recipient Signature (Optional)</label>
+                                                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400 ml-1">Step 5: Recipient Signature (Optional)</label>
                                                         <button
                                                             type="button"
                                                             onClick={clearSignature}
-                                                            className="text-[9px] font-black uppercase tracking-widest text-brand-rust hover:text-red-600 transition-colors flex items-center gap-1"
+                                                            className="text-[9px] font-black uppercase tracking-widest text-rose-600 dark:text-rose-400 hover:text-rose-700 transition-colors flex items-center gap-1"
                                                         >
                                                             <Eraser className="size-3" />
                                                             Clear
                                                         </button>
                                                     </div>
-                                                    <div className="relative aspect-video rounded-[2rem] border-2 border-brand-sand bg-white shadow-inner overflow-hidden">
+                                                    <div className="relative aspect-video rounded-[2rem] border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-inner overflow-hidden">
                                                         <canvas
                                                             ref={canvasRef}
                                                             className="h-full w-full touch-none cursor-crosshair"
                                                         />
                                                         {!data.signature && (
-                                                            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center opacity-20">
+                                                            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center opacity-30 text-slate-500 dark:text-slate-400">
                                                                 <Edit3 className="size-10 mb-2" />
                                                                 <p className="text-[10px] font-black uppercase tracking-[0.3em]">Sign Record</p>
                                                             </div>
                                                         )}
                                                     </div>
-                                                    {errors.signature && <p className="text-xs font-bold text-red-600">{errors.signature}</p>}
+                                                    {errors.signature && <p className="text-xs font-bold text-rose-600 dark:text-rose-400">{errors.signature}</p>}
                                                     {!hasStoredSignature && !data.signature && (
-                                                        <p className="text-xs font-bold text-slate-500">Leave blank if recipient is unavailable. Marked as unsigned by receiver.</p>
+                                                        <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Leave blank if recipient is unavailable. Marked as unsigned by receiver.</p>
                                                     )}
                                                 </div>
                                             )}
@@ -499,14 +607,14 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                                     </div>
 
                                     {/* Sticky Final Submission */}
-                                    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 bg-gradient-to-t from-white via-white/90 to-transparent">
+                                    <div className="absolute bottom-0 left-0 right-0 pt-6 pb-2 bg-gradient-to-t from-white via-white/95 to-transparent dark:from-slate-900 dark:via-slate-900/95 dark:to-transparent">
                                         <button
                                             type="submit"
                                             disabled={isSubmitDisabled}
                                             className={`w-full flex items-center justify-center gap-4 px-10 py-5 rounded-[2rem] text-sm font-black uppercase tracking-[0.2em] shadow-2xl transition-all active:scale-95 disabled:opacity-30 ${
-                                                data.tracking_step_key === 'delivered' ? 'bg-emerald-600 text-white shadow-emerald-600/30' :
-                                                data.tracking_step_key === 'cancelled' ? 'bg-red-600 text-white shadow-red-600/30' :
-                                                'bg-brand-navy text-white shadow-brand-navy/30'
+                                                data.tracking_step_key === 'delivered' ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30' :
+                                                data.tracking_step_key === 'cancelled' ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30' :
+                                                'bg-slate-900 dark:bg-brand-primary text-white shadow-slate-900/30 dark:shadow-brand-primary/30'
                                             }`}
                                         >
                                             {processing ? <Loader2 className="size-5 animate-spin" /> : <CheckCircle className="size-5" />}
@@ -520,7 +628,7 @@ export default function BoxDetail({ box, canUpdate, trackingSteps }: { box: any;
                 </Dialog>
 
                 {/* Sticky Mobile Action Bar */}
-                <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-2xl border-t border-brand-sand/30 p-6 lg:hidden animate-in slide-in-from-bottom-full duration-500">
+                <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-2xl border-t border-slate-200/80 dark:border-slate-800 p-6 lg:hidden animate-in slide-in-from-bottom-full duration-500">
                     <button
                         onClick={() => setIsConsoleOpen(true)}
                         disabled={!canUpdate}

@@ -1,6 +1,6 @@
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { AlertCircle, Anchor, ArrowRight, BarChart3, Box, Boxes, Camera, CheckCircle2, Clock, History, ListFilter, Loader2, QrCode, Ruler, ShieldAlert, Truck, Zap, FileWarning, Wifi, WifiOff, RefreshCw, Upload, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { AlertCircle, Anchor, ArrowRight, BarChart3, Box, Boxes, Camera, CheckCircle2, ChevronDown, ChevronUp, Clock, History, ListFilter, Loader2, MapPin, Phone, QrCode, Ruler, ShieldAlert, Truck, Warehouse, Zap, FileWarning, Wifi, WifiOff, RefreshCw, Upload, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -93,7 +93,30 @@ interface RecentScan {
     timeLabel: string;
 }
 
-export default function WarehouseDashboard({ activeBatches, readyToLoad, exceptionBoxes, stats, filters, receiveSteps, loadSteps }: { activeBatches: Batch[]; readyToLoad: Box[]; exceptionBoxes: Box[]; stats: Stats; filters: Filters; receiveSteps: any[]; loadSteps: any[] }) {
+interface PendingDriverDropBox {
+    id: number;
+    tracking_number: string;
+    status: string;
+    box_type: string;
+}
+
+interface PendingDriverDrop {
+    id: number;
+    runsheet_number: string;
+    area_description?: string;
+    picker_name: string;
+    picker_mobile?: string;
+    warehouse_drop_initiated_at: string;
+    warehouse_drop_bay?: string | null;
+    warehouse_drop_notes?: string | null;
+    warehouse_drop_photo_path?: string | null;
+    total_boxes: number;
+    pending_boxes: number;
+    received_boxes: number;
+    boxes: PendingDriverDropBox[];
+}
+
+export default function WarehouseDashboard({ activeBatches, readyToLoad, exceptionBoxes, stats, filters, receiveSteps, loadSteps, pendingDriverDrops = [] }: { activeBatches: Batch[]; readyToLoad: Box[]; exceptionBoxes: Box[]; stats: Stats; filters: Filters; receiveSteps: any[]; loadSteps: any[]; pendingDriverDrops?: PendingDriverDrop[] }) {
     const page = usePage();
     const queryString = page.url.split('?')[1] ?? '';
     const params = new URLSearchParams(queryString);
@@ -126,6 +149,50 @@ export default function WarehouseDashboard({ activeBatches, readyToLoad, excepti
     const [showBatchDetailsModal, setShowBatchDetailsModal] = useState(false);
     const [batchDetails, setBatchDetails] = useState<any>(null);
     const [isLoadingBatchDetails, setIsLoadingBatchDetails] = useState(false);
+    const [selectedDropForVerification, setSelectedDropForVerification] = useState<PendingDriverDrop | null>(null);
+    const [verificationLocation, setVerificationLocation] = useState('');
+    const [isVerifyingDrop, setIsVerifyingDrop] = useState(false);
+    const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
+    const [expandedDropIds, setExpandedDropIds] = useState<Record<number, boolean>>({});
+
+    const toggleDropExpanded = (dropId: number) => {
+        setExpandedDropIds((prev) => ({
+            ...prev,
+            [dropId]: !prev[dropId],
+        }));
+    };
+
+    const openVerifyModal = (drop: PendingDriverDrop) => {
+        setSelectedDropForVerification(drop);
+        setVerificationLocation(drop.warehouse_drop_bay ? `Bay ${drop.warehouse_drop_bay}` : 'Warehouse Intake');
+    };
+
+    const handleConfirmVerifyDrop = () => {
+        if (!selectedDropForVerification) return;
+        setIsVerifyingDrop(true);
+
+        router.post(
+            `/warehouse/runsheet/${selectedDropForVerification.id}/verify-drop`,
+            {
+                warehouse_location: verificationLocation.trim() || (selectedDropForVerification.warehouse_drop_bay ? `Bay ${selectedDropForVerification.warehouse_drop_bay}` : 'Warehouse Intake'),
+            },
+            {
+                preserveScroll: true,
+                onSuccess: () => {
+                    toast.success(`Drop-off for runsheet ${selectedDropForVerification.runsheet_number} verified and received!`);
+                    setSelectedDropForVerification(null);
+                },
+                onError: (errors) => {
+                    const msg = (Object.values(errors)[0] || 'Failed to verify drop-off.') as string;
+                    toast.error(msg);
+                },
+                onFinish: () => {
+                    setIsVerifyingDrop(false);
+                },
+            }
+        );
+    };
+
     const [, setScanError] = useState('');
     const scannerRef = useRef<Html5Qrcode | null>(null);
     const scannerQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -1388,6 +1455,178 @@ export default function WarehouseDashboard({ activeBatches, readyToLoad, excepti
                             </div>
                         </section>
 
+                        {/* Inbound Driver Drop-Offs Queue */}
+                        {pendingDriverDrops && pendingDriverDrops.length > 0 && (
+                            <section className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="size-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500">
+                                            <Truck className="size-5" />
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h3 className="font-serif text-2xl font-medium text-brand-text tracking-tight">
+                                                    Inbound Driver Drop-Offs
+                                                </h3>
+                                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                                                    <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                                    {pendingDriverDrops.length} Awaiting Verification
+                                                </span>
+                                            </div>
+                                            <p className="text-xs font-medium text-brand-text-light mt-0.5">
+                                                Drivers have arrived at the depot and offloaded collected cargo into bays. Verify to accept into warehouse inventory.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-4">
+                                    {pendingDriverDrops.map((drop) => {
+                                        const isExpanded = !!expandedDropIds[drop.id];
+                                        const dropTime = new Date(drop.warehouse_drop_initiated_at).toLocaleTimeString([], {
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                        });
+
+                                        return (
+                                            <div
+                                                key={drop.id}
+                                                className="rounded-2xl border border-amber-500/30 bg-card p-5 sm:p-6 shadow-sm hover:border-amber-500/50 transition-all space-y-4"
+                                            >
+                                                {/* Top Bar: Driver Info, Bay, Status */}
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border">
+                                                    <div className="flex items-start sm:items-center gap-3.5">
+                                                        <div className="size-11 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-500 shrink-0">
+                                                            <Warehouse className="size-5" />
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <h4 className="font-semibold text-base text-brand-text">
+                                                                    {drop.runsheet_number}
+                                                                </h4>
+                                                                <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                                                    {drop.warehouse_drop_bay ? `Bay ${drop.warehouse_drop_bay}` : 'Unassigned Bay'}
+                                                                </span>
+                                                                <span className="text-xs text-brand-text-light flex items-center gap-1">
+                                                                    <Clock className="size-3" /> Dropped at {dropTime}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-3 mt-1 text-xs text-brand-text-mid flex-wrap">
+                                                                <span className="font-medium text-brand-text">Driver: {drop.picker_name}</span>
+                                                                {drop.picker_mobile && (
+                                                                    <a
+                                                                        href={`tel:${drop.picker_mobile}`}
+                                                                        className="inline-flex items-center gap-1 text-brand-rust hover:underline"
+                                                                    >
+                                                                        <Phone className="size-3" /> {drop.picker_mobile}
+                                                                    </a>
+                                                                )}
+                                                                {drop.area_description && (
+                                                                    <span className="text-brand-text-light">• {drop.area_description}</span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Verification Summary Badge & Actions */}
+                                                    <div className="flex items-center gap-2 sm:self-center">
+                                                        <div className="text-right sm:mr-2">
+                                                            <div className="text-xs font-bold text-amber-500">
+                                                                {drop.pending_boxes} to verify
+                                                            </div>
+                                                            <div className="text-[11px] text-brand-text-light">
+                                                                {drop.received_boxes} of {drop.total_boxes} received
+                                                            </div>
+                                                        </div>
+                                                        <Button
+                                                            type="button"
+                                                            onClick={() => openVerifyModal(drop)}
+                                                            className="bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl px-4 py-2 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                                                        >
+                                                            <CheckCircle2 className="size-4" />
+                                                            Verify & Accept All
+                                                        </Button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Driver Notes & Photo if present */}
+                                                {(drop.warehouse_drop_notes || drop.warehouse_drop_photo_path) && (
+                                                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 bg-brand-warm/10 p-3 rounded-xl border border-border text-xs">
+                                                        {drop.warehouse_drop_photo_path && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setPreviewPhotoUrl(drop.warehouse_drop_photo_path!)}
+                                                                className="relative group shrink-0 size-14 rounded-lg overflow-hidden border border-border bg-black/20 cursor-pointer"
+                                                                title="Click to view full photo"
+                                                            >
+                                                                <img
+                                                                    src={drop.warehouse_drop_photo_path}
+                                                                    alt="Drop Proof"
+                                                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                                                />
+                                                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                                                    <Camera className="size-4 text-white" />
+                                                                </div>
+                                                            </button>
+                                                        )}
+                                                        <div className="flex-1 min-w-0">
+                                                            <span className="font-semibold text-brand-text-mid uppercase tracking-wider text-[10px] block mb-0.5">
+                                                                Driver Drop-Off Notes:
+                                                            </span>
+                                                            <p className="text-brand-text italic">
+                                                                "{drop.warehouse_drop_notes || 'No specific notes provided.'}"
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Expandable Box List */}
+                                                <div className="pt-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleDropExpanded(drop.id)}
+                                                        className="flex items-center gap-1.5 text-xs font-semibold text-brand-text-mid hover:text-brand-text transition-colors cursor-pointer"
+                                                    >
+                                                        {isExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                                                        <span>{isExpanded ? 'Hide' : 'View'} Box Manifest ({drop.boxes.length} Boxes)</span>
+                                                    </button>
+
+                                                    {isExpanded && (
+                                                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 pt-2 border-t border-border">
+                                                            {drop.boxes.map((box) => (
+                                                                <div
+                                                                    key={box.id}
+                                                                    className="flex items-center justify-between p-2.5 rounded-lg bg-card border border-border/80 text-xs"
+                                                                >
+                                                                    <div className="min-w-0">
+                                                                        <p className="font-mono font-medium text-brand-text truncate">
+                                                                            {box.tracking_number}
+                                                                        </p>
+                                                                        <p className="text-[10px] text-brand-text-light truncate">
+                                                                            {box.box_type}
+                                                                        </p>
+                                                                    </div>
+                                                                    <span
+                                                                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                                            box.status === 'received_by_warehouse'
+                                                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                                                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                                                        }`}
+                                                                    >
+                                                                        {box.status === 'received_by_warehouse' ? 'Received' : 'Collected'}
+                                                                    </span>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+                        )}
+
                         {/* Inventory Table Section */}
                         <section className="space-y-6">
                             <div className="flex items-center justify-between">
@@ -2173,6 +2412,85 @@ export default function WarehouseDashboard({ activeBatches, readyToLoad, excepti
                         <Button type="button" onClick={() => setShowShortcutsModal(false)} className="rounded-xl px-5 h-9 text-xs font-bold bg-brand-primary text-white cursor-pointer">
                             Got it
                         </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal: Verify Inbound Driver Drop-Off */}
+            <Dialog open={!!selectedDropForVerification} onOpenChange={(open) => !open && setSelectedDropForVerification(null)}>
+                <DialogContent className="max-w-md bg-card border-border">
+                    <DialogHeader>
+                        <DialogTitle className="font-serif text-xl font-medium text-brand-text flex items-center gap-2">
+                            <Warehouse className="size-5 text-amber-500" />
+                            Verify Inbound Drop-Off
+                        </DialogTitle>
+                        <DialogDescription className="text-xs text-brand-text-light">
+                            Confirm acceptance of collected cargo from runsheet <span className="font-mono font-semibold text-brand-text">{selectedDropForVerification?.runsheet_number}</span> by driver <span className="font-semibold text-brand-text">{selectedDropForVerification?.picker_name}</span>.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-4 py-2">
+                        <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1">
+                            <div className="flex justify-between font-semibold text-amber-500">
+                                <span>Boxes to Receive:</span>
+                                <span>{selectedDropForVerification?.pending_boxes} boxes</span>
+                            </div>
+                            <p className="text-[11px] text-brand-text-light">
+                                All unreceived boxes on this runsheet will be marked as Received at Warehouse (received_by_branch), and the runsheet will be completed.
+                            </p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <Label htmlFor="verification_location" className="text-xs font-semibold text-brand-text-mid">
+                                Assign Warehouse Bay / Bin Location
+                            </Label>
+                            <Input
+                                id="verification_location"
+                                value={verificationLocation}
+                                onChange={(e) => setVerificationLocation(e.target.value)}
+                                placeholder="e.g. Bay 3 or Section B-2"
+                                className="h-10 text-xs bg-card border-border"
+                            />
+                            <p className="text-[11px] text-brand-text-light">
+                                This location will be saved on all received boxes for easy retrieval.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setSelectedDropForVerification(null)}
+                            disabled={isVerifyingDrop}
+                            className="text-xs cursor-pointer"
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            type="button"
+                            onClick={handleConfirmVerifyDrop}
+                            disabled={isVerifyingDrop}
+                            className="bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs cursor-pointer flex items-center gap-1.5"
+                        >
+                            {isVerifyingDrop ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+                            Confirm & Receive Cargo
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal: Photo Preview */}
+            <Dialog open={!!previewPhotoUrl} onOpenChange={(open) => !open && setPreviewPhotoUrl(null)}>
+                <DialogContent className="max-w-2xl bg-card border-border p-2">
+                    <div className="relative rounded-lg overflow-hidden bg-black flex items-center justify-center max-h-[80vh]">
+                        {previewPhotoUrl && (
+                            <img
+                                src={previewPhotoUrl}
+                                alt="Drop proof preview"
+                                className="max-h-[80vh] w-auto object-contain"
+                            />
+                        )}
                     </div>
                 </DialogContent>
             </Dialog>

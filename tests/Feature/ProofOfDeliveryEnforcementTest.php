@@ -13,14 +13,20 @@ use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Models\Runsheet;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ProofOfDeliveryEnforcementTest extends TestCase
 {
-    use RefreshDatabase;
+    use DatabaseTransactions;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+    }
 
     public function test_courier_cannot_mark_delivered_without_delivery_proof(): void
     {
@@ -46,7 +52,7 @@ class ProofOfDeliveryEnforcementTest extends TestCase
             ->put(route('courier.box.update', $box), [
                 'tracking_step_key' => 'delivered',
                 'courier_notes' => 'Delivered to recipient.',
-                'delivery_proof' => UploadedFile::fake()->image('proof.jpg'),
+                'delivery_proof' => UploadedFile::fake()->create('proof.pdf', 100, 'application/pdf'),
             ]);
 
         $response->assertSessionHas('success');
@@ -67,7 +73,7 @@ class ProofOfDeliveryEnforcementTest extends TestCase
             ->put(route('courier.box.update', $box), [
                 'tracking_step_key' => 'delivered',
                 'courier_notes' => 'Delivered to recipient.',
-                'delivery_proof' => UploadedFile::fake()->image('proof.jpg'),
+                'delivery_proof' => UploadedFile::fake()->create('proof.pdf', 100, 'application/pdf'),
                 'signature' => 'data:image/png;base64,'.base64_encode('signature'),
             ]);
 
@@ -81,6 +87,33 @@ class ProofOfDeliveryEnforcementTest extends TestCase
         $this->assertTrue(Storage::disk('public')->exists($box->signature_path));
     }
 
+    public function test_courier_records_recipient_id_and_relationship_in_delivery_audit_notes(): void
+    {
+        Storage::fake('public');
+        [$courier, $box] = $this->assignedCourierBox();
+
+        $response = $this->actingAs($courier)
+            ->put(route('courier.box.update', $box), [
+                'tracking_step_key' => 'delivered',
+                'recipient_name' => 'Maria Santos',
+                'recipient_relationship' => 'Spouse',
+                'recipient_id_type' => 'National ID (PhilSys)',
+                'recipient_id_number' => '4321',
+                'courier_notes' => 'Received at doorstep.',
+                'delivery_proof' => UploadedFile::fake()->create('proof.pdf', 100, 'application/pdf'),
+            ]);
+
+        $response->assertSessionHas('success');
+        $box->refresh();
+
+        $this->assertSame(BoxStatus::Delivered, $box->status);
+        $this->assertStringContainsString('Delivered to Maria Santos (Spouse) [ID: National ID (PhilSys) - 4321]', $box->courier_notes);
+
+        $latestUpdate = BoxUpdate::where('box_id', $box->id)->latest('id')->first();
+        $this->assertNotNull($latestUpdate);
+        $this->assertStringContainsString('Delivered to Maria Santos (Spouse) [ID: National ID (PhilSys) - 4321]', $latestUpdate->description);
+    }
+
     public function test_admin_can_deliver_without_override_reason_when_proof_uploaded(): void
     {
         Storage::fake('public');
@@ -91,7 +124,7 @@ class ProofOfDeliveryEnforcementTest extends TestCase
             ->post(route('admin.boxes.update-status', $box), [
                 'status' => BoxStatus::Delivered->value,
                 'courier_notes' => 'Delivered with proof.',
-                'delivery_proof' => UploadedFile::fake()->image('proof.jpg'),
+                'delivery_proof' => UploadedFile::fake()->create('proof.pdf', 100, 'application/pdf'),
             ]);
 
         $response->assertSessionHas('success');
@@ -173,6 +206,7 @@ class ProofOfDeliveryEnforcementTest extends TestCase
             'booking_id' => $booking->id,
             'status' => BoxStatus::Arrived,
         ]);
+        $runsheet->boxes()->attach($box->id);
 
         return [$courier, $box];
     }
@@ -200,6 +234,7 @@ class ProofOfDeliveryEnforcementTest extends TestCase
             'booking_id' => $booking->id,
             'status' => BoxStatus::Arrived,
         ]);
+        $runsheet->boxes()->attach($box->id);
 
         return [$courier, $box];
     }
@@ -217,7 +252,7 @@ class ProofOfDeliveryEnforcementTest extends TestCase
 
         return Box::factory()->create([
             'booking_id' => $booking->id,
-            'status' => BoxStatus::Arrived,
+            'status' => BoxStatus::ReceivedByWarehouse,
         ]);
     }
 }

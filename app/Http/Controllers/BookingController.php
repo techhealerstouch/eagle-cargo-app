@@ -131,6 +131,7 @@ class BookingController extends Controller
             'draftBooking' => $draftBooking,
             'sender' => $user ? $user->sender?->load('pickupZone') : null,
             'activePromotions' => $activePromotions,
+            'initialQuery' => $request->only(['suburb', 'postcode', 'state', 'pickup_zone_id', 'box_type_id', 'area_id', 'province']),
         ]);
     }
 
@@ -582,6 +583,7 @@ class BookingController extends Controller
             'draftBooking' => null,
             'sender' => $user->sender?->load('pickupZone'),
             'activePromotions' => $activePromotions,
+            
         ]);
     }
 

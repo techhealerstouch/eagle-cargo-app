@@ -671,7 +671,7 @@ export default function Dashboard({
                                             )}
 
                                             <Link
-                                                href={`/book?box_type_id=${calcBoxType}&area_id=${effectiveAreaId}&pickup_zone_id=${calcPickupZone}&province=${encodeURIComponent(selectedProvince?.name || '')}`}
+                                                href={`/book?box_type_id=${calcBoxType}&area_id=${effectiveAreaId}&pickup_zone_id=${calcPickupZone}&province=${encodeURIComponent(selectedProvince?.name || '')}&state=VIC`}
                                                 className="mt-4 w-full flex items-center justify-center gap-2 rounded-xl bg-brand-rust text-white py-2.5 text-xs font-bold hover:bg-brand-rust/90 transition-all active:scale-95 shadow-sm"
                                                 prefetch
                                             >

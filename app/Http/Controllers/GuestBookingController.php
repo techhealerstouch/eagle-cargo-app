@@ -69,6 +69,7 @@ class GuestBookingController extends Controller
             'savedRecipients' => [],
             'sender' => null,
             'isGuest' => true,
+            'initialQuery' => $request->only(['suburb', 'postcode', 'state', 'pickup_zone_id', 'box_type_id', 'area_id', 'province']),
         ]);
     }
 

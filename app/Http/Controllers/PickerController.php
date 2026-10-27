@@ -6,13 +6,16 @@ use App\Enums\BoxStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
+use App\Enums\TrackingPhase;
 use App\Http\Requests\Picker\RecordPaymentRequest;
 use App\Http\Requests\Picker\StorePickupNoteRequest;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\Invoice;
 use App\Models\Runsheet;
 use App\Models\SerialNumber;
+use App\Services\TrackingCacheService;
 use Carbon\Carbon;
 use App\Repositories\Contracts\BoxRepositoryInterface;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
@@ -85,7 +88,7 @@ class PickerController extends Controller
     {
         $user = Auth::user();
 
-        $runsheets = Runsheet::with(['bookings.boxes', 'bookings.sender'])
+        $runsheets = Runsheet::with(['bookings.boxes', 'bookings.sender', 'bookings.invoice'])
             ->where('picker_id', (int) $user->id)
             ->where('type', RunsheetType::Pickup->value)
             ->orderBy('scheduled_date', 'desc')
@@ -284,6 +287,67 @@ class PickerController extends Controller
         }
 
         return redirect()->back()->with('success', 'Pickup runsheet completed.');
+    }
+
+    public function initializeWarehouseDrop(Request $request, Runsheet $runsheet)
+    {
+        if (! $this->isAssignedToRunsheet($runsheet)) {
+            abort(403);
+        }
+
+        $request->validate([
+            'warehouse_drop_bay' => 'nullable|string|max:50',
+            'warehouse_drop_notes' => 'nullable|string|max:1000',
+            'warehouse_drop_photo' => 'nullable|image|max:10240',
+        ]);
+
+        $allBoxes = $runsheet->bookings()
+            ->with('boxes')
+            ->get()
+            ->flatMap(fn (Booking $b) => $b->boxes);
+
+        $collectedBoxes = $allBoxes->filter(fn (Box $box) => $box->status === BoxStatus::Collected);
+
+        if ($collectedBoxes->isEmpty()) {
+            return redirect()->back()->with('error', 'No collected boxes found on this runsheet to drop off.');
+        }
+
+        $photoPath = null;
+        if ($request->hasFile('warehouse_drop_photo')) {
+            $photoPath = $request->file('warehouse_drop_photo')->store('warehouse_drops', 'public');
+        }
+
+        DB::transaction(function () use ($runsheet, $request, $photoPath, $collectedBoxes) {
+            $runsheet->update([
+                'warehouse_drop_initiated_at' => now(),
+                'warehouse_drop_bay' => $request->warehouse_drop_bay,
+                'warehouse_drop_notes' => $request->warehouse_drop_notes,
+                'warehouse_drop_photo_path' => $photoPath ?? $runsheet->warehouse_drop_photo_path,
+            ]);
+
+            $pickerName = Auth::user()?->name ?? 'Driver';
+            $bayText = $request->warehouse_drop_bay ? " at {$request->warehouse_drop_bay}" : '';
+            $description = "Driver {$pickerName} arrived at warehouse and initiated drop-off{$bayText}.";
+            $location = 'Warehouse Intake' . ($request->warehouse_drop_bay ? " ({$request->warehouse_drop_bay})" : '');
+
+            foreach ($collectedBoxes as $box) {
+                BoxUpdate::create([
+                    'box_id' => $box->id,
+                    'status' => $box->status->value,
+                    'tracking_step_key' => TrackingPhase::ARRIVED_AT_WAREHOUSE->value,
+                    'tracking_phase' => TrackingPhase::ARRIVED_AT_WAREHOUSE->value,
+                    'description' => $description,
+                    'location' => $location,
+                    'updated_by' => Auth::id(),
+                ]);
+
+                app(TrackingCacheService::class)->forgetBox($box);
+            }
+        });
+
+        $count = $collectedBoxes->count();
+
+        return redirect()->back()->with('success', "Warehouse drop-off initiated for {$count} boxes! The intake team has been notified for inventory verification.");
     }
 
     public function paymentConsole(Runsheet $runsheet, Booking $booking)

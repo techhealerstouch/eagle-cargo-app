@@ -12,6 +12,7 @@ use App\Enums\TrackingPhase;
 use App\Http\Controllers\Controller;
 use App\Services\DeveloperAccess;
 use App\Http\Requests\Admin\StoreBatchRequest;
+use App\Http\Requests\Admin\QuickUpdateBatchRequest;
 use App\Http\Resources\Admin\BatchResource;
 use App\Models\Batch;
 use App\Models\Box;

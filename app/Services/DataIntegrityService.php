@@ -117,6 +117,20 @@ class DataIntegrityService
     {
         $bookings = Booking::whereIn('status', [BookingStatus::Confirmed->value, BookingStatus::Collected->value])
             ->where('declaration_form_status', 'missing')
+            ->where(function ($query) {
+                // False positive prevention: empty box supply orders without cargo boxes do not require customs declarations
+                $query->where(function ($q) {
+                    $q->whereNull('empty_box_count')
+                        ->orWhere('empty_box_count', '<=', 0);
+                })->orWhereHas('boxes');
+            })
+            ->where(function ($query) {
+                // Exclude bookings where boxes exist and all of them are cancelled
+                $query->doesntHave('boxes')
+                    ->orWhereHas('boxes', function ($boxQuery) {
+                        $boxQuery->where('status', '!=', BoxStatus::Cancelled->value);
+                    });
+            })
             ->get();
 
         foreach ($bookings as $booking) {
@@ -151,9 +165,21 @@ class DataIntegrityService
     public function checkOrphanBoxes(): int
     {
         // Boxes received more than 24 hours ago but not in a batch
-        $boxes = Box::where('status', BoxStatus::ReceivedByWarehouse->value)
+        // False positive prevention: Exclude boxes legitimately blocked from batch loading
+        // (unpaid booking, or active hold/damage)
+        $boxes = Box::with('booking')
+            ->where('status', BoxStatus::ReceivedByWarehouse->value)
             ->whereNull('batch_id')
             ->where('updated_at', '<=', now()->subHours(24))
+            ->where(function ($query) {
+                $query->whereDoesntHave('booking', function ($bq) {
+                    $bq->whereNotIn('payment_status', [
+                        PaymentStatus::Paid->value,
+                        PaymentStatus::CashCollected->value,
+                    ]);
+                });
+            })
+            ->whereNotIn('status', [BoxStatus::Held->value, BoxStatus::Damaged->value])
             ->get();
 
         foreach ($boxes as $box) {
@@ -190,6 +216,12 @@ class DataIntegrityService
     {
         $bookings = Booking::where('status', '!=', BookingStatus::Draft->value)
             ->where('status', '!=', BookingStatus::Cancelled->value)
+            ->where(function ($query) {
+                // False positive prevention: empty box supply deliveries have no cargo boxes
+                $query->whereNull('empty_box_count')
+                    ->orWhere('empty_box_count', '<=', 0);
+            })
+            ->where('booking_type', '!=', 'supply_only')
             ->doesntHave('boxes')
             ->get();
 
@@ -220,15 +252,26 @@ class DataIntegrityService
 
     public function checkStaleScans(): int
     {
-        $boxes = Box::with(['booking', 'updates' => fn ($query) => $query->latest()])
+        $boxes = Box::with(['booking', 'batch', 'updates' => fn ($query) => $query->latest()])
             ->whereIn('status', [
                 BoxStatus::Collected->value,
-                BoxStatus::ReceivedByWarehouse->value,
                 BoxStatus::LoadedToContainer->value,
                 BoxStatus::InTransit->value,
                 BoxStatus::Arrived->value,
                 BoxStatus::OutForDelivery->value,
             ])
+            ->where(function ($query) {
+                // False positive prevention: Boxes in ocean transit (sailed container) take weeks with no barcode scans
+                $query->whereNull('batch_id')
+                    ->orWhereDoesntHave('batch', function ($bq) {
+                        $bq->whereIn('status', [
+                            BatchStatus::Sailed->value,
+                            BatchStatus::Arrived->value,
+                            BatchStatus::UnderCustomsClearance->value,
+                            BatchStatus::ReleasedByBoc->value,
+                        ]);
+                    });
+            })
             ->where(function ($query) {
                 $query->whereHas('updates', function ($updates) {
                     $updates->where('created_at', '<=', now()->subHours($this->slaHours('arrived_sorting')));
@@ -358,13 +401,16 @@ class DataIntegrityService
 
     public function checkMissingWarehouseLocations(): int
     {
+        $graceHours = $this->slaHours('warehouse_intake_grace');
+
         $boxes = Box::with(['booking', 'updates' => fn ($query) => $query->latest()])
             ->where('status', BoxStatus::ReceivedByWarehouse->value)
             ->where(function ($query) {
                 $query->whereNull('warehouse_location')
                     ->orWhere('warehouse_location', '');
             })
-            ->get();
+            ->get()
+            ->filter(fn (Box $box) => $this->lastScanAt($box)?->lessThanOrEqualTo(now()->subHours($graceHours)));
 
         foreach ($boxes as $box) {
             $this->upsertBoxWarning(
@@ -383,16 +429,26 @@ class DataIntegrityService
 
     public function checkOverdueLoading(): int
     {
+        $thresholdHours = $this->slaHours('overdue_loading');
+
         $boxes = Box::with(['booking', 'updates' => fn ($query) => $query->latest()])
             ->where('status', BoxStatus::ReceivedByWarehouse->value)
             ->whereNull('batch_id')
+            ->where(function ($query) {
+                // False positive prevention: Exclude boxes legitimately blocked from loading due to unpaid status
+                $query->whereDoesntHave('booking', function ($bq) {
+                    $bq->whereNotIn('payment_status', [
+                        PaymentStatus::Paid->value,
+                        PaymentStatus::CashCollected->value,
+                    ]);
+                });
+            })
+            ->whereNotIn('status', [BoxStatus::Held->value, BoxStatus::Damaged->value])
             ->get()
-            ->filter(fn (Box $box) => $this->lastScanAt($box)?->lessThanOrEqualTo(now()->subHours($this->slaHours('overdue_loading'))));
+            ->filter(fn (Box $box) => $this->lastScanAt($box)?->lessThanOrEqualTo(now()->subHours($thresholdHours)));
 
         /** @var Box $box */
         foreach ($boxes as $box) {
-            $thresholdHours = $this->slaHours('overdue_loading');
-
             $this->upsertBoxWarning(
                 type: 'overdue_loading',
                 box: $box,
@@ -585,23 +641,24 @@ class DataIntegrityService
 
     public function checkDeliveryOverdue(): int
     {
-        $updates = BoxUpdate::with(['box.booking', 'box.updates' => fn ($query) => $query->latest()])
-            ->where('tracking_phase', TrackingPhase::OUT_FOR_DELIVERY->value)
-            ->where('created_at', '<=', now()->subHours($this->slaHours('delivery_overdue')))
-            ->whereHas('box', fn ($query) => $query->whereNotIn('status', [BoxStatus::Delivered->value, BoxStatus::Cancelled->value]))
-            ->latest()
+        $thresholdHours = $this->slaHours('delivery_overdue');
+
+        $boxes = Box::with(['booking', 'updates' => fn ($query) => $query->latest()])
+            ->whereIn('status', [BoxStatus::OutForDelivery->value, BoxStatus::InTransit->value])
+            ->whereNotIn('status', [BoxStatus::Delivered->value, BoxStatus::Cancelled->value])
             ->get()
-            ->unique('box_id');
+            ->filter(function (Box $box) use ($thresholdHours) {
+                $latestUpdate = $box->updates->sortByDesc('created_at')->first();
+                if (! $latestUpdate) {
+                    return $box->status === BoxStatus::OutForDelivery
+                        && $box->updated_at?->lessThanOrEqualTo(now()->subHours($thresholdHours));
+                }
 
-        /** @var BoxUpdate $update */
-        foreach ($updates as $update) {
-            $box = $update->box;
-            if (! $box) {
-                continue;
-            }
+                return $latestUpdate->tracking_phase === TrackingPhase::OUT_FOR_DELIVERY
+                    && $latestUpdate->created_at?->lessThanOrEqualTo(now()->subHours($thresholdHours));
+            });
 
-            $thresholdHours = $this->slaHours('delivery_overdue');
-
+        foreach ($boxes as $box) {
             $this->upsertBoxWarning(
                 type: 'delivery_overdue',
                 box: $box,
@@ -613,7 +670,7 @@ class DataIntegrityService
             );
         }
 
-        return $updates->count();
+        return $boxes->count();
     }
 
     public function checkPartialDeliveries(): int
@@ -983,6 +1040,10 @@ class DataIntegrityService
         $users = User::query()
             ->whereIn('role', [Role::SuperAdmin->value, Role::Admin->value])
             ->whereNull('two_factor_confirmed_at')
+            ->when(! app()->isProduction() && ! app()->runningUnitTests(), function ($query) {
+                // False positive prevention: In local dev/staging (outside unit tests), ignore default seed demo accounts
+                $query->whereNotIn('email', ['admin@example.com', 'superadmin@example.com']);
+            })
             ->get();
 
         foreach ($users as $user) {
@@ -1048,14 +1109,22 @@ class DataIntegrityService
      */
     public function cleanupResolvedWarnings(): void
     {
-        // Resolve missing declaration warnings if declaration is now present
+        // Resolve missing declaration warnings if declaration is now present or booking is cancelled/empty-box
         $warnings = DataIntegrityWarning::where('type', 'missing_declaration')
             ->where('is_resolved', false)
             ->get();
 
         foreach ($warnings as $warning) {
             $booking = $warning->record;
-            if (! $booking || $booking->declaration_form_status !== 'missing' || $booking->status === BookingStatus::Cancelled) {
+            $isEmptyBoxOrder = $booking && ($booking->empty_box_count ?? 0) > 0 && ! $booking->boxes()->exists();
+            $allBoxesCancelled = $booking && $booking->boxes()->exists() && ! $booking->boxes()->where('status', '!=', BoxStatus::Cancelled->value)->exists();
+
+            if (! $booking
+                || $booking->declaration_form_status !== 'missing'
+                || $booking->status === BookingStatus::Cancelled
+                || $isEmptyBoxOrder
+                || $allBoxesCancelled
+            ) {
                 $warning->update([
                     'is_resolved' => true,
                     'resolved_at' => now(),
@@ -1063,14 +1132,42 @@ class DataIntegrityService
             }
         }
 
-        // Resolve orphan box warnings if box is now assigned or no longer at warehouse
+        // Resolve orphan box warnings if box is now assigned, no longer at warehouse, or legitimately blocked
         $warnings = DataIntegrityWarning::where('type', 'orphan_box')
             ->where('is_resolved', false)
             ->get();
 
         foreach ($warnings as $warning) {
             $box = $warning->record;
-            if (! $box || $box->batch_id !== null || $box->status !== BoxStatus::ReceivedByWarehouse) {
+            $isBlocked = $box && (
+                $box->batch_id !== null
+                || $box->status !== BoxStatus::ReceivedByWarehouse
+                || in_array($box->status, [BoxStatus::Held, BoxStatus::Damaged], true)
+                || ! in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)
+                || $box->booking?->declaration_form_status === 'missing'
+            );
+            if (! $box || $isBlocked) {
+                $warning->update([
+                    'is_resolved' => true,
+                    'resolved_at' => now(),
+                ]);
+            }
+        }
+
+        // Resolve box count mismatch warnings if boxes are assigned, booking cancelled/draft, or empty-box order
+        $warnings = DataIntegrityWarning::where('type', 'box_count_mismatch')
+            ->where('is_resolved', false)
+            ->get();
+
+        foreach ($warnings as $warning) {
+            $booking = $warning->record;
+            if (! $booking
+                || $booking->status === BookingStatus::Cancelled
+                || $booking->status === BookingStatus::Draft
+                || ($booking->empty_box_count !== null && $booking->empty_box_count > 0)
+                || $booking->booking_type === 'supply_only'
+                || $booking->boxes()->exists()
+            ) {
                 $warning->update([
                     'is_resolved' => true,
                     'resolved_at' => now(),
@@ -1216,18 +1313,27 @@ class DataIntegrityService
         return match ($warning->type) {
             'stale_scan' => in_array($box->status, [
                 BoxStatus::Collected,
-                BoxStatus::ReceivedByWarehouse,
                 BoxStatus::LoadedToContainer,
                 BoxStatus::InTransit,
                 BoxStatus::Arrived,
                 BoxStatus::OutForDelivery,
-            ], true) && $lastScanAt?->lessThanOrEqualTo(now()->subHours($this->staleThresholdHoursFor($box))),
+            ], true)
+                && (! $box->batch || ! in_array($box->batch->status, [
+                    BatchStatus::Sailed,
+                    BatchStatus::Arrived,
+                    BatchStatus::UnderCustomsClearance,
+                    BatchStatus::ReleasedByBoc,
+                ], true))
+                && $lastScanAt?->lessThanOrEqualTo(now()->subHours($this->staleThresholdHoursFor($box))),
             'delayed_receipt' => $box->status === BoxStatus::Collected
                 && $lastScanAt?->lessThanOrEqualTo(now()->subHours($this->slaHours('delayed_receipt'))),
             'missing_warehouse_location' => $box->status === BoxStatus::ReceivedByWarehouse
-                && blank($box->warehouse_location),
+                && blank($box->warehouse_location)
+                && $lastScanAt?->lessThanOrEqualTo(now()->subHours($this->slaHours('warehouse_intake_grace'))),
             'overdue_loading' => $box->status === BoxStatus::ReceivedByWarehouse
                 && $box->batch_id === null
+                && in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)
+                && ! in_array($box->status, [BoxStatus::Held, BoxStatus::Damaged], true)
                 && $lastScanAt?->lessThanOrEqualTo(now()->subHours($this->slaHours('overdue_loading'))),
             'missed_eta' => $box->batch !== null
                 && $box->batch->status !== BatchStatus::ReceivedAtWarehouse
@@ -1239,13 +1345,10 @@ class DataIntegrityService
             'unpaid_loading_block' => $box->status === BoxStatus::ReceivedByWarehouse
                 && $box->batch_id === null
                 && ! in_array($box->booking?->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true),
-            'delivery_overdue' => ! in_array($box->status, [BoxStatus::Delivered, BoxStatus::Cancelled], true)
-                && $box->updates
-                    ->where('tracking_phase', TrackingPhase::OUT_FOR_DELIVERY)
-                    ->sortByDesc('created_at')
-                    ->first()
-                    ?->created_at
-                    ?->lessThanOrEqualTo(now()->subHours($this->slaHours('delivery_overdue'))),
+            'delivery_overdue' => in_array($box->status, [BoxStatus::OutForDelivery, BoxStatus::InTransit], true)
+                && ($latestOut = $box->updates->sortByDesc('created_at')->first()) !== null
+                && $latestOut->tracking_phase === TrackingPhase::OUT_FOR_DELIVERY
+                && $latestOut->created_at?->lessThanOrEqualTo(now()->subHours($this->slaHours('delivery_overdue'))),
             'delivery_proof_missing' => $box->status === BoxStatus::Delivered
                 && (blank($box->delivery_proof_path) || blank($box->signature_path)),
             default => false,
@@ -1257,7 +1360,8 @@ class DataIntegrityService
         return match ($warning->type) {
             'privileged_user_without_2fa' => $warning->record instanceof User
                 && in_array($warning->record->role, [Role::SuperAdmin, Role::Admin], true)
-                && $warning->record->two_factor_confirmed_at === null,
+                && $warning->record->two_factor_confirmed_at === null
+                && (app()->isProduction() || app()->runningUnitTests() || ! in_array($warning->record->email, ['admin@example.com', 'superadmin@example.com'], true)),
             'debug_mode_enabled' => config('app.env') === 'production' && config('app.debug'),
             default => true,
         };
@@ -1504,6 +1608,7 @@ class DataIntegrityService
             'delayed_receipt' => self::DELAYED_RECEIPT_HOURS,
             'missed_pickup' => self::MISSED_PICKUP_HOURS,
             'overdue_loading' => self::OVERDUE_LOADING_HOURS,
+            'warehouse_intake_grace' => 2,
             'arrived_sorting' => self::ARRIVED_SORTING_HOURS,
             'delivery_overdue' => self::DELIVERY_OVERDUE_HOURS,
             'missed_eta' => self::MISSED_ETA_HOURS,

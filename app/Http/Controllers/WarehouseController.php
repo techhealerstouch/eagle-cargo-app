@@ -7,12 +7,18 @@ use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
+use App\Enums\RunsheetStatus;
+use App\Enums\RunsheetType;
+use App\Enums\TrackingPhase;
 use App\Models\Batch;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\DataIntegrityWarning;
+use App\Models\Runsheet;
 use App\Repositories\Contracts\BoxRepositoryInterface;
 use App\Services\BatchService;
 use App\Services\RunsheetService;
+use App\Services\TrackingCacheService;
 use App\Services\TrackingStepService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -43,7 +49,7 @@ class WarehouseController extends Controller
             ->orderBy('created_at', 'desc')
             ->get(['id', 'batch_number', 'status', 'current_box_count', 'capacity_boxes', 'current_cbm', 'capacity_cbm']);
 
-// 1. Origin Phase: Boxes collected by pickers but not yet received at warehouse
+        // 1. Origin Phase: Boxes collected by pickers but not yet received at warehouse
         $pendingReceiptQuery = Box::where('status', BoxStatus::Collected->value);
         if ($filters['warehouse_location'] ?? null) {
             $pendingReceiptQuery->where('warehouse_location', 'like', '%'.$filters['warehouse_location'].'%');
@@ -156,10 +162,52 @@ class WarehouseController extends Controller
             ->orderBy('updated_at', 'desc')
             ->get();
 
+        // Inbound Driver Drop-Offs: Runsheets where driver initiated drop-off at warehouse and pending verification
+        $pendingDriverDrops = Runsheet::with([
+            'picker:id,name,email',
+            'picker.picker:id,user_id,mobile',
+            'bookings.boxes' => fn ($q) => $q->select('id', 'booking_id', 'tracking_number', 'status', 'box_type_id'),
+            'bookings.boxes.boxType:id,name',
+        ])
+            ->where('type', RunsheetType::Pickup->value)
+            ->whereNotNull('warehouse_drop_initiated_at')
+            ->whereNull('warehouse_verified_at')
+            ->where('status', '!=', RunsheetStatus::Completed->value)
+            ->latest('warehouse_drop_initiated_at')
+            ->get()
+            ->map(function (Runsheet $rs) {
+                $allBoxes = $rs->bookings->flatMap(fn ($b) => $b->boxes);
+                $totalCount = $allBoxes->count();
+                $collectedBoxes = $allBoxes->filter(fn ($b) => $b->status === BoxStatus::Collected);
+                $receivedBoxes = $allBoxes->filter(fn ($b) => $b->status === BoxStatus::ReceivedByWarehouse);
+
+                return [
+                    'id' => $rs->id,
+                    'runsheet_number' => $rs->runsheet_number,
+                    'area_description' => $rs->area_description,
+                    'picker_name' => $rs->picker?->name ?? 'Unknown Driver',
+                    'picker_mobile' => $rs->picker?->picker?->mobile,
+                    'warehouse_drop_initiated_at' => $rs->warehouse_drop_initiated_at?->toISOString(),
+                    'warehouse_drop_bay' => $rs->warehouse_drop_bay,
+                    'warehouse_drop_notes' => $rs->warehouse_drop_notes,
+                    'warehouse_drop_photo_path' => $rs->warehouse_drop_photo_path ? asset('storage/'.$rs->warehouse_drop_photo_path) : null,
+                    'total_boxes' => $totalCount,
+                    'pending_boxes' => $collectedBoxes->count(),
+                    'received_boxes' => $receivedBoxes->count(),
+                    'boxes' => $allBoxes->map(fn ($b) => [
+                        'id' => $b->id,
+                        'tracking_number' => $b->tracking_number,
+                        'status' => $b->status instanceof BoxStatus ? $b->status->value : (string) $b->status,
+                        'box_type' => $b->boxType?->name ?? 'Box',
+                    ])->values(),
+                ];
+            });
+
         return Inertia::render('warehouse/Dashboard', [
             'activeBatches' => $activeBatches,
             'readyToLoad' => $readyToLoad,
             'exceptionBoxes' => $exceptionBoxes,
+            'pendingDriverDrops' => $pendingDriverDrops,
             'stats' => [
                 'pendingReceipt' => $pendingReceiptCount,
                 'needsSorting' => $needsSortingCount,
@@ -175,6 +223,68 @@ class WarehouseController extends Controller
             'receiveSteps' => $receiveSteps,
             'loadSteps' => $loadSteps,
         ]);
+    }
+
+    /**
+     * Verify and accept an inbound driver drop-off.
+     */
+    public function verifyDriverDrop(Request $request, Runsheet $runsheet)
+    {
+        $request->validate([
+            'warehouse_location' => 'nullable|string|max:50',
+        ]);
+
+        $allBoxes = $runsheet->bookings()
+            ->with('boxes')
+            ->get()
+            ->flatMap(fn ($b) => $b->boxes);
+
+        $unreceivedBoxes = $allBoxes->filter(fn (Box $b) => $b->status === BoxStatus::Collected);
+
+        if ($unreceivedBoxes->isEmpty()) {
+            return redirect()->back()->with('error', 'No unreceived collected boxes found on this runsheet.');
+        }
+
+        DB::transaction(function () use ($runsheet, $request, $unreceivedBoxes) {
+            $location = $request->warehouse_location ?? ($runsheet->warehouse_drop_bay ? 'Bay '.$runsheet->warehouse_drop_bay : 'Warehouse Intake');
+
+            foreach ($unreceivedBoxes as $box) {
+                if ($location) {
+                    $box->update(['warehouse_location' => $location]);
+                }
+
+                $this->boxRepo->updateStatus(
+                    $box,
+                    BoxStatus::ReceivedByWarehouse->value,
+                    'Received at warehouse intake from driver drop-off.',
+                    Auth::id(),
+                    null,
+                    null,
+                    'received_by_branch',
+                    null,
+                    null,
+                    null,
+                    false,
+                    null,
+                    'received_by_branch'
+                );
+
+                app(TrackingCacheService::class)->forgetBox($box);
+            }
+
+            $runsheet->update([
+                'warehouse_verified_at' => now(),
+                'warehouse_verified_by' => Auth::id(),
+            ]);
+        });
+
+        // Sync runsheet status to auto-complete if all boxes are received
+        $runsheet->refresh();
+        $this->runsheetService->syncRunsheetStatusFromBoxes($runsheet);
+
+        $count = $unreceivedBoxes->count();
+
+        return redirect()->back()->with('success', "Driver drop-off verified! {$count} boxes received into warehouse inventory.");
     }
 
     /**
@@ -210,7 +320,7 @@ class WarehouseController extends Controller
             ? [BoxStatus::Arrived, BoxStatus::InTransit, BoxStatus::ReceivedByWarehouse]
             : [BoxStatus::Collected, BoxStatus::Pending];
 
-if (! in_array($box->status, $allowedStatuses)) {
+        if (! in_array($box->status, $allowedStatuses)) {
             $phaseHint = $isDestinationStep ? 'destination processing' : 'warehouse receipt';
             throw ValidationException::withMessages([
                 'tracking_number' => "Cannot {$phaseHint} box with current status: {$box->status->value}",
@@ -225,7 +335,7 @@ if (! in_array($box->status, $allowedStatuses)) {
 
         if ($trackingStepKey === 'loading_container') {
             throw ValidationException::withMessages([
-                'tracking_step_key' => "Cannot use a loading step for receive action.",
+                'tracking_step_key' => 'Cannot use a loading step for receive action.',
             ]);
         }
 
@@ -234,11 +344,12 @@ if (! in_array($box->status, $allowedStatuses)) {
         $forceOverride = $request->boolean('force_receive');
 
         if (! $isDestinationStep && $box->booking->payment_status !== PaymentStatus::Paid) {
-            if (!$forceOverride) {
-                $hasProof = !empty($box->booking->proof_of_payment);
+            if (! $forceOverride) {
+                $hasProof = ! empty($box->booking->proof_of_payment);
+
                 return back()->with('payment_override', [
                     'tracking_number' => $box->tracking_number,
-                    'message' => $hasProof 
+                    'message' => $hasProof
                         ? 'This booking has a proof of payment uploaded but is not yet confirmed by an admin. You can override to receive this box, or contact admin.'
                         : 'Payment for this booking is not confirmed yet. You can override to receive this box, or contact admin.',
                 ]);
@@ -297,405 +408,16 @@ if (! in_array($box->status, $allowedStatuses)) {
             'batch_id' => 'required|exists:batches,id',
         ]);
 
-        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
-
-        if (! $box) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Box not found.',
-            ]);
-        }
-
-        if ($box->batch_id !== null && $box->batch_id != $request->batch_id) {
-            $existingBatch = Batch::find($box->batch_id);
-            $targetBatch = Batch::find($request->batch_id);
-
-            DataIntegrityWarning::updateOrCreate(
-                [
-                    'type' => 'duplicate_batch_scan',
-                    'record_type' => Box::class,
-                    'record_id' => $box->id,
-                    'is_resolved' => false,
-                ],
-                [
-                    'severity' => 'error',
-                    'message' => "Duplicate batch scan attempt: Box {$box->tracking_number} is already assigned to Batch " . ($existingBatch?->batch_number ?? $box->batch_id) . ". Scanned for Batch " . ($targetBatch?->batch_number ?? $request->batch_id) . ".",
-                    'metadata' => [
-                        'tracking_number' => $box->tracking_number,
-                        'existing_batch_id' => $box->batch_id,
-                        'existing_batch_number' => $existingBatch?->batch_number,
-                        'target_batch_id' => $request->batch_id,
-                        'target_batch_number' => $targetBatch?->batch_number,
-                        'scanned_by' => Auth::id(),
-                        'alert' => true,
-                    ],
-                ]
-            );
-
-            throw ValidationException::withMessages([
-                'tracking_number' => "DUPLICATE SCAN ALERT: Box {$box->tracking_number} is already registered in Batch " . ($existingBatch?->batch_number ?? $box->batch_id) . ".",
-            ]);
-        }
-
-        if ($box->status !== BoxStatus::ReceivedByWarehouse) {
-            throw ValidationException::withMessages([
-                'tracking_number' => "Box is not eligible to be loaded into a container. Current status is '{$box->status->label()}' ({$box->status->value}), but box must be in 'Received by Warehouse' status.",
-            ]);
-        }
-
-        if ($box->booking->status === BookingStatus::Cancelled) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Cannot load a box for a cancelled booking.',
-            ]);
-        }
-
-        if ($box->booking->payment_status !== PaymentStatus::Paid) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Payment not confirmed. Cannot load unpaid box to container.',
-            ]);
-        }
-
-        if ($box->booking->needsDeclaration()) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Customs declaration is missing. Cannot load box to container.',
-            ]);
-        }
-
-        $invoice = $box->booking->invoice;
-        if (! $invoice || $invoice->status === InvoiceStatus::Voided) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'No valid invoice found for this booking. Generate an invoice before loading to container.',
-            ]);
-        }
-
-        if (! $box->recipient_id) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'No recipient assigned to this box. Cannot load to container.',
-            ]);
-        }
-
-        $recipient = $box->recipient;
-        if (! $recipient->city || ! $recipient->province) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Recipient address is incomplete (missing city or province).',
-            ]);
-        }
-
-        if (! $recipient->phone_number) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Recipient phone number is missing.',
-            ]);
-        }
-        
-        if ($box->price_charged === null || (float) $box->price_charged <= 0) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Box price is not set or zero.',
-            ]);
-        }
-
-        if ($recipient->sender_id !== $box->booking->sender_id) {
-            throw ValidationException::withMessages([
-                'tracking_number' => 'Recipient does not belong to the booking sender.',
-            ]);
-        }
-
-
-
         $trackingStepKey = $request->input('tracking_step_key', 'loading_container');
-        $allSteps = $this->trackingStepService->getSteps();
-        $stepConfig = collect($allSteps)->firstWhere('key', $trackingStepKey);
+        $box = $this->processLoadBox($request->tracking_number, (int) $request->batch_id, $trackingStepKey);
+        $batch = Batch::find($request->batch_id);
 
-        if (! $stepConfig || ! in_array('warehouse', $stepConfig['allowed_roles'] ?? [])) {
-            throw ValidationException::withMessages([
-                'tracking_step_key' => "Invalid or unauthorized tracking step: {$trackingStepKey}",
-            ]);
-        }
-
-        if ($trackingStepKey !== 'loading_container') {
-            throw ValidationException::withMessages([
-                'tracking_step_key' => "Cannot use a receive step for load action.",
-            ]);
-        }
-
-        $systemStatus = $stepConfig['system_status'] ?? $box->status->value;
-        $trackingLabel = $stepConfig['label'] ?? 'Loaded to Container';
-        $targetStatus = BoxStatus::tryFrom($systemStatus);
-
-        if ($targetStatus && $box->status !== $targetStatus && ! $box->status->canTransitionTo($targetStatus)) {
-            throw ValidationException::withMessages([
-                'tracking_number' => "Cannot transition box status from '{$box->status->label()}' to '{$targetStatus->label()}'. The box is not eligible for this operation.",
-            ]);
-        }
-
-        try {
-            DB::transaction(function () use ($box, $request, $systemStatus, $trackingLabel, $trackingStepKey) {
-                // Lock the batch inside the transaction to prevent race conditions
-                $batch = Batch::query()
-                    ->whereIn('status', [BatchStatus::Open->value, BatchStatus::Loading->value])
-                    ->whereKey($request->batch_id)
-                    ->lockForUpdate()
-                    ->firstOrFail();
-
-                // Capacity check with fresh locked data
-                $capacityError = $this->batchService->checkCapacity($batch, 1);
-                if ($capacityError) {
-                    throw ValidationException::withMessages([
-                        'batch_id' => $capacityError,
-                    ]);
-                }
-
-                $this->boxRepo->updateStatus(
-                    $box,
-                    $systemStatus,
-                    $trackingLabel.": {$batch->batch_number}",
-                    Auth::id(),
-                    null,
-                    null,
-                    $trackingStepKey
-                );
-
-                $oldBatchId = $box->batch_id;
-                $box->update(['batch_id' => $batch->id]);
-
-                // If moving from another batch, refresh the old one
-                if ($oldBatchId && $oldBatchId !== $batch->id) {
-                    $this->batchService->refreshAndEvaluateById($oldBatchId);
-                }
-
-                // Refresh batch metrics inside the transaction
-                $this->batchService->refreshAndEvaluateById($batch->id);
-
-                // Auto-transition batch to Loading if it was Open
-                if ($batch->fresh()->status === BatchStatus::Open) {
-                    $batch->update(['status' => BatchStatus::Loading]);
-                }
-            });
-
-            $batch = Batch::find($request->batch_id);
-
-            return back()->with('success', "Box {$box->tracking_number} loaded into batch {$batch->batch_number}.");
-        } catch (\Exception $e) {
-            if ($e instanceof ValidationException) {
-                throw $e;
-            }
-
-            return back()->with('error', 'Failed to load box: '.$e->getMessage());
-        }
+        return back()->with('success', "Box {$box->tracking_number} loaded into batch {$batch->batch_number}.");
     }
 
     /**
-     * Remove Box from Batch.
+     * Bulk Load Boxes into Container Batch (for offline scan queue sync).
      */
-    public function unloadBox(Request $request)
-    {
-        $request->validate([
-            'tracking_number' => 'required|string',
-        ]);
-
-        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
-
-        if (! $box || ! $box->batch_id) {
-            return back()->with('error', 'Box not found or not in a batch.');
-        }
-
-        $batchId = $box->batch_id;
-
-        try {
-            DB::transaction(function () use ($box) {
-                $oldBatchNumber = $box->batch?->batch_number;
-
-                $box->update(['batch_id' => null]);
-
-                $this->boxRepo->updateStatus(
-                    $box,
-                    BoxStatus::ReceivedByWarehouse->value,
-                    "Unloaded from batch: {$oldBatchNumber}",
-                    Auth::id(),
-                    null,
-                    null,
-                    'received_by_branch'
-                );
-            });
-
-$this->batchService->refreshAndEvaluateById($batchId);
-
-            return back()->with('success', "Box {$box->tracking_number} unloaded from batch.");
-        } catch (\Exception $e) {
-            return back()->with('error', 'Failed to unload box: '.$e->getMessage());
-        }
-    }
-
-    /**
-     * Mark box as damaged.
-     */
-    public function markDamaged(Request $request)
-    {
-        $request->validate([
-            'tracking_number' => 'required|string',
-            'notes' => 'required|string',
-        ]);
-
-        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
-
-        if (! $box) {
-            return back()->with('error', 'Box not found.');
-        }
-
-        // Validate box status allows transition to Damaged
-        if (! $box->status->canTransitionTo(BoxStatus::Damaged)) {
-            return back()->with('error', "Cannot mark box as damaged. Current status: {$box->status->value} does not allow transition to damaged.");
-        }
-
-        try {
-            $this->boxRepo->updateStatus(
-                $box,
-                BoxStatus::Damaged->value,
-                "DAMAGED: {$request->notes}",
-                Auth::id(),
-            );
-
-            return back()->with('success', "Box {$box->tracking_number} marked as DAMAGED.");
-        } catch (\Exception $e) {
-            return back()->with('error', 'Failed to mark box as damaged: '.$e->getMessage());
-        }
-    }
-
-    /**
-     * Flag box for holding (Consolidation/Payment).
-     */
-    public function markHeld(Request $request)
-    {
-        $request->validate([
-            'tracking_number' => 'required|string',
-            'notes' => 'required|string',
-        ]);
-
-        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
-
-        if (! $box) {
-            return back()->with('error', 'Box not found.');
-        }
-
-        // Validate box status allows transition to Held
-        if (! $box->status->canTransitionTo(BoxStatus::Held)) {
-            return back()->with('error', "Cannot hold box. Current status: {$box->status->value} does not allow transition to held.");
-        }
-
-        try {
-            $this->boxRepo->updateStatus(
-                $box,
-                BoxStatus::Held->value,
-                "HELD: {$request->notes}",
-                Auth::id(),
-            );
-
-            return back()->with('success', "Box {$box->tracking_number} is now on HOLD.");
-        } catch (\Exception $e) {
-            return back()->with('error', 'Failed to hold box: '.$e->getMessage());
-        }
-    }
-
-    /**
-     * Update weight, CBM, or location.
-     */
-    public function updatePhysicals(Request $request)
-    {
-        $request->validate([
-            'tracking_number' => 'required|string',
-            'weight' => 'nullable|numeric|min:0',
-            'actual_cbm' => 'nullable|numeric|min:0',
-            'warehouse_location' => 'nullable|string|max:50',
-        ]);
-
-        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
-
-        if (! $box) {
-            return back()->with('error', 'Box not found.');
-        }
-        
-        $box->loadMissing('boxType', 'booking.invoice');
-
-        try {
-            $oldBatchId = $box->batch_id;
-
-            $updateData = $request->only(['weight', 'actual_cbm', 'warehouse_location']);
-
-            if ($request->filled('actual_cbm')) {
-                $standardCbm = $box->boxType?->getStandardCbm();
-                if ($standardCbm) {
-                    $tolerance = 1.05; // 5% tolerance
-                    if ($request->actual_cbm > ($standardCbm * $tolerance)) {
-                        $updateData['is_bulging'] = true;
-                        $updateData['oversized_surcharge'] = ($request->actual_cbm - $standardCbm) * 5000;
-
-                        // Transition status to HeldBulging if it allows
-                        if ($box->status->canTransitionTo(BoxStatus::HeldBulging)) {
-                            $this->boxRepo->updateStatus(
-                                $box,
-                                BoxStatus::HeldBulging->value,
-                                "HELD (BULGING): Actual CBM ({$request->actual_cbm}) exceeds standard ({$standardCbm}).",
-                                Auth::id(),
-                            );
-                        }
-                    } else {
-                        $updateData['is_bulging'] = false;
-                        $updateData['oversized_surcharge'] = 0.00;
-                    }
-                }
-            }
-
-            $box->update($updateData);
-
-            if ($oldBatchId) {
-                $this->batchService->refreshAndEvaluateById($oldBatchId);
-            }
-
-            if ($box->wasChanged('oversized_surcharge') && $box->booking->invoice) {
-                $box->booking->invoice->recalculateAmount();
-            }
-
-            return back()->with('success', "Physical measurements updated for {$box->tracking_number}.");
-        } catch (\Exception $e) {
-            return back()->with('error', 'Failed to update physicals: '.$e->getMessage());
-        }
-    }
-
-    private function resolveAgingBucket(int $ageHours): string
-    {
-        return match (true) {
-            $ageHours < 24 => 'under_24',
-            $ageHours < 48 => '24_48',
-            $ageHours < 72 => '48_plus',
-            default => 'critical',
-        };
-    }
-
-    private function agingLabel(string $bucket): string
-    {
-        return match ($bucket) {
-            'under_24' => 'Under 24h',
-            '24_48' => '24-48h',
-            '48_plus' => '48h+',
-            'critical' => 'Critical 72h+',
-            default => 'Unknown',
-        };
-    }
-
-    public function apiBatchDetails(Batch $batch)
-    {
-        $batch->load([
-            'boxes' => function ($query) {
-                $query->with([
-                    'booking:id,reference_number',
-                    'recipient:id,city,province',
-                    'boxType:id,name',
-                ]);
-            }
-        ]);
-
-        return response()->json($batch);
-    }
-
-
     public function loadBatch(Request $request)
     {
         $request->validate([
@@ -765,7 +487,11 @@ $this->batchService->refreshAndEvaluateById($batchId);
         return back()->with('success', $message)->with('sync_errors', $errors);
     }
 
-
+    /**
+     * Process loading a single box into a batch.
+     *
+     * @throws ValidationException
+     */
     private function processLoadBox(string $trackingNumber, int $batchId, string $trackingStepKey = 'loading_container'): Box
     {
         $box = $this->boxRepo->findByIdentifier($trackingNumber);
@@ -940,4 +666,218 @@ $this->batchService->refreshAndEvaluateById($batchId);
         return $box;
     }
 
+    /**
+     * Remove Box from Batch.
+     */
+    public function unloadBox(Request $request)
+    {
+        $request->validate([
+            'tracking_number' => 'required|string',
+        ]);
+
+        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
+
+        if (! $box || ! $box->batch_id) {
+            return back()->with('error', 'Box not found or not in a batch.');
+        }
+
+        $batchId = $box->batch_id;
+
+        try {
+            DB::transaction(function () use ($box) {
+                $oldBatchNumber = $box->batch?->batch_number;
+
+                $box->update(['batch_id' => null]);
+
+                $this->boxRepo->updateStatus(
+                    $box,
+                    BoxStatus::ReceivedByWarehouse->value,
+                    "Unloaded from batch: {$oldBatchNumber}",
+                    Auth::id(),
+                    null,
+                    null,
+                    'received_by_branch'
+                );
+            });
+
+            $this->batchService->refreshAndEvaluateById($batchId);
+
+            return back()->with('success', "Box {$box->tracking_number} unloaded from batch.");
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to unload box: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Mark box as damaged.
+     */
+    public function markDamaged(Request $request)
+    {
+        $request->validate([
+            'tracking_number' => 'required|string',
+            'notes' => 'required|string',
+            'damage_photo' => 'nullable|file|mimes:jpeg,jpg,png,webp|max:10240',
+        ]);
+
+        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
+
+        if (! $box) {
+            return back()->with('error', 'Box not found.');
+        }
+
+        // Validate box status allows transition to Damaged
+        if (! $box->status->canTransitionTo(BoxStatus::Damaged)) {
+            return back()->with('error', "Cannot mark box as damaged. Current status: {$box->status->value} does not allow transition to damaged.");
+        }
+
+        try {
+            $this->boxRepo->updateStatus(
+                $box,
+                BoxStatus::Damaged->value,
+                "DAMAGED: {$request->notes}",
+                Auth::id(),
+                damagePhoto: $request->file('damage_photo'),
+            );
+
+            return back()->with('success', "Box {$box->tracking_number} marked as DAMAGED.");
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to mark box as damaged: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Flag box for holding (Consolidation/Payment).
+     */
+    public function markHeld(Request $request)
+    {
+        $request->validate([
+            'tracking_number' => 'required|string',
+            'notes' => 'required|string',
+        ]);
+
+        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
+
+        if (! $box) {
+            return back()->with('error', 'Box not found.');
+        }
+
+        // Validate box status allows transition to Held
+        if (! $box->status->canTransitionTo(BoxStatus::Held)) {
+            return back()->with('error', "Cannot hold box. Current status: {$box->status->value} does not allow transition to held.");
+        }
+
+        try {
+            $this->boxRepo->updateStatus(
+                $box,
+                BoxStatus::Held->value,
+                "HELD: {$request->notes}",
+                Auth::id(),
+            );
+
+            return back()->with('success', "Box {$box->tracking_number} is now on HOLD.");
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to hold box: '.$e->getMessage());
+        }
+    }
+
+    /**
+     * Update weight, CBM, or location.
+     */
+    public function updatePhysicals(Request $request)
+    {
+        $request->validate([
+            'tracking_number' => 'required|string',
+            'weight' => 'nullable|numeric|min:0',
+            'actual_cbm' => 'nullable|numeric|min:0',
+            'warehouse_location' => 'nullable|string|max:50',
+        ]);
+
+        $box = $this->boxRepo->findByIdentifier($request->tracking_number);
+
+        if (! $box) {
+            return back()->with('error', 'Box not found.');
+        }
+
+        $box->loadMissing('boxType', 'booking.invoice');
+
+        try {
+            $oldBatchId = $box->batch_id;
+
+            $updateData = $request->only(['weight', 'actual_cbm', 'warehouse_location']);
+
+            if ($request->filled('actual_cbm')) {
+                $standardCbm = $box->boxType?->getStandardCbm();
+                if ($standardCbm) {
+                    $tolerance = 1.05; // 5% tolerance
+                    if ($request->actual_cbm > ($standardCbm * $tolerance)) {
+                        $updateData['is_bulging'] = true;
+                        $updateData['oversized_surcharge'] = ($request->actual_cbm - $standardCbm) * 5000;
+
+                        // Transition status to HeldBulging if it allows
+                        if ($box->status->canTransitionTo(BoxStatus::HeldBulging)) {
+                            $this->boxRepo->updateStatus(
+                                $box,
+                                BoxStatus::HeldBulging->value,
+                                "HELD (BULGING): Actual CBM ({$request->actual_cbm}) exceeds standard ({$standardCbm}).",
+                                Auth::id(),
+                            );
+                        }
+                    } else {
+                        $updateData['is_bulging'] = false;
+                        $updateData['oversized_surcharge'] = 0.00;
+                    }
+                }
+            }
+
+            $box->update($updateData);
+
+            if ($oldBatchId) {
+                $this->batchService->refreshAndEvaluateById($oldBatchId);
+            }
+
+            if ($box->wasChanged('oversized_surcharge') && $box->booking->invoice) {
+                $box->booking->invoice->recalculateAmount();
+            }
+
+            return back()->with('success', "Physical measurements updated for {$box->tracking_number}.");
+        } catch (\Exception $e) {
+            return back()->with('error', 'Failed to update physicals: '.$e->getMessage());
+        }
+    }
+
+    private function resolveAgingBucket(int $ageHours): string
+    {
+        return match (true) {
+            $ageHours < 24 => 'under_24',
+            $ageHours < 48 => '24_48',
+            $ageHours < 72 => '48_plus',
+            default => 'critical',
+        };
+    }
+
+    private function agingLabel(string $bucket): string
+    {
+        return match ($bucket) {
+            'under_24' => 'Under 24h',
+            '24_48' => '24-48h',
+            '48_plus' => '48h+',
+            'critical' => 'Critical 72h+',
+            default => 'Unknown',
+        };
+    }
+
+    public function apiBatchDetails(Batch $batch)
+    {
+        $batch->load([
+            'boxes' => function ($query) {
+                $query->with([
+                    'booking:id,reference_number',
+                    'recipient:id,city,province',
+                    'boxType:id,name',
+                ]);
+            },
+        ]);
+
+        return response()->json($batch);
+    }
 }
