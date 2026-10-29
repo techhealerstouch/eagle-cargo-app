@@ -7,21 +7,21 @@ use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
-use App\Enums\Role;
 use App\Enums\TrackingPhase;
 use App\Http\Controllers\Controller;
-use App\Services\DeveloperAccess;
-use App\Http\Requests\Admin\StoreBatchRequest;
 use App\Http\Requests\Admin\QuickUpdateBatchRequest;
+use App\Http\Requests\Admin\StoreBatchRequest;
 use App\Http\Resources\Admin\BatchResource;
 use App\Models\Batch;
 use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Services\BatchService;
+use App\Services\DeveloperAccess;
 use App\Services\TrackingStepService;
 use BackedEnum;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
@@ -157,6 +157,51 @@ class BatchController extends Controller
         return redirect($this->adminReturnUrl('admin.batches.index'))->with('success', 'Batch updated successfully.');
     }
 
+    public function quickUpdate(
+        QuickUpdateBatchRequest $request,
+        Batch $batch,
+        BatchService $batchService,
+        TrackingStepService $trackingStepService,
+    ): RedirectResponse {
+        $validated = $request->validated();
+        $trackingPhase = $validated['tracking_phase'] ?? null;
+        $trackingDescription = $validated['tracking_description'] ?? null;
+        unset($validated['tracking_phase'], $validated['tracking_description']);
+
+        $attributesToUpdate = array_filter($validated, function ($val) {
+            return $val !== null;
+        });
+
+        try {
+            DB::transaction(function () use ($batch, $attributesToUpdate, $trackingPhase, $trackingDescription, $batchService, $trackingStepService, $request) {
+                if (! empty($trackingPhase)) {
+                    $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
+                    $trackingStep = $trackingSteps->firstWhere('key', $trackingPhase);
+
+                    if ($trackingPhase !== TrackingPhase::DELIVERED->value && $this->userCanApplyTrackingStep($request->user(), $trackingStep)) {
+                        $batchService->bulkUpdateTrackingPhase(
+                            $batch,
+                            $trackingPhase,
+                            $request->user()?->id,
+                            $trackingDescription,
+                            $trackingStep['system_status'] ?? null,
+                        );
+                    }
+                }
+
+                if (! empty($attributesToUpdate)) {
+                    $batchService->update($batch, $attributesToUpdate);
+                }
+            });
+        } catch (\InvalidArgumentException $exception) {
+            return back()->with('error', $exception->getMessage());
+        } catch (\RuntimeException $exception) {
+            return back()->with('error', $exception->getMessage());
+        }
+
+        return back()->with('success', sprintf('Batch %s updated successfully.', $batch->batch_number));
+    }
+
     public function confirmManifest(Request $request, Batch $batch, BatchService $batchService): RedirectResponse
     {
         $validated = $request->validate([
@@ -195,11 +240,11 @@ class BatchController extends Controller
     public function availableBoxes(Request $request, Batch $batch)
     {
         $query = Box::whereIn('status', [
-                BoxStatus::Pending,
-                BoxStatus::Collected,
-                BoxStatus::ReceivedByWarehouse,
-                BoxStatus::Arrived,
-            ])
+            BoxStatus::Pending,
+            BoxStatus::Collected,
+            BoxStatus::ReceivedByWarehouse,
+            BoxStatus::Arrived,
+        ])
             ->where(function ($q) use ($batch) {
                 $q->whereNull('batch_id')
                     ->orWhere('batch_id', '!=', $batch->id);
@@ -454,11 +499,7 @@ class BatchController extends Controller
             return back()->with('error', 'Cannot apply tracking updates to a batch that is still open or loading.');
         }
 
-        $latestTrackingPhase = $this->latestTrackingPhaseForBatch($batch);
-        $latestOrder = $this->trackingStepOrder($trackingSteps, $latestTrackingPhase);
-        $selectedOrder = $this->trackingStepOrder($trackingSteps, $validated['tracking_phase']);
-
-        if ($latestOrder !== null && $selectedOrder !== null && $selectedOrder <= $latestOrder) {
+        if ($this->areAllBoxesAtOrPastTrackingPhase($batch, $validated['tracking_phase'], $trackingSteps)) {
             return back()->with(
                 'error',
                 'This batch is already at or past that tracking phase. Select a later phase to continue.',
@@ -527,6 +568,7 @@ class BatchController extends Controller
         }
 
         $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+
         return redirect($returnUrl)->with('success', $message)->with('bulk_result', $result);
     }
 
@@ -569,15 +611,13 @@ class BatchController extends Controller
         foreach ($batches as $batch) {
             if (in_array($batch->status, [BatchStatus::Open, BatchStatus::Loading], true)) {
                 $skipped++;
+
                 continue;
             }
 
-            $latestTrackingPhase = $this->latestTrackingPhaseForBatch($batch);
-            $latestOrder = $this->trackingStepOrder($trackingSteps, $latestTrackingPhase);
-            $selectedOrder = $this->trackingStepOrder($trackingSteps, $validated['tracking_phase']);
-
-            if ($latestOrder !== null && $selectedOrder !== null && $selectedOrder <= $latestOrder) {
+            if ($this->areAllBoxesAtOrPastTrackingPhase($batch, $validated['tracking_phase'], $trackingSteps)) {
                 $skipped++;
+
                 continue;
             }
 
@@ -612,6 +652,7 @@ class BatchController extends Controller
         }
 
         $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+
         return redirect($returnUrl)->with('success', $message);
     }
 
@@ -650,6 +691,7 @@ class BatchController extends Controller
         }
 
         $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+
         return redirect($returnUrl)->with('success', $message)->with('bulk_result', $result);
     }
 
@@ -683,10 +725,11 @@ class BatchController extends Controller
         $batch->delete();
 
         $returnUrl = request()->input('return_to') ?? session('admin_return_url') ?? route('admin.batches.index');
+
         return redirect($returnUrl)->with('success', 'Batch deleted successfully.');
     }
 
-    private function trackingPhaseOptionsForUser(\Illuminate\Support\Collection $trackingSteps, mixed $user): \Illuminate\Support\Collection
+    private function trackingPhaseOptionsForUser(Collection $trackingSteps, mixed $user): Collection
     {
         return $trackingSteps
             ->filter(fn (array $step): bool => $this->userCanApplyTrackingStep($user, $step))
@@ -704,7 +747,7 @@ class BatchController extends Controller
             ->values();
     }
 
-    private function configuredTrackingSteps(TrackingStepService $trackingStepService): \Illuminate\Support\Collection
+    private function configuredTrackingSteps(TrackingStepService $trackingStepService): Collection
     {
         return collect($trackingStepService->getSteps())
             ->sortBy(fn (array $step): int => (int) ($step['order'] ?? 0))
@@ -722,6 +765,31 @@ class BatchController extends Controller
             ->values();
     }
 
+    private function areAllBoxesAtOrPastTrackingPhase(Batch $batch, string $targetPhase, Collection $trackingSteps): bool
+    {
+        $boxes = $batch->boxes()->with('latestUpdate')->select(['id', 'batch_id', 'tracking_step_key'])->get();
+
+        if ($boxes->isEmpty()) {
+            return false;
+        }
+
+        $targetOrder = $this->trackingStepOrder($trackingSteps, $targetPhase);
+        if ($targetOrder === null) {
+            return false;
+        }
+
+        foreach ($boxes as $box) {
+            $currentPhase = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;
+            $currentOrder = $this->trackingStepOrder($trackingSteps, $currentPhase);
+
+            if ($currentOrder === null || $currentOrder < $targetOrder) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private function latestTrackingPhaseForBatch(Batch $batch): ?string
     {
         $boxIds = $batch->boxes()->pluck('id');
@@ -733,12 +801,13 @@ class BatchController extends Controller
         return BoxUpdate::whereIn('box_id', $boxIds)
             ->whereNotNull('tracking_phase')
             ->latest()
+            ->orderBy('id', 'desc')
             ->first()
             ?->tracking_phase
             ?->value;
     }
 
-    private function trackingStepOrder(\Illuminate\Support\Collection $trackingSteps, ?string $trackingPhase): ?int
+    private function trackingStepOrder(Collection $trackingSteps, ?string $trackingPhase): ?int
     {
         if ($trackingPhase === null) {
             return null;

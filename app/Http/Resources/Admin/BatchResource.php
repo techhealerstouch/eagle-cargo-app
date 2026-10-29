@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Admin;
 
+use App\Models\ActivityLog;
 use App\Models\Batch;
 use App\Models\BoxUpdate;
 use App\Services\TrackingStepService;
@@ -26,6 +27,7 @@ class BatchResource extends JsonResource
         $latestUpdate = BoxUpdate::whereIn('box_id', $this->resource->boxes->pluck('id'))
             ->whereNotNull('tracking_phase')
             ->latest()
+            ->orderBy('id', 'desc')
             ->first();
 
         $latestTrackingPhase = $latestUpdate?->tracking_phase?->value;
@@ -69,7 +71,7 @@ class BatchResource extends JsonResource
             return null;
         }
 
-        $log = \App\Models\ActivityLog::with('user')
+        $log = ActivityLog::with('user')
             ->where('model_type', Batch::class)
             ->where('model_id', $this->resource->id)
             ->where('action', 'updated')
@@ -86,7 +88,7 @@ class BatchResource extends JsonResource
         return [
             'from_status' => $log->changes['status']['old'] ?? null,
             'to_status' => $log->changes['status']['new'] ?? null,
-            'overridden_by' => $log->user?->first_name ? trim($log->user->first_name . ' ' . $log->user->last_name) : ($log->user?->name ?? 'System'),
+            'overridden_by' => $log->user?->first_name ? trim($log->user->first_name.' '.$log->user->last_name) : ($log->user?->name ?? 'System'),
             'overridden_at' => $log->created_at->format('M j, Y h:i A'),
         ];
     }

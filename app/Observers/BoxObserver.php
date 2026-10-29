@@ -4,12 +4,18 @@ namespace App\Observers;
 
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
+use App\Enums\TrackingPhase;
+use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Notifications\BoxStatusChanged;
 use App\Services\BatchService;
+use App\Services\CommissionService;
 use App\Services\ReferenceDataService;
+use App\Services\RunsheetService;
 use App\Services\TrackingCacheService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class BoxObserver
 {
@@ -47,8 +53,8 @@ class BoxObserver
 
                 if ($priceConfig) {
                     $doorToDoorFee = $box->is_door_to_door ? app(ReferenceDataService::class)->doorToDoorFeeFor($areaId) : 0.0;
-                    $box->price_charged    = (float) $priceConfig->price + $doorToDoorFee;
-                    $box->price_snapshot   = $box->price_charged;
+                    $box->price_charged = (float) $priceConfig->price + $doorToDoorFee;
+                    $box->price_snapshot = $box->price_charged;
                     $box->price_is_estimate = false;
                 }
             }
@@ -65,8 +71,8 @@ class BoxObserver
                 if ($cbmRate && $cbmRate > 0) {
                     $cbm = ((float) $box->custom_length * (float) $box->custom_width * (float) $box->custom_height) / 1_000_000;
                     $doorToDoorFee = $box->is_door_to_door ? app(ReferenceDataService::class)->doorToDoorFeeFor($areaId) : 0.0;
-                    $box->price_charged    = round($cbm * $cbmRate, 2) + $doorToDoorFee;
-                    $box->price_snapshot   = $box->price_charged;
+                    $box->price_charged = round($cbm * $cbmRate, 2) + $doorToDoorFee;
+                    $box->price_snapshot = $box->price_charged;
                     $box->price_is_estimate = true;
                 }
             }
@@ -128,8 +134,8 @@ class BoxObserver
             // Rollup status to Booking (skip Draft — still being edited by sender)
             $booking = $box->booking;
             if ($booking && ! in_array($booking->status, [BookingStatus::Draft, BookingStatus::Cancelled])) {
-                \Illuminate\Support\Facades\DB::transaction(function () use ($booking) {
-                    $lockedBooking = \App\Models\Booking::whereKey($booking->id)->lockForUpdate()->first();
+                DB::transaction(function () use ($booking) {
+                    $lockedBooking = Booking::whereKey($booking->id)->lockForUpdate()->first();
                     if (! $lockedBooking) {
                         return;
                     }
@@ -142,8 +148,24 @@ class BoxObserver
                     if (! empty($boxes)) {
                         $totalBoxes = count($boxes);
                         $deliveredCount = count(array_filter($boxes, fn ($s) => $s === BoxStatus::Delivered->value));
-                        $shippedCount = count(array_filter($boxes, fn ($s) => in_array($s, [BoxStatus::InTransit->value, BoxStatus::Delivered->value, BoxStatus::Arrived->value])));
-                        $collectedCount = count(array_filter($boxes, fn ($s) => in_array($s, [BoxStatus::Collected->value, BoxStatus::InTransit->value, BoxStatus::Delivered->value, BoxStatus::Arrived->value])));
+                        $shippedStatuses = [
+                            BoxStatus::InTransit->value,
+                            BoxStatus::Arrived->value,
+                            BoxStatus::ForCheckingUnloading->value,
+                            BoxStatus::UnloadedManila->value,
+                            BoxStatus::ForDeliveryScheduling->value,
+                            BoxStatus::EnRouteRoRo->value,
+                            BoxStatus::OutForDelivery->value,
+                            BoxStatus::Delivered->value,
+                        ];
+                        $collectedStatuses = array_merge([
+                            BoxStatus::Collected->value,
+                            BoxStatus::ReceivedByWarehouse->value,
+                            BoxStatus::LoadedToContainer->value,
+                        ], $shippedStatuses);
+
+                        $shippedCount = count(array_filter($boxes, fn ($s) => in_array($s, $shippedStatuses, true)));
+                        $collectedCount = count(array_filter($boxes, fn ($s) => in_array($s, $collectedStatuses, true)));
 
                         $allDelivered = $deliveredCount === $totalBoxes;
                         $someDelivered = $deliveredCount > 0 && $deliveredCount < $totalBoxes;
@@ -170,11 +192,11 @@ class BoxObserver
 
             // Sync related runsheets automatically when status changes
             // This ensures Pickup/Delivery runsheets close when boxes reach terminal states
-            app(\App\Services\RunsheetService::class)->syncRelatedRunsheets($box);
+            app(RunsheetService::class)->syncRelatedRunsheets($box);
 
             // Handle Commission updates automatically if box is cancelled, held, or damaged
             if (in_array($box->status, [BoxStatus::Cancelled, BoxStatus::Held, BoxStatus::Damaged])) {
-                app(\App\Services\CommissionService::class)->cancelCommission($box);
+                app(CommissionService::class)->cancelCommission($box);
             }
         }
 
@@ -190,24 +212,24 @@ class BoxObserver
         $stepKey = $box->tracking_step_key;
         $phase = null;
         if ($stepKey) {
-            $phaseEnum = \App\Enums\TrackingPhase::tryFrom($stepKey);
+            $phaseEnum = TrackingPhase::tryFrom($stepKey);
             $phase = $phaseEnum?->value;
         }
 
         if (! $phase) {
             $phase = match ($statusValue) {
-                'collected' => \App\Enums\TrackingPhase::PICKED_UP->value,
-                'received_by_branch' => \App\Enums\TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
-                'loaded_to_container' => \App\Enums\TrackingPhase::LOADING_CONTAINER->value,
-                'in_transit' => \App\Enums\TrackingPhase::IN_TRANSIT_SEA->value,
-                'arrived' => \App\Enums\TrackingPhase::ARRIVED_MANILA_PORT->value,
-                'out_for_delivery' => \App\Enums\TrackingPhase::OUT_FOR_DELIVERY->value,
-                'delivered' => \App\Enums\TrackingPhase::DELIVERED->value,
+                'collected' => TrackingPhase::PICKED_UP->value,
+                'received_by_branch' => TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
+                'loaded_to_container' => TrackingPhase::LOADING_CONTAINER->value,
+                'in_transit' => TrackingPhase::IN_TRANSIT_SEA->value,
+                'arrived' => TrackingPhase::ARRIVED_MANILA_PORT->value,
+                'out_for_delivery' => TrackingPhase::OUT_FOR_DELIVERY->value,
+                'delivered' => TrackingPhase::DELIVERED->value,
                 default => null,
             };
         }
 
-        \App\Models\BoxUpdate::create([
+        BoxUpdate::create([
             'box_id' => $box->id,
             'status' => $statusValue,
             'tracking_step_key' => $stepKey,
