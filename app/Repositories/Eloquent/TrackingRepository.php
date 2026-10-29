@@ -2,6 +2,8 @@
 
 namespace App\Repositories\Eloquent;
 
+use App\Enums\BatchStatus;
+use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\Role;
 use App\Enums\TrackingPhase;
@@ -12,10 +14,10 @@ use App\Models\User;
 use App\Repositories\Contracts\TrackingRepositoryInterface;
 use App\Services\TrackingCacheService;
 use App\Services\TrackingStepService;
+use Carbon\CarbonInterface;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 
@@ -55,7 +57,7 @@ class TrackingRepository implements TrackingRepositoryInterface
     {
         $boxWithRelations = [
             'updates' => function ($q) {
-                $q->orderBy('created_at', 'desc');
+                $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
             'batch',
             'boxType',
@@ -69,7 +71,7 @@ class TrackingRepository implements TrackingRepositoryInterface
         // 1. Try finding by Box tracking_number first
         $box = Box::with(array_merge($boxWithRelations, [
             'booking.boxes.updates' => function ($q) {
-                $q->orderBy('created_at', 'desc');
+                $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
             'booking.boxes.batch',
             'booking.boxes.boxType',
@@ -90,7 +92,7 @@ class TrackingRepository implements TrackingRepositoryInterface
         // 2. Check if it's a booking reference number instead of Box tracking number
         $booking = Booking::with([
             'boxes.updates' => function ($q) {
-                $q->orderBy('created_at', 'desc');
+                $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
             'boxes.batch',
             'boxes.boxType',
@@ -119,7 +121,7 @@ class TrackingRepository implements TrackingRepositoryInterface
         $disk = Storage::disk('public');
 
         $latestUpdate = $b->updates->first();
-        $activeStepKey = $b->tracking_step_key ?: $latestUpdate?->tracking_step_key ?: $latestUpdate?->tracking_phase?->value;
+        $activeStepKey = $this->resolveActiveStepKey($b, $latestUpdate);
 
         return [
             'id' => $b->id,
@@ -150,8 +152,8 @@ class TrackingRepository implements TrackingRepositoryInterface
             'estimate_delivery_message' => $b->estimate_delivery_message ?: $b->eta_message,
             'batch' => $b->batch ? [
                 'batch_number' => $b->batch->batch_number,
-                'status' => $b->batch->status instanceof \App\Enums\BatchStatus ? $b->batch->status->value : (string) $b->batch->status,
-                'status_label' => $b->batch->status instanceof \App\Enums\BatchStatus ? $b->batch->status->label() : ucwords(str_replace('_', ' ', (string) $b->batch->status)),
+                'status' => $b->batch->status instanceof BatchStatus ? $b->batch->status->value : (string) $b->batch->status,
+                'status_label' => $b->batch->status instanceof BatchStatus ? $b->batch->status->label() : ucwords(str_replace('_', ' ', (string) $b->batch->status)),
                 'container_number' => $b->batch->container_number,
                 'seal_number' => $b->batch->seal_number,
                 'vessel_name' => $b->batch->vessel_name,
@@ -160,7 +162,7 @@ class TrackingRepository implements TrackingRepositoryInterface
                 'origin_port' => $b->batch->origin_port,
                 'destination_port' => $b->batch->destination_port,
                 'branch_code' => $b->batch->branch_name,
-                'eta_at' => $b->batch->eta_at ? ($b->batch->eta_at instanceof \Carbon\CarbonInterface ? $b->batch->eta_at->format('M d, Y') : (string) $b->batch->eta_at) : null,
+                'eta_at' => $b->batch->eta_at ? ($b->batch->eta_at instanceof CarbonInterface ? $b->batch->eta_at->format('M d, Y') : (string) $b->batch->eta_at) : null,
             ] : null,
             'has_delivery_proof' => ! empty($b->delivery_proof_path),
             'has_pickup_proof' => ! empty($b->pickup_proof_path),
@@ -170,10 +172,12 @@ class TrackingRepository implements TrackingRepositoryInterface
             'has_signature' => ! empty($b->signature_path),
             'signature_url' => $b->signature_path ? '/uploads/'.ltrim($b->signature_path, '/') : null,
             'timeline' => $b->updates ? $b->updates->map(function ($update) {
+                $stepKey = $update->tracking_step_key ?: $update->tracking_phase?->value;
+
                 return [
                     'status' => $update->status,
-                    'status_label' => $this->resolveStatusLabel($update, $update->status),
-                    'tracking_step_key' => $update->tracking_step_key,
+                    'status_label' => $this->resolveStatusLabel($update, $update->status, $stepKey),
+                    'tracking_step_key' => $stepKey,
                     'tracking_phase' => $update->tracking_phase?->value,
                     'location' => $update->location,
                     'description' => $update->description,
@@ -198,19 +202,19 @@ class TrackingRepository implements TrackingRepositoryInterface
             }
         }
 
-        /** @var \Illuminate\Filesystem\FilesystemAdapter $disk */
+        /** @var FilesystemAdapter $disk */
         $disk = Storage::disk('public');
 
         $primaryEtaDate = $primaryBox->eta_date ?: $primaryBox->estimate_delivery_date;
         $primaryEtaMessage = $primaryBox->eta_message ?: $primaryBox->estimate_delivery_message ?: ($primaryEtaDate ? 'Your box is expected to be delivered on or before this date' : null);
 
         $latestUpdate = $primaryBox->updates->first();
-        $activeStepKey = $primaryBox->tracking_step_key ?: $latestUpdate?->tracking_step_key ?: $latestUpdate?->tracking_phase?->value;
+        $activeStepKey = $this->resolveActiveStepKey($primaryBox, $latestUpdate);
 
         return [
             'booking_id' => $booking->id,
             'booking_reference' => $booking->reference_number,
-            'booking_status' => $booking->status instanceof \App\Enums\BookingStatus ? $booking->status->value : (string) $booking->status,
+            'booking_status' => $booking->status instanceof BookingStatus ? $booking->status->value : (string) $booking->status,
             'confirmed_at' => $booking->confirmed_at ? $booking->confirmed_at->format('M d, Y h:i A') : null,
             'is_guest' => (bool) $booking->is_guest,
             'sender_email_masked' => $this->maskEmail($booking->sender?->email),
@@ -246,6 +250,7 @@ class TrackingRepository implements TrackingRepositoryInterface
                 }
                 $isAdmin = in_array($user->role, [Role::Admin, Role::SuperAdmin], true);
                 $isOwner = $user->role === Role::Sender && $booking->sender_id === $user->sender?->id;
+
                 return $isAdmin || $isOwner;
             })(),
             'eta_date' => $primaryEtaDate,
@@ -261,8 +266,8 @@ class TrackingRepository implements TrackingRepositoryInterface
             'signature_url' => $primaryBox->signature_path ? '/uploads/'.ltrim($primaryBox->signature_path, '/') : null,
             'batch' => $primaryBox->batch ? [
                 'batch_number' => $primaryBox->batch->batch_number,
-                'status' => $primaryBox->batch->status instanceof \App\Enums\BatchStatus ? $primaryBox->batch->status->value : (string) $primaryBox->batch->status,
-                'status_label' => $primaryBox->batch->status instanceof \App\Enums\BatchStatus ? $primaryBox->batch->status->label() : ucwords(str_replace('_', ' ', (string) $primaryBox->batch->status)),
+                'status' => $primaryBox->batch->status instanceof BatchStatus ? $primaryBox->batch->status->value : (string) $primaryBox->batch->status,
+                'status_label' => $primaryBox->batch->status instanceof BatchStatus ? $primaryBox->batch->status->label() : ucwords(str_replace('_', ' ', (string) $primaryBox->batch->status)),
                 'container_number' => $primaryBox->batch->container_number,
                 'seal_number' => $primaryBox->batch->seal_number,
                 'vessel_name' => $primaryBox->batch->vessel_name,
@@ -271,13 +276,15 @@ class TrackingRepository implements TrackingRepositoryInterface
                 'origin_port' => $primaryBox->batch->origin_port,
                 'destination_port' => $primaryBox->batch->destination_port,
                 'branch_code' => $primaryBox->batch->branch_name,
-                'eta_at' => $primaryBox->batch->eta_at ? ($primaryBox->batch->eta_at instanceof \Carbon\CarbonInterface ? $primaryBox->batch->eta_at->format('M d, Y') : (string) $primaryBox->batch->eta_at) : null,
+                'eta_at' => $primaryBox->batch->eta_at ? ($primaryBox->batch->eta_at instanceof CarbonInterface ? $primaryBox->batch->eta_at->format('M d, Y') : (string) $primaryBox->batch->eta_at) : null,
             ] : null,
             'timeline' => $primaryBox->updates ? $primaryBox->updates->map(function ($update) {
+                $stepKey = $update->tracking_step_key ?: $update->tracking_phase?->value;
+
                 return [
                     'status' => $update->status,
-                    'status_label' => $this->resolveStatusLabel($update, $update->status, $update->tracking_step_key),
-                    'tracking_step_key' => $update->tracking_step_key,
+                    'status_label' => $this->resolveStatusLabel($update, $update->status, $stepKey),
+                    'tracking_step_key' => $stepKey,
                     'tracking_phase' => $update->tracking_phase?->value,
                     'location' => $update->location,
                     'description' => $update->description,
@@ -290,6 +297,35 @@ class TrackingRepository implements TrackingRepositoryInterface
             'total_boxes_count' => $booking->boxes->count(),
             'all_boxes' => $allBoxes,
         ];
+    }
+
+    private function resolveActiveStepKey(Box $box, ?BoxUpdate $latestUpdate): ?string
+    {
+        $boxStepKey = $box->tracking_step_key;
+        $milestoneUpdate = ($latestUpdate?->tracking_step_key || $latestUpdate?->tracking_phase)
+            ? $latestUpdate
+            : $box->updates?->first(fn ($u) => ! empty($u->tracking_step_key) || ! empty($u->tracking_phase));
+        $latestUpdateKey = $milestoneUpdate?->tracking_step_key ?: $milestoneUpdate?->tracking_phase?->value;
+
+        if (! $latestUpdateKey) {
+            return $boxStepKey;
+        }
+
+        if (! $boxStepKey) {
+            return $latestUpdateKey;
+        }
+
+        $stepService = app(TrackingStepService::class);
+        $boxOrder = $stepService->getStepOrder($boxStepKey);
+        $updateOrder = $stepService->getStepOrder($latestUpdateKey);
+
+        // If the latest audit ledger record is further ahead than the box column (or at the same position),
+        // prioritize the ledger update as the source of truth to self-heal any desynced states.
+        if ($boxOrder !== null && $updateOrder !== null && $updateOrder >= $boxOrder) {
+            return $latestUpdateKey;
+        }
+
+        return $boxStepKey ?: $latestUpdateKey;
     }
 
     private function resolveStatusLabel(?BoxUpdate $update, mixed $boxStatus, ?string $trackingStepKey = null): ?string
@@ -407,12 +443,12 @@ class TrackingRepository implements TrackingRepositoryInterface
 
         $len = strlen($name);
         if ($len <= 2) {
-            $maskedName = substr($name, 0, 1) . '*';
+            $maskedName = substr($name, 0, 1).'*';
         } else {
-            $maskedName = substr($name, 0, 1) . str_repeat('*', min(5, $len - 2)) . substr($name, -1);
+            $maskedName = substr($name, 0, 1).str_repeat('*', min(5, $len - 2)).substr($name, -1);
         }
 
-        return $maskedName . '@' . $domain;
+        return $maskedName.'@'.$domain;
     }
 
     /**
@@ -425,13 +461,13 @@ class TrackingRepository implements TrackingRepositoryInterface
         /** @var User|null $user */
         $user = Auth::user();
         $userKey = $user
-            ? 'user:' . $user->id
+            ? 'user:'.$user->id
             : ($booking->sender?->email
-                ? 'email:' . strtolower(trim($booking->sender->email))
-                : 'booking:' . $booking->id);
+                ? 'email:'.strtolower(trim($booking->sender->email))
+                : 'booking:'.$booking->id);
 
-        $rateLimitUserKey = 'declaration_resend_daily:' . $userKey;
-        $rateLimitBookingKey = 'declaration_resend_daily:booking:' . $booking->id;
+        $rateLimitUserKey = 'declaration_resend_daily:'.$userKey;
+        $rateLimitBookingKey = 'declaration_resend_daily:booking:'.$booking->id;
 
         $maxAttempts = 3;
 

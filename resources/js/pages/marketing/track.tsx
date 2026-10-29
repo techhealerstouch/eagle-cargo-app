@@ -156,6 +156,8 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
             tracking_number: selectedBox.tracking_number,
             status: selectedBox.status,
             status_label: selectedBox.status_label || selectedBox.status,
+            tracking_step_key: selectedBox.tracking_step_key ?? trackingData.tracking_step_key,
+            tracking_phase: selectedBox.tracking_phase ?? trackingData.tracking_phase,
             recipient_name: selectedBox.recipient_name || trackingData.recipient_name,
             destination: selectedBox.destination || trackingData.destination,
             box_type: selectedBox.box_type || trackingData.box_type,
@@ -428,28 +430,37 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
         const firstStep = dynamicSteps[0];
         const lastStep = dynamicSteps[dynamicSteps.length - 1];
 
-        const pickupStep = dynamicSteps.find((s) =>
-            s.systemStatus === 'collected' || s.statusKey === 'collected' || s.statusKey === 'picked_up'
-        );
-
-        const transitStep = dynamicSteps.find((s) =>
+        const transitIdx = dynamicSteps.findIndex((s) =>
             s.systemStatus === 'in_transit' || s.statusKey === 'in_transit' || s.statusKey.includes('transit') || s.statusKey.includes('sea')
         );
-
-        const arrivedStep = dynamicSteps.find((s) =>
-            s.statusKey.includes('customs') || s.statusKey.includes('boc') || s.statusKey.includes('arrived') || s.systemStatus === 'arrived'
-        );
-
-        const deliveryStep = dynamicSteps.find((s) =>
+        const deliveryIdx = dynamicSteps.findIndex((s) =>
             s.systemStatus === 'out_for_delivery' || s.statusKey === 'out_for_delivery' || s.statusKey.includes('delivery')
         );
+
+        const defaultPickupStep = dynamicSteps.find((s) =>
+            s.systemStatus === 'collected' || s.statusKey === 'collected' || s.statusKey === 'picked_up'
+        );
+        const pickupStep = (currentStepIndex > 0 && transitIdx !== -1 && currentStepIndex < transitIdx)
+            ? dynamicSteps[currentStepIndex]
+            : defaultPickupStep;
+
+        const transitStep = transitIdx !== -1 ? dynamicSteps[transitIdx] : undefined;
+
+        const defaultArrivedStep = dynamicSteps.find((s) =>
+            s.statusKey.includes('customs') || s.statusKey.includes('boc') || s.statusKey.includes('arrived') || s.systemStatus === 'arrived'
+        );
+        const arrivedStep = (transitIdx !== -1 && deliveryIdx !== -1 && currentStepIndex > transitIdx && currentStepIndex < deliveryIdx)
+            ? dynamicSteps[currentStepIndex]
+            : defaultArrivedStep;
+
+        const deliveryStep = deliveryIdx !== -1 ? dynamicSteps[deliveryIdx] : undefined;
 
         const anchors = [firstStep, pickupStep, transitStep, arrivedStep, deliveryStep, lastStep].filter(
             (step, idx, arr): step is NormalizedStep => Boolean(step) && arr.indexOf(step) === idx
         );
 
         return anchors.length >= 3 ? anchors : dynamicSteps.slice(0, 5);
-    }, [dynamicSteps]);
+    }, [dynamicSteps, currentStepIndex]);
 
     const stepperCurrentIndex = useMemo(() => {
         if (!activeTrackingData || stepperSteps.length === 0) {

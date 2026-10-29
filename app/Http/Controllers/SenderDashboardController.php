@@ -70,9 +70,14 @@ class SenderDashboardController extends Controller
             BoxStatus::LoadedToContainer,
             BoxStatus::InTransit,
             BoxStatus::Arrived,
+            BoxStatus::ForCheckingUnloading,
+            BoxStatus::UnloadedManila,
+            BoxStatus::ForDeliveryScheduling,
+            BoxStatus::EnRouteRoRo,
             BoxStatus::OutForDelivery,
             BoxStatus::Damaged,
             BoxStatus::Held,
+            BoxStatus::HeldBulging,
         ]);
         $history = collect();
 

@@ -115,6 +115,10 @@ class TrackingStepService
             $step['order'] = $index + 1;
             $step['step_type'] = $this->resolveStepType($step);
 
+            if (($step['key'] ?? null) === 'received_manila_warehouse' && ($step['system_status'] ?? null) === 'arrived') {
+                $step['system_status'] = 'unloaded_manila';
+            }
+
             return $step;
         })->all();
     }

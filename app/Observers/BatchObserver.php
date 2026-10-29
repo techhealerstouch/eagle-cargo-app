@@ -4,12 +4,13 @@ namespace App\Observers;
 
 use App\Enums\BatchStatus;
 use App\Enums\BoxStatus;
+use App\Http\Controllers\PublicScheduleAndRateController;
 use App\Models\Batch;
-use App\Models\BoxUpdate;
 use App\Models\User;
 use App\Notifications\BatchLifecycleNotification;
 use App\Notifications\BatchStatusNotification;
 use App\Services\BatchService;
+use App\Services\CalendarEventService;
 use App\Services\TrackingCacheService;
 use App\Services\TrackingStepService;
 use Illuminate\Support\Facades\Auth;
@@ -43,27 +44,28 @@ class BatchObserver
      */
     public function created(Batch $batch): void
     {
-        \App\Http\Controllers\PublicScheduleAndRateController::forgetUpcomingBatchesCache();
-        app(\App\Services\CalendarEventService::class)->syncBatchEvents($batch);
+        PublicScheduleAndRateController::forgetUpcomingBatchesCache();
+        app(CalendarEventService::class)->syncBatchEvents($batch);
     }
 
     /**
      * Handle the Batch "updated" event.
      */
-    
+
     /**
      * Handle the Batch "deleted" event.
      */
     public function deleted(Batch $batch): void
     {
-        \App\Http\Controllers\PublicScheduleAndRateController::forgetUpcomingBatchesCache();
+        PublicScheduleAndRateController::forgetUpcomingBatchesCache();
         app(TrackingCacheService::class)->forgetBatch($batch);
     }
+
     public function updated(Batch $batch): void
     {
-        \App\Http\Controllers\PublicScheduleAndRateController::forgetUpcomingBatchesCache();
+        PublicScheduleAndRateController::forgetUpcomingBatchesCache();
         app(TrackingCacheService::class)->forgetBatch($batch);
-        app(\App\Services\CalendarEventService::class)->syncBatchEvents($batch);
+        app(CalendarEventService::class)->syncBatchEvents($batch);
 
         if ($batch->wasChanged('status')) {
             $this->handleStatusChange($batch);
@@ -77,11 +79,11 @@ class BatchObserver
     {
         $newStatus = $batch->status;
 
-        // Cascade batch status to box statuses
-        $this->cascadeStatusToBoxes($batch, $newStatus);
-
-        // Keep box updates in sync with major tracking milestones.
+        // Keep box updates and tracking_step_key in sync with major tracking milestones.
         $this->cascadeTrackingPhaseToBoxes($batch, $newStatus);
+
+        // Cascade batch status to any remaining eligible box statuses
+        $this->cascadeStatusToBoxes($batch, $newStatus);
 
         // Notify admins
         if (in_array($newStatus, self::ADMIN_NOTIFIABLE_STATUSES, true)) {
@@ -112,9 +114,27 @@ class BatchObserver
             return;
         }
 
+        $trackingStepService = app(TrackingStepService::class);
+        $batchService = app(BatchService::class);
+        $targetPhase = $batchService->resolveTrackingPhaseForStatus($status);
+        $targetOrder = $targetPhase ? $trackingStepService->getStepOrder($targetPhase->value) : null;
+
         foreach ($batch->boxes as $box) {
+            // Do not demote or regress boxes that have already reached or passed this journey stage
+            if ($targetOrder !== null) {
+                $currentKey = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;
+                $currentOrder = $currentKey ? $trackingStepService->getStepOrder($currentKey) : null;
+                if ($currentOrder !== null && $currentOrder >= $targetOrder) {
+                    continue;
+                }
+            }
+
             if ($box->status?->canTransitionTo($boxStatus)) {
-                $box->update(['status' => $boxStatus]);
+                $updates = ['status' => $boxStatus];
+                if ($targetPhase !== null && $box->tracking_step_key !== $targetPhase->value) {
+                    $updates['tracking_step_key'] = $targetPhase->value;
+                }
+                $box->update($updates);
             }
         }
     }
@@ -122,31 +142,11 @@ class BatchObserver
     private function cascadeTrackingPhaseToBoxes(Batch $batch, BatchStatus $status): void
     {
         $batchService = app(BatchService::class);
-        $trackingStepService = app(TrackingStepService::class);
 
         $trackingPhase = $batchService->resolveTrackingPhaseForStatus($status);
 
         if ($trackingPhase === null) {
             return;
-        }
-
-        // --- Prevent Downgrading ---
-        // If the batch already has boxes at this or a later tracking phase, don't revert them.
-        $boxIds = $batch->boxes->pluck('id');
-        if ($boxIds->isNotEmpty()) {
-            $latestUpdate = BoxUpdate::whereIn('box_id', $boxIds)
-                ->whereNotNull('tracking_phase')
-                ->latest()
-                ->first();
-
-            if ($latestUpdate) {
-                $currentOrder = $trackingStepService->getStepOrder($latestUpdate->tracking_phase->value) ?? 0;
-                $newOrder = $trackingStepService->getStepOrder($trackingPhase->value) ?? 0;
-
-                if ($currentOrder >= $newOrder) {
-                    return;
-                }
-            }
         }
 
         $description = match ($status) {
@@ -167,6 +167,8 @@ class BatchObserver
             default => null,
         };
 
+        // Note: bulkUpdateTrackingPhase performs per-box forward progression checks,
+        // advancing eligible boxes while preserving any boxes that have already advanced further.
         $batchService->bulkUpdateTrackingPhase(
             $batch,
             $trackingPhase,

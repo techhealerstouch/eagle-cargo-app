@@ -149,8 +149,13 @@ class BatchService
             }
         }
 
-        $updated = DB::transaction(function () use ($batch, $trackingPhase, $updatedBy, $description, $targetStatus): int {
-            $boxes = $batch->boxes()->select(['id', 'status', 'tracking_number'])->get();
+        $targetOrder = $this->trackingStepService->getStepOrder($trackingPhase->value);
+
+        $updated = DB::transaction(function () use ($batch, $trackingPhase, $targetOrder, $updatedBy, $description, $targetStatus): int {
+            $boxes = $batch->boxes()
+                ->with('latestUpdate')
+                ->select(['id', 'batch_id', 'booking_id', 'serial_number', 'status', 'tracking_number', 'tracking_step_key'])
+                ->get();
 
             if ($boxes->isEmpty()) {
                 return 0;
@@ -166,12 +171,22 @@ class BatchService
             $updates = [];
 
             foreach ($boxes as $box) {
+                // Prevent downgrade or duplicate updates on boxes that already reached or passed this milestone
+                $currentBoxStepKey = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;
+                if ($targetOrder !== null && $currentBoxStepKey) {
+                    $currentBoxOrder = $this->trackingStepService->getStepOrder($currentBoxStepKey);
+                    if ($currentBoxOrder !== null && $currentBoxOrder >= $targetOrder) {
+                        continue;
+                    }
+                }
+
                 $currentStatus = $box->status instanceof BoxStatus
                     ? $box->status
                     : BoxStatus::from((string) $box->status);
 
                 $resolvedStatus = $targetStatus ?? $currentStatus;
 
+                $boxUpdates = [];
                 if ($targetStatus !== null && $currentStatus !== $targetStatus) {
                     if (! $currentStatus->canTransitionTo($targetStatus)) {
                         throw new \InvalidArgumentException(sprintf(
@@ -183,12 +198,21 @@ class BatchService
                         ));
                     }
 
-                    $box->update(['status' => $targetStatus]);
+                    $boxUpdates['status'] = $targetStatus;
+                }
+
+                if ($box->tracking_step_key !== $trackingPhase->value) {
+                    $boxUpdates['tracking_step_key'] = $trackingPhase->value;
+                }
+
+                if (! empty($boxUpdates)) {
+                    $box->update($boxUpdates);
                 }
 
                 $updates[] = [
                     'box_id' => $box->id,
                     'status' => $resolvedStatus->value,
+                    'tracking_step_key' => $trackingPhase->value,
                     'tracking_phase' => $trackingPhase->value,
                     'location' => $trackingPhase->phase(),
                     'description' => $resolvedDescription,
@@ -198,15 +222,15 @@ class BatchService
                 ];
             }
 
-            BoxUpdate::query()->insert($updates);
+            if (! empty($updates)) {
+                BoxUpdate::query()->insert($updates);
+            }
 
             return count($updates);
         });
 
-        if ($updated > 0) {
-            $this->syncBatchStatusWithTrackingPhase($batch, $trackingPhase);
-            app(TrackingCacheService::class)->forgetBatch($batch);
-        }
+        $this->syncBatchStatusWithTrackingPhase($batch, $trackingPhase);
+        app(TrackingCacheService::class)->forgetBatch($batch);
 
         return $updated;
     }
@@ -331,8 +355,6 @@ class BatchService
 
         return sprintf('%s-%s-%03d', $prefix, $dateCode, $sequence);
     }
-
-
 
     private function isManifestThresholdReached(Batch $batch): bool
     {
