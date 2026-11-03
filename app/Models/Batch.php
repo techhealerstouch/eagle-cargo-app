@@ -61,6 +61,13 @@ class Batch extends Model
         'status' => BatchStatus::class,
     ];
 
+    /**
+     * When true, BatchObserver skips the status-change cascade (box re-sync and
+     * admin/sender lifecycle notifications). Used by admin corrections, where the
+     * boxes are realigned explicitly and customers must not be re-notified.
+     */
+    public bool $skipLifecycleCascade = false;
+
     public function boxes()
     {
         return $this->hasMany(Box::class);

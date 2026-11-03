@@ -126,7 +126,7 @@ class BoxObserver
         if ($box->wasChanged('status')) {
             // Notify sender (via User if linked, otherwise directly to Sender)
             $sender = $box->booking?->sender;
-            if ($sender) {
+            if ($sender && ! Box::statusNotificationsMuted()) {
                 $notifiable = $sender->user ?? $sender;
                 $notifiable->notify(new BoxStatusChanged($box));
             }
@@ -176,13 +176,13 @@ class BoxObserver
                         if ($allDelivered && $lockedBooking->status !== BookingStatus::Delivered) {
                             $lockedBooking->bypassStatusValidation = true;
                             $lockedBooking->update(['status' => BookingStatus::Delivered]);
-                        } elseif ($someDelivered && ! in_array($lockedBooking->status, [BookingStatus::Delivered, BookingStatus::PartiallyDelivered])) {
+                        } elseif ($someDelivered && $lockedBooking->status !== BookingStatus::PartiallyDelivered) {
                             $lockedBooking->bypassStatusValidation = true;
                             $lockedBooking->update(['status' => BookingStatus::PartiallyDelivered]);
-                        } elseif ($allShipped && ! in_array($lockedBooking->status, [BookingStatus::Delivered, BookingStatus::PartiallyDelivered, BookingStatus::Shipped])) {
+                        } elseif ($allShipped && $lockedBooking->status !== BookingStatus::Shipped) {
                             $lockedBooking->bypassStatusValidation = true;
                             $lockedBooking->update(['status' => BookingStatus::Shipped]);
-                        } elseif ($allCollected && ! in_array($lockedBooking->status, [BookingStatus::Delivered, BookingStatus::PartiallyDelivered, BookingStatus::Shipped, BookingStatus::Collected])) {
+                        } elseif ($allCollected && $lockedBooking->status !== BookingStatus::Collected) {
                             $lockedBooking->bypassStatusValidation = true;
                             $lockedBooking->update(['status' => BookingStatus::Collected]);
                         }

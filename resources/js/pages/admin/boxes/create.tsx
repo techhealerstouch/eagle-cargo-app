@@ -10,7 +10,7 @@ import type { BreadcrumbItem } from '@/types';
 interface Booking {
     id: number;
     reference_number: string;
-    sender: { first_name: string; last_name: string };
+    sender?: { first_name: string; last_name: string } | null;
 }
 
 export default function BoxesCreate({ bookings }: { bookings: Booking[] }) {
@@ -74,7 +74,7 @@ export default function BoxesCreate({ bookings }: { bookings: Booking[] }) {
                                     <option value="">Select a booking</option>
                                     {bookings.map((b) => (
                                         <option key={b.id} value={b.id}>
-                                            {b.reference_number} — {b.sender.first_name} {b.sender.last_name}
+                                            {b.reference_number} — {b.sender ? `${b.sender.first_name} ${b.sender.last_name}` : 'No Sender'}
                                         </option>
                                     ))}
                                 </select>

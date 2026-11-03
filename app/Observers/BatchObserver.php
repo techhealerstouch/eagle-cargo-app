@@ -67,7 +67,7 @@ class BatchObserver
         app(TrackingCacheService::class)->forgetBatch($batch);
         app(CalendarEventService::class)->syncBatchEvents($batch);
 
-        if ($batch->wasChanged('status')) {
+        if ($batch->wasChanged('status') && ! $batch->skipLifecycleCascade) {
             $this->handleStatusChange($batch);
         }
     }
@@ -119,7 +119,7 @@ class BatchObserver
         $targetPhase = $batchService->resolveTrackingPhaseForStatus($status);
         $targetOrder = $targetPhase ? $trackingStepService->getStepOrder($targetPhase->value) : null;
 
-        foreach ($batch->boxes as $box) {
+        foreach ($batch->boxes()->with('latestUpdate')->get() as $box) {
             // Do not demote or regress boxes that have already reached or passed this journey stage
             if ($targetOrder !== null) {
                 $currentKey = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;

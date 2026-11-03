@@ -129,25 +129,65 @@ class BatchController extends Controller
         $validated = $request->validated();
         $trackingPhase = $validated['tracking_phase'] ?? null;
         $trackingDescription = $validated['tracking_description'] ?? null;
-        unset($validated['tracking_phase'], $validated['tracking_description']);
+        $requestedStatus = $validated['status'] ?? null;
+        $originalBatchStatus = $batch->status instanceof BackedEnum ? $batch->status->value : (string) $batch->status;
+        $isBackwardStatus = $this->isBackwardBatchStatus($batch, $requestedStatus);
+        unset($validated['tracking_phase'], $validated['tracking_description'], $validated['is_correction']);
+
+        $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
+
+        if (empty($trackingPhase) && ! empty($requestedStatus)) {
+            $targetBatchEnum = BatchStatus::tryFrom((string) $requestedStatus);
+            $inferredPhase = $targetBatchEnum ? $batchService->resolveTrackingPhaseForStatus($targetBatchEnum, true)?->value : null;
+
+            if ($inferredPhase && ($isBackwardStatus || $request->boolean('is_correction') || $this->hasAnyBoxAheadOfTrackingPhase($batch, $inferredPhase, $trackingSteps))) {
+                $trackingPhase = $inferredPhase;
+            }
+        }
 
         try {
-            DB::transaction(function () use ($batch, $validated, $trackingPhase, $trackingDescription, $batchService, $trackingStepService, $request) {
-                $batchService->update($batch, $validated);
-
+            DB::transaction(function () use ($batch, $validated, $trackingPhase, $trackingDescription, $requestedStatus, $originalBatchStatus, $isBackwardStatus, $trackingSteps, $batchService, $request) {
                 if (! empty($trackingPhase)) {
-                    $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
                     $trackingStep = $trackingSteps->firstWhere('key', $trackingPhase);
 
                     if ($trackingPhase !== TrackingPhase::DELIVERED->value && $this->userCanApplyTrackingStep($request->user(), $trackingStep)) {
-                        $batchService->bulkUpdateTrackingPhase(
-                            $batch,
-                            $trackingPhase,
-                            $request->user()?->id,
-                            $trackingDescription,
-                            $trackingStep['system_status'] ?? null,
-                        );
+                        $needsCorrection = $request->boolean('is_correction')
+                            || $isBackwardStatus
+                            || $this->needsTrackingPhaseCorrection($batch, $trackingPhase, $trackingSteps);
+                        $overrideNote = $validated['override_note'] ?? ($request->input('override_note') ?? null);
+
+                        if ($needsCorrection) {
+                            if (! app(DeveloperAccess::class)->isDeveloperOrAdmin($request->user())) {
+                                throw new \InvalidArgumentException('Only Admins and Super Admins are authorized to perform tracking milestone corrections.');
+                            }
+
+                            $batchService->adminCorrectTrackingPhase(
+                                $batch,
+                                $trackingPhase,
+                                (int) $request->user()?->id,
+                                (string) $overrideNote,
+                                $trackingStep['system_status'] ?? null,
+                                $requestedStatus,
+                            );
+                            unset($validated['status'], $validated['override_note']);
+                        } else {
+                            $batchService->bulkUpdateTrackingPhase(
+                                $batch,
+                                $trackingPhase,
+                                $request->user()?->id,
+                                $trackingDescription,
+                                $trackingStep['system_status'] ?? null,
+                            );
+
+                            if (($validated['status'] ?? null) === $originalBatchStatus) {
+                                unset($validated['status']);
+                            }
+                        }
                     }
+                }
+
+                if (! empty($validated)) {
+                    $batchService->update($batch, $validated);
                 }
             });
         } catch (\InvalidArgumentException $exception) {
@@ -166,26 +206,65 @@ class BatchController extends Controller
         $validated = $request->validated();
         $trackingPhase = $validated['tracking_phase'] ?? null;
         $trackingDescription = $validated['tracking_description'] ?? null;
-        unset($validated['tracking_phase'], $validated['tracking_description']);
+        unset($validated['tracking_phase'], $validated['tracking_description'], $validated['is_correction']);
 
         $attributesToUpdate = array_filter($validated, function ($val) {
             return $val !== null;
         });
 
+        $requestedStatus = $attributesToUpdate['status'] ?? null;
+        $originalBatchStatus = $batch->status instanceof BackedEnum ? $batch->status->value : (string) $batch->status;
+        $isBackwardStatus = $this->isBackwardBatchStatus($batch, $requestedStatus);
+        $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
+
+        if (empty($trackingPhase) && ! empty($requestedStatus)) {
+            $targetBatchEnum = BatchStatus::tryFrom((string) $requestedStatus);
+            $inferredPhase = $targetBatchEnum ? $batchService->resolveTrackingPhaseForStatus($targetBatchEnum, true)?->value : null;
+
+            if ($inferredPhase && ($isBackwardStatus || $request->boolean('is_correction') || $this->hasAnyBoxAheadOfTrackingPhase($batch, $inferredPhase, $trackingSteps))) {
+                $trackingPhase = $inferredPhase;
+            }
+        }
+
         try {
-            DB::transaction(function () use ($batch, $attributesToUpdate, $trackingPhase, $trackingDescription, $batchService, $trackingStepService, $request) {
+            DB::transaction(function () use ($batch, $attributesToUpdate, $trackingPhase, $trackingDescription, $requestedStatus, $originalBatchStatus, $isBackwardStatus, $trackingSteps, $batchService, $request) {
                 if (! empty($trackingPhase)) {
-                    $trackingSteps = $this->configuredTrackingSteps($trackingStepService);
                     $trackingStep = $trackingSteps->firstWhere('key', $trackingPhase);
 
                     if ($trackingPhase !== TrackingPhase::DELIVERED->value && $this->userCanApplyTrackingStep($request->user(), $trackingStep)) {
-                        $batchService->bulkUpdateTrackingPhase(
-                            $batch,
-                            $trackingPhase,
-                            $request->user()?->id,
-                            $trackingDescription,
-                            $trackingStep['system_status'] ?? null,
-                        );
+                        $needsCorrection = $request->boolean('is_correction')
+                            || $isBackwardStatus
+                            || $this->needsTrackingPhaseCorrection($batch, $trackingPhase, $trackingSteps);
+                        $overrideNote = $attributesToUpdate['override_note'] ?? ($request->input('override_note') ?? null);
+
+                        if ($needsCorrection) {
+                            if (! app(DeveloperAccess::class)->isDeveloperOrAdmin($request->user())) {
+                                throw new \InvalidArgumentException('Only Admins and Super Admins are authorized to perform tracking milestone corrections.');
+                            }
+
+                            $batchService->adminCorrectTrackingPhase(
+                                $batch,
+                                $trackingPhase,
+                                (int) $request->user()?->id,
+                                (string) $overrideNote,
+                                $trackingStep['system_status'] ?? null,
+                                $requestedStatus,
+                            );
+                            // Avoid redundant batch update for status and override note if already updated by correction
+                            unset($attributesToUpdate['status'], $attributesToUpdate['override_note']);
+                        } else {
+                            $batchService->bulkUpdateTrackingPhase(
+                                $batch,
+                                $trackingPhase,
+                                $request->user()?->id,
+                                $trackingDescription,
+                                $trackingStep['system_status'] ?? null,
+                            );
+
+                            if (($attributesToUpdate['status'] ?? null) === $originalBatchStatus) {
+                                unset($attributesToUpdate['status']);
+                            }
+                        }
                     }
                 }
 
@@ -194,9 +273,9 @@ class BatchController extends Controller
                 }
             });
         } catch (\InvalidArgumentException $exception) {
-            return back()->with('error', $exception->getMessage());
+            return back()->withErrors(['status' => $exception->getMessage()])->with('error', $exception->getMessage());
         } catch (\RuntimeException $exception) {
-            return back()->with('error', $exception->getMessage());
+            return back()->withErrors(['status' => $exception->getMessage()])->with('error', $exception->getMessage());
         }
 
         return back()->with('success', sprintf('Batch %s updated successfully.', $batch->batch_number));
@@ -483,6 +562,8 @@ class BatchController extends Controller
                 Rule::in($trackingSteps->pluck('key')->all()),
             ],
             'description' => ['nullable', 'string', 'max:500'],
+            'is_correction' => ['nullable', 'boolean'],
+            'correction_reason' => ['nullable', 'string', 'max:1000'],
         ]);
 
         if ($validated['tracking_phase'] === TrackingPhase::DELIVERED->value) {
@@ -495,15 +576,46 @@ class BatchController extends Controller
             abort(403, 'Unauthorized tracking phase.');
         }
 
-        if (in_array($batch->status, [BatchStatus::Open, BatchStatus::Loading], true)) {
-            return back()->with('error', 'Cannot apply tracking updates to a batch that is still open or loading.');
+        $isCorrection = $request->boolean('is_correction');
+        $isPastOrCurrent = $this->needsTrackingPhaseCorrection($batch, $validated['tracking_phase'], $trackingSteps);
+
+        if ($isCorrection || $isPastOrCurrent) {
+            $isDeveloperOrAdmin = app(DeveloperAccess::class)->isDeveloperOrAdmin($request->user());
+            if (! $isDeveloperOrAdmin) {
+                return back()->with('error', 'Only Admins and Super Admins are authorized to perform tracking milestone corrections.');
+            }
+
+            $reason = trim((string) ($validated['correction_reason'] ?? $validated['description'] ?? ''));
+            if (mb_strlen($reason) < 10) {
+                return back()->withErrors([
+                    'correction_reason' => 'A correction reason of at least 10 characters is required when reverting or correcting tracking milestones.',
+                ]);
+            }
+
+            try {
+                $updated = $batchService->adminCorrectTrackingPhase(
+                    $batch,
+                    $validated['tracking_phase'],
+                    (int) $request->user()?->id,
+                    $reason,
+                    $trackingStep['system_status'] ?? null,
+                );
+            } catch (\InvalidArgumentException|\RuntimeException $exception) {
+                return back()->with('error', $exception->getMessage());
+            }
+
+            return back()->with(
+                'success',
+                sprintf(
+                    'Admin correction applied: tracking milestone set to "%s" for %d box(es).',
+                    str_replace('_', ' ', (string) $validated['tracking_phase']),
+                    $updated,
+                ),
+            );
         }
 
-        if ($this->areAllBoxesAtOrPastTrackingPhase($batch, $validated['tracking_phase'], $trackingSteps)) {
-            return back()->with(
-                'error',
-                'This batch is already at or past that tracking phase. Select a later phase to continue.',
-            );
+        if (in_array($batch->status, [BatchStatus::Open, BatchStatus::Loading], true)) {
+            return back()->with('error', 'Cannot apply tracking updates to a batch that is still open or loading.');
         }
 
         try {
@@ -767,7 +879,78 @@ class BatchController extends Controller
 
     private function areAllBoxesAtOrPastTrackingPhase(Batch $batch, string $targetPhase, Collection $trackingSteps): bool
     {
-        $boxes = $batch->boxes()->with('latestUpdate')->select(['id', 'batch_id', 'tracking_step_key'])->get();
+        $boxes = $batch->boxes()->with('latestUpdate')->select(['id', 'batch_id', 'status', 'tracking_step_key'])->get();
+
+        if ($boxes->isEmpty()) {
+            return false;
+        }
+
+        $targetOrder = $this->trackingStepOrder($trackingSteps, $targetPhase);
+        if ($targetOrder === null) {
+            return false;
+        }
+
+        $activeCount = 0;
+
+        foreach ($boxes as $box) {
+            $statusValue = $box->status instanceof BackedEnum ? $box->status->value : (string) $box->status;
+            if (in_array($statusValue, [BoxStatus::Delivered->value, BoxStatus::Cancelled->value], true)) {
+                continue;
+            }
+
+            $activeCount++;
+            $currentPhase = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;
+            $currentOrder = $this->trackingStepOrder($trackingSteps, $currentPhase);
+
+            if ($currentOrder === null || $currentOrder < $targetOrder) {
+                return false;
+            }
+        }
+
+        return $activeCount > 0;
+    }
+
+    private function needsTrackingPhaseCorrection(Batch $batch, string $targetPhase, Collection $trackingSteps): bool
+    {
+        $boxes = $batch->boxes()->with('latestUpdate')->select(['id', 'batch_id', 'status', 'tracking_step_key'])->get();
+
+        if ($boxes->isEmpty()) {
+            return false;
+        }
+
+        $targetOrder = $this->trackingStepOrder($trackingSteps, $targetPhase);
+        if ($targetOrder === null) {
+            return false;
+        }
+
+        $activeCount = 0;
+        $allAtOrPast = true;
+
+        foreach ($boxes as $box) {
+            $statusValue = $box->status instanceof BackedEnum ? $box->status->value : (string) $box->status;
+            if (in_array($statusValue, [BoxStatus::Delivered->value, BoxStatus::Cancelled->value], true)) {
+                continue;
+            }
+
+            $activeCount++;
+            $currentPhase = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;
+            $currentOrder = $this->trackingStepOrder($trackingSteps, $currentPhase);
+
+            if ($currentOrder !== null && $currentOrder > $targetOrder) {
+                return true;
+            }
+
+            if ($currentOrder === null || $currentOrder < $targetOrder) {
+                $allAtOrPast = false;
+            }
+        }
+
+        return $activeCount > 0 && $allAtOrPast;
+    }
+
+    private function hasAnyBoxAheadOfTrackingPhase(Batch $batch, string $targetPhase, Collection $trackingSteps): bool
+    {
+        $boxes = $batch->boxes()->with('latestUpdate')->select(['id', 'batch_id', 'status', 'tracking_step_key'])->get();
 
         if ($boxes->isEmpty()) {
             return false;
@@ -779,15 +962,38 @@ class BatchController extends Controller
         }
 
         foreach ($boxes as $box) {
+            $statusValue = $box->status instanceof BackedEnum ? $box->status->value : (string) $box->status;
+            if (in_array($statusValue, [BoxStatus::Delivered->value, BoxStatus::Cancelled->value], true)) {
+                continue;
+            }
+
             $currentPhase = $box->tracking_step_key ?: $box->latestUpdate?->tracking_step_key ?: $box->latestUpdate?->tracking_phase?->value;
             $currentOrder = $this->trackingStepOrder($trackingSteps, $currentPhase);
 
-            if ($currentOrder === null || $currentOrder < $targetOrder) {
-                return false;
+            if ($currentOrder !== null && $currentOrder > $targetOrder) {
+                return true;
             }
         }
 
-        return true;
+        return false;
+    }
+
+    private function isBackwardBatchStatus(Batch $batch, ?string $targetStatus): bool
+    {
+        if (! $targetStatus) {
+            return false;
+        }
+
+        $currentValue = $batch->status instanceof BackedEnum ? $batch->status->value : (string) $batch->status;
+        if ($currentValue === $targetStatus) {
+            return false;
+        }
+
+        $statuses = array_map(fn (BatchStatus $s): string => $s->value, BatchStatus::cases());
+        $currentIndex = array_search($currentValue, $statuses, true);
+        $newIndex = array_search($targetStatus, $statuses, true);
+
+        return $newIndex !== false && $currentIndex !== false && $newIndex < $currentIndex;
     }
 
     private function latestTrackingPhaseForBatch(Batch $batch): ?string

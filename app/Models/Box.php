@@ -88,6 +88,37 @@ class Box extends Model
 
     public bool $bypassStatusValidation = false;
 
+    /**
+     * Process-wide switch that mutes sender status-change notifications.
+     * Scoped via withoutStatusNotifications(); used by admin corrections.
+     */
+    protected static bool $statusNotificationsMuted = false;
+
+    /**
+     * Run the callback without dispatching BoxStatusChanged notifications to senders.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    public static function withoutStatusNotifications(callable $callback): mixed
+    {
+        $previous = static::$statusNotificationsMuted;
+        static::$statusNotificationsMuted = true;
+
+        try {
+            return $callback();
+        } finally {
+            static::$statusNotificationsMuted = $previous;
+        }
+    }
+
+    public static function statusNotificationsMuted(): bool
+    {
+        return static::$statusNotificationsMuted;
+    }
+
     protected $appends = ['destination'];
 
     /**

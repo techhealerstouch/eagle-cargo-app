@@ -52,6 +52,13 @@ import type { BreadcrumbItem } from '@/types';
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
+const CORRECTION_REASON_PRESETS = [
+    'Mistaken status update; container is still sailing',
+    'Accidentally updated wrong company / batch',
+    'Vessel departure delayed; rolling back milestone',
+    'Logistics data entry correction by admin',
+];
+
 interface Recipient {
     id: number;
     name: string;
@@ -171,8 +178,10 @@ export default function BatchShow({
     batch: BatchData;
     trackingPhases?: TrackingPhaseOption[];
 }) {
-    const { props } = usePage<{ flash: PageFlash }>();
+    const { props } = usePage<any>();
     const flash = props.flash ?? {};
+    const auth = props.auth;
+    const isSuperAdminOrAdmin = ['admin', 'super_admin'].includes(auth?.user?.role) || auth?.user?.is_developer;
 
     // Show flash toasts
     useEffect(() => {
@@ -261,6 +270,7 @@ export default function BatchShow({
     // Bulk tracking-phase form state
     const [selectedTrackingPhase, setSelectedTrackingPhase] = useState(initialTrackingPhase);
     const [trackingDescription, setTrackingDescription] = useState('');
+    const [correctionReason, setCorrectionReason] = useState('');
     const [isTrackingPhaseSubmitting, setIsTrackingPhaseSubmitting] = useState(false);
     const [isArriving, setIsArriving] = useState(false);
     const [isCustomsSubmitting, setIsCustomsSubmitting] = useState<string | null>(null);
@@ -411,8 +421,13 @@ export default function BatchShow({
             return;
         }
 
-        if (selectedPhaseIsCurrentOrPast) {
+        if (selectedPhaseIsCurrentOrPast && !isSuperAdminOrAdmin) {
             toast.error('This batch is already at or past that tracking phase. Select a later phase to continue.');
+            return;
+        }
+
+        if (selectedPhaseIsCurrentOrPast && correctionReason.trim().length < 10) {
+            toast.error('A correction reason of at least 10 characters is required to revert tracking milestones.');
             return;
         }
 
@@ -423,11 +438,14 @@ export default function BatchShow({
             {
                 tracking_phase: selectedTrackingPhase,
                 description: trackingDescription.trim() || null,
+                is_correction: selectedPhaseIsCurrentOrPast ? true : undefined,
+                correction_reason: selectedPhaseIsCurrentOrPast ? correctionReason.trim() : undefined,
             },
             {
                 preserveScroll: true,
                 onSuccess: () => {
                     setTrackingDescription('');
+                    setCorrectionReason('');
                 },
                 onFinish: () => setIsTrackingPhaseSubmitting(false),
             }
@@ -881,6 +899,195 @@ export default function BatchShow({
                     </div>
                 </div>
 
+                {/* Bulk Tracking Phase Panel */}
+                <div id="bulk-tracking-phase" className="bg-card rounded-2xl border border-border shadow-2xs overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-card">
+                        <div className="flex items-center gap-2.5">
+                            <div className="size-7 rounded-md bg-amber-500 flex items-center justify-center text-white shadow-2xs shrink-0">
+                                <Ship className="size-4" />
+                            </div>
+                            <div>
+                                <h2 className="font-sans text-sm font-semibold text-brand-text">
+                                    Bulk Tracking Phase Update
+                                </h2>
+                            </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+                            BOC & Transit Milestones
+                        </span>
+                    </div>
+
+                    <form className="p-4 sm:p-5 space-y-3" onSubmit={submitTrackingPhaseUpdate}>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-1">
+                                <label
+                                    htmlFor="tracking-phase-select"
+                                    className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light ml-0.5"
+                                >
+                                    Tracking Phase
+                                </label>
+                                <select
+                                    id="tracking-phase-select"
+                                    value={selectedTrackingPhase}
+                                    onChange={(e) => setSelectedTrackingPhase(e.target.value)}
+                                    disabled={!hasBatchBoxes || isTrackingPhaseSubmitting}
+                                    className="flex h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-semibold text-brand-text shadow-2xs focus:ring-1 focus:ring-brand-rust outline-none disabled:cursor-not-allowed disabled:bg-brand-warm/10"
+                                >
+                                    {trackingPhases.length === 0 && (
+                                        <option value="">No tracking phases available</option>
+                                    )}
+                                    {trackingPhases.map((phase) => {
+                                        const isPastOrCurrent =
+                                            latestPhaseOrder !== null &&
+                                            phase.order <= latestPhaseOrder;
+                                        const isCurrent = phase.value === batch.latest_tracking_phase;
+                                        const isDisabled = isPastOrCurrent && !isSuperAdminOrAdmin;
+
+                                        return (
+                                            <option
+                                                key={phase.value}
+                                                value={phase.value}
+                                                disabled={isDisabled}
+                                            >
+                                                {phase.group} - {phase.label}
+                                                {isCurrent ? ' (current)' : isPastOrCurrent ? ' (correction / revert)' : ''}
+                                            </option>
+                                        );
+                                    })}
+                                </select>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label
+                                    htmlFor="tracking-phase-description"
+                                    className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light ml-0.5"
+                                >
+                                    Description (Optional)
+                                </label>
+                                <input
+                                    id="tracking-phase-description"
+                                    type="text"
+                                    maxLength={500}
+                                    value={trackingDescription}
+                                    onChange={(e) => setTrackingDescription(e.target.value)}
+                                    disabled={!hasBatchBoxes || isTrackingPhaseSubmitting}
+                                    placeholder="Example: Cleared by BOC and released for local handling."
+                                    className="flex h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-medium text-brand-text shadow-2xs focus:ring-1 focus:ring-brand-rust outline-none disabled:cursor-not-allowed disabled:bg-brand-warm/10"
+                                />
+                            </div>
+                        </div>
+
+                        {selectedPhaseIsCurrentOrPast && isSuperAdminOrAdmin && (
+                            <div className="space-y-3 p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 dark:bg-amber-500/5 animate-in fade-in duration-200">
+                                <div className="flex items-center gap-2 text-xs font-bold text-amber-800 dark:text-amber-300">
+                                    <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                    <span>Admin Milestone Correction Required</span>
+                                </div>
+                                <p className="text-[11px] text-amber-700 dark:text-amber-300/90 leading-relaxed font-medium">
+                                    You are reverting this batch backward to <strong>{selectedPhaseLabel}</strong>.
+                                    An explicit explanation is required for the immutable audit ledger. Customer status change notifications will be silenced.
+                                </p>
+
+                                {/* Quick Presets */}
+                                <div className="space-y-1.5 pt-0.5">
+                                    <span className="text-[10px] font-bold text-amber-900/80 dark:text-amber-200/80 uppercase tracking-wider flex items-center gap-1">
+                                        <Sparkles className="size-3 text-amber-600" />
+                                        Quick Presets (Click to autofill):
+                                    </span>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {CORRECTION_REASON_PRESETS.map((preset) => (
+                                            <button
+                                                key={preset}
+                                                type="button"
+                                                onClick={() => setCorrectionReason(preset)}
+                                                className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-white/80 dark:bg-zinc-900 hover:bg-amber-100 dark:hover:bg-amber-950/60 text-amber-900 dark:text-amber-200 border border-amber-300/80 dark:border-amber-700/80 transition-all text-left active:scale-95 cursor-pointer shadow-2xs"
+                                            >
+                                                ⚡ {preset}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1 pt-1">
+                                    <label htmlFor="batch-correction-reason" className="text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:text-amber-200">
+                                        Correction Reason *
+                                    </label>
+                                    <input
+                                        id="batch-correction-reason"
+                                        type="text"
+                                        maxLength={500}
+                                        placeholder="e.g. Container was mistakenly updated to Manila Warehouse while still in ocean transit."
+                                        value={correctionReason}
+                                        onChange={(e) => setCorrectionReason(e.target.value)}
+                                        className="flex h-9 w-full rounded-lg border border-amber-300 dark:border-amber-700 bg-white dark:bg-zinc-900 px-3 text-xs font-medium text-brand-text shadow-2xs outline-none focus:ring-1 focus:ring-brand-rust"
+                                    />
+                                    <div className="flex items-center justify-between text-[11px] pt-1">
+                                        {correctionReason.trim().length === 0 ? (
+                                            <span className="text-amber-700/80 dark:text-amber-300/80">
+                                                Minimum 10 characters required for audit trail (or select a quick preset above)
+                                            </span>
+                                        ) : correctionReason.trim().length < 10 ? (
+                                            <span className="text-red-500 font-semibold flex items-center gap-1">
+                                                <span>Needs {10 - correctionReason.trim().length} more character{10 - correctionReason.trim().length === 1 ? '' : 's'}</span>
+                                                <span className="text-[10px] text-muted-foreground">({correctionReason.trim().length}/10)</span>
+                                            </span>
+                                        ) : (
+                                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                                                <CheckCircle2 className="size-3.5" />
+                                                <span>Valid audit reason ({correctionReason.trim().length} characters)</span>
+                                            </span>
+                                        )}
+                                        <span className="text-[10px] text-muted-foreground font-mono">{correctionReason.length}/500</span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-border">
+                            <p className="text-xs text-brand-text-light leading-snug">
+                                {!hasBatchBoxes
+                                    ? 'No boxes in this batch yet.'
+                                    : selectedPhaseIsCurrent
+                                    ? nextAllowedPhase
+                                        ? `Already marked as ${selectedPhaseLabel}. Select ${nextAllowedPhase.group} - ${nextAllowedPhase.label} to continue.`
+                                        : `Already marked as ${selectedPhaseLabel}. No later phase is available for your role.`
+                                    : selectedPhaseIsPast
+                                    ? isSuperAdminOrAdmin
+                                        ? `Admin Correction: Reverting ${batch.boxes?.length ?? 0} box(es) back to ${selectedPhaseLabel}.`
+                                        : 'This batch has already passed that tracking phase. Select a later phase to continue.'
+                                    : `This will update ${batch.boxes?.length ?? 0} box${(batch.boxes?.length ?? 0) !== 1 ? 'es' : ''} with a tracking history entry.`}
+                            </p>
+
+                            <Button
+                                type="submit"
+                                disabled={
+                                    !hasBatchBoxes ||
+                                    !selectedTrackingPhase ||
+                                    (selectedPhaseIsCurrentOrPast && (!isSuperAdminOrAdmin || correctionReason.trim().length < 10)) ||
+                                    isTrackingPhaseSubmitting
+                                }
+                                className={`h-8 px-5 rounded-lg text-white text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all flex items-center gap-1.5 disabled:cursor-not-allowed disabled:bg-brand-warm/10 disabled:text-brand-text-light disabled:shadow-none shrink-0 ${
+                                    selectedPhaseIsCurrentOrPast && isSuperAdminOrAdmin
+                                        ? 'bg-amber-600 hover:bg-amber-700'
+                                        : 'bg-brand-rust hover:bg-brand-rust/90'
+                                }`}
+                            >
+                                {isTrackingPhaseSubmitting ? (
+                                    <>
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                        Updating...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Ship className="size-3.5" />
+                                        {selectedPhaseIsCurrentOrPast ? (isSuperAdminOrAdmin ? 'Apply Journey Correction' : 'Already Updated') : 'Update All Boxes'}
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+                    </form>
+                </div>
+
                 {/* Loaded Boxes Table */}
                 <div className="bg-card rounded-2xl border border-border shadow-2xs overflow-hidden">
                     <div className="px-5 py-3.5 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card">
@@ -1057,118 +1264,6 @@ export default function BatchShow({
                             </p>
                         </div>
                     )}
-                </div>
-
-                {/* Bulk Tracking Phase Panel */}
-                <div className="bg-card rounded-2xl border border-border shadow-2xs overflow-hidden">
-                    <div className="px-5 py-3.5 border-b border-border flex items-center justify-between bg-card">
-                        <div className="flex items-center gap-2.5">
-                            <div className="size-7 rounded-md bg-amber-500 flex items-center justify-center text-white shadow-2xs shrink-0">
-                                <Ship className="size-4" />
-                            </div>
-                            <div>
-                                <h2 className="font-sans text-sm font-semibold text-brand-text">
-                                    Bulk Tracking Phase Update
-                                </h2>
-                            </div>
-                        </div>
-                        <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30">
-                            BOC & Transit Milestones
-                        </span>
-                    </div>
-
-                    <form className="p-4 sm:p-5 space-y-3" onSubmit={submitTrackingPhaseUpdate}>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                            <div className="space-y-1">
-                                <label
-                                    htmlFor="tracking-phase-select"
-                                    className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light ml-0.5"
-                                >
-                                    Tracking Phase
-                                </label>
-                                <select
-                                    id="tracking-phase-select"
-                                    value={selectedTrackingPhase}
-                                    onChange={(e) => setSelectedTrackingPhase(e.target.value)}
-                                    disabled={!hasBatchBoxes || isTrackingPhaseSubmitting}
-                                    className="flex h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-semibold text-brand-text shadow-2xs focus:ring-1 focus:ring-brand-rust outline-none disabled:cursor-not-allowed disabled:bg-brand-warm/10"
-                                >
-                                    {trackingPhases.length === 0 && (
-                                        <option value="">No tracking phases available</option>
-                                    )}
-                                    {trackingPhases.map((phase) => (
-                                        <option
-                                            key={phase.value}
-                                            value={phase.value}
-                                            disabled={
-                                                latestPhaseOrder !== null &&
-                                                phase.order <= latestPhaseOrder
-                                            }
-                                        >
-                                            {phase.group} - {phase.label}
-                                            {phase.value === batch.latest_tracking_phase ? ' (current)' : ''}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label
-                                    htmlFor="tracking-phase-description"
-                                    className="text-[11px] font-bold uppercase tracking-wider text-brand-text-light ml-0.5"
-                                >
-                                    Description (Optional)
-                                </label>
-                                <input
-                                    id="tracking-phase-description"
-                                    type="text"
-                                    maxLength={500}
-                                    value={trackingDescription}
-                                    onChange={(e) => setTrackingDescription(e.target.value)}
-                                    disabled={!hasBatchBoxes || isTrackingPhaseSubmitting}
-                                    placeholder="Example: Cleared by BOC and released for local handling."
-                                    className="flex h-9 w-full rounded-lg border border-border bg-card px-3 text-xs font-medium text-brand-text shadow-2xs focus:ring-1 focus:ring-brand-rust outline-none disabled:cursor-not-allowed disabled:bg-brand-warm/10"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-border">
-                            <p className="text-xs text-brand-text-light leading-snug">
-                                {!hasBatchBoxes
-                                    ? 'No boxes in this batch yet.'
-                                    : selectedPhaseIsCurrent
-                                    ? nextAllowedPhase
-                                        ? `Already marked as ${selectedPhaseLabel}. Select ${nextAllowedPhase.group} - ${nextAllowedPhase.label} to continue.`
-                                        : `Already marked as ${selectedPhaseLabel}. No later phase is available for your role.`
-                                    : selectedPhaseIsPast
-                                    ? 'This batch has already passed that tracking phase. Select a later phase to continue.'
-                                    : `This will update ${batch.boxes.length} box${batch.boxes.length !== 1 ? 'es' : ''} with a tracking history entry.`}
-                            </p>
-
-                            <Button
-                                type="submit"
-                                disabled={
-                                    !hasBatchBoxes ||
-                                    !selectedTrackingPhase ||
-                                    selectedPhaseIsCurrentOrPast ||
-                                    isTrackingPhaseSubmitting
-                                }
-                                className="h-8 px-5 rounded-lg bg-brand-rust text-white text-xs font-semibold uppercase tracking-wide shadow-2xs transition-all hover:bg-brand-rust/90 active:scale-[0.98] flex items-center gap-1.5 disabled:cursor-not-allowed disabled:bg-brand-warm/10 disabled:text-brand-text-light disabled:shadow-none shrink-0"
-                            >
-                                {isTrackingPhaseSubmitting ? (
-                                    <>
-                                        <Loader2 className="size-3.5 animate-spin" />
-                                        Updating...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Ship className="size-3.5" />
-                                        {selectedPhaseIsCurrentOrPast ? 'Already Updated' : 'Update All Boxes'}
-                                    </>
-                                )}
-                            </Button>
-                        </div>
-                    </form>
                 </div>
 
                 {/* Load Boxes Panel — only show when batch is in "open" or "loading" status */}

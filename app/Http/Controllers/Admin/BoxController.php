@@ -77,7 +77,10 @@ class BoxController extends Controller
 
     public function create()
     {
-        $bookings = Booking::with('sender')->latest()->get();
+        $bookings = Booking::with(['sender' => fn ($q) => $q->withTrashed()])
+            ->select(['id', 'reference_number', 'sender_id'])
+            ->latest()
+            ->get();
 
         return Inertia::render('admin/boxes/create', [
             'bookings' => $bookings,
@@ -105,9 +108,12 @@ class BoxController extends Controller
 
     public function edit(Box $box)
     {
-        $bookings = Booking::with('sender')->latest()->get();
+        $bookings = Booking::with(['sender' => fn ($q) => $q->withTrashed()])
+            ->select(['id', 'reference_number', 'sender_id'])
+            ->latest()
+            ->get();
 
-        $box->load(['booking.sender', 'latestUpdate']);
+        $box->load(['booking.sender' => fn ($q) => $q->withTrashed(), 'latestUpdate']);
         if (empty($box->tracking_step_key) && ! empty($box->latestUpdate?->tracking_step_key)) {
             $box->tracking_step_key = $box->latestUpdate->tracking_step_key;
         }
@@ -122,7 +128,8 @@ class BoxController extends Controller
     {
         $validated = $request->validated();
         $overrideReason = $validated['admin_delivery_override_reason'] ?? null;
-        unset($validated['admin_delivery_override_reason']);
+        $correctionReason = $validated['admin_correction_reason'] ?? null;
+        unset($validated['admin_delivery_override_reason'], $validated['admin_correction_reason']);
 
         if (! $request->boolean('update_eta') && ! $request->boolean('update_eta_date') && ! $request->filled('eta_date')) {
             unset($validated['eta_date']);
@@ -144,7 +151,7 @@ class BoxController extends Controller
         $newStatus = $validated['status'] ?? null;
         $trackingStepKey = $validated['tracking_step_key'] ?? null;
         // Do not unset tracking_step_key so it gets saved to the boxes table
-        $this->assertTrackingStepCanBeApplied($box, $trackingStepKey);
+        $this->assertTrackingStepCanBeApplied($box, $trackingStepKey, $correctionReason);
 
         $currentStatusVal = $box->status instanceof BoxStatus ? $box->status->value : (string) $box->status;
         $statusChanged = $newStatus && $currentStatusVal !== $newStatus;
@@ -158,17 +165,37 @@ class BoxController extends Controller
             }
 
             unset($validated['status']);
+            $box->bypassStatusValidation = true;
             $box->update($validated);
 
-            $boxRepo->updateStatus(
-                $box,
-                $newStatus ?? $currentStatusVal,
-                ($validated['courier_notes'] ?? null) ?: 'Status updated by Admin',
-                Auth::id(),
-                deliveryOverrideReason: $overrideReason,
-                trackingStepKey: $trackingStepKey,
-                bypassValidation: true,
-            );
+            $note = filled($correctionReason)
+                ? 'Admin Correction: ' . trim($correctionReason)
+                : (($validated['courier_notes'] ?? null) ?: 'Status updated by Admin');
+
+            // Mute status notifications to sender if it is an admin correction
+            if (filled($correctionReason)) {
+                Box::withoutStatusNotifications(function () use ($boxRepo, $box, $newStatus, $currentStatusVal, $note, $overrideReason, $trackingStepKey) {
+                    $boxRepo->updateStatus(
+                        $box,
+                        $newStatus ?? $currentStatusVal,
+                        $note,
+                        Auth::id(),
+                        deliveryOverrideReason: $overrideReason,
+                        trackingStepKey: $trackingStepKey,
+                        bypassValidation: true,
+                    );
+                });
+            } else {
+                $boxRepo->updateStatus(
+                    $box,
+                    $newStatus ?? $currentStatusVal,
+                    $note,
+                    Auth::id(),
+                    deliveryOverrideReason: $overrideReason,
+                    trackingStepKey: $trackingStepKey,
+                    bypassValidation: true,
+                );
+            }
         } else {
             $box->update($validated);
         }
@@ -744,9 +771,15 @@ class BoxController extends Controller
         return blank($box->delivery_proof_path);
     }
 
-    private function assertTrackingStepCanBeApplied(Box $box, ?string $trackingStepKey): void
+    private function assertTrackingStepCanBeApplied(Box $box, ?string $trackingStepKey, ?string $correctionReason = null): void
     {
         if (blank($trackingStepKey)) {
+            return;
+        }
+
+        // If the tracking step key matches a valid BoxStatus enum (e.g. cancelled, damaged, held, held_bulging),
+        // it represents an exception or terminal status rather than a linear journey milestone.
+        if (BoxStatus::tryFrom($trackingStepKey) !== null) {
             return;
         }
 
@@ -766,8 +799,12 @@ class BoxController extends Controller
             : $service->getStepBySystemStatus($box->status instanceof BoxStatus ? $box->status->value : (string) $box->status);
 
         if (is_array($currentStep) && (int) $selectedStep['order'] < (int) $currentStep['order']) {
+            if (filled($correctionReason) && mb_strlen(trim($correctionReason)) >= 10 && app(DeveloperAccess::class)->isDeveloperOrAdmin(Auth::user())) {
+                return;
+            }
+
             throw ValidationException::withMessages([
-                'tracking_step_key' => 'A tracking step cannot move backward from the box\'s current journey position.',
+                'tracking_step_key' => 'A tracking step cannot move backward from the box\'s current journey position without an admin correction reason (minimum 10 characters).',
             ]);
         }
     }

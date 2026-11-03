@@ -1,18 +1,26 @@
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
-import { Save, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { Save, ArrowLeft, AlertTriangle, CheckCircle2, Sparkles } from 'lucide-react';
 import { useState } from 'react';
 import Heading from '@/components/common/heading';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import AppLayout from '@/layouts/app-layout';
+import { toast } from 'sonner';
 
 import type { BreadcrumbItem } from '@/types';
+
+const CORRECTION_REASON_PRESETS = [
+    'Mistaken status update; container is still sailing',
+    'Accidentally updated wrong company / box',
+    'Vessel departure delayed; rolling back milestone',
+    'Logistics data entry correction by admin',
+];
 
 interface Booking {
     id: number;
     reference_number: string;
-    sender: { first_name: string; last_name: string };
+    sender?: { first_name: string; last_name: string } | null;
 }
 
 interface Box {
@@ -178,6 +186,7 @@ export default function BoxesEdit({
         tracking_step_key: initialSelectedKey,
         courier_notes: box.courier_notes || '',
         admin_delivery_override_reason: '',
+        admin_correction_reason: '',
         update_eta: false,
         eta_date: box.eta_date || '',
         eta_message: box.eta_message || 'Your box is expected to be delivered on or before this date',
@@ -204,8 +213,17 @@ export default function BoxesEdit({
         { title: box.tracking_number, href: `/admin/boxes/${box.id}/edit` },
     ];
 
+    const isSuperAdminOrAdmin = ['admin', 'super_admin'].includes(auth?.user?.role) || auth?.user?.is_developer;
+    const currentOrder = getStepOrder(initialSelectedKey);
+    const selectedOrder = getStepOrder(selectedStepKey);
+    const isBackwardStep = selectedOrder > 0 && currentOrder > 0 && selectedOrder < currentOrder;
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+        if (isBackwardStep && data.admin_correction_reason.trim().length < 10) {
+            toast.error('An admin correction reason of at least 10 characters is required to move a box backward.');
+            return;
+        }
         transform((data) => ({
             ...data,
             ...(return_url ? { return_to: return_url } : {}),
@@ -352,7 +370,7 @@ export default function BoxesEdit({
                                 >
                                     {bookings.map((booking) => (
                                         <option key={booking.id} value={booking.id}>
-                                            {booking.reference_number} - {booking.sender.first_name} {booking.sender.last_name}
+                                            {booking.reference_number} — {booking.sender ? `${booking.sender.first_name} ${booking.sender.last_name}` : 'No Sender'}
                                         </option>
                                     ))}
                                 </select>
@@ -382,7 +400,9 @@ export default function BoxesEdit({
                                 >
                                     {allOptions.map((opt) => {
                                         const isCurrentSaved = opt.value === initialSelectedKey;
-                                        const isDisabled = !isCurrentSaved && isStatusDisabled(box.status, opt.system_status);
+                                        const optOrder = getStepOrder(opt.value);
+                                        const isRevertOption = isSuperAdminOrAdmin && optOrder > 0 && currentOrder > 0 && optOrder < currentOrder;
+                                        const isDisabled = !isCurrentSaved && !isSuperAdminOrAdmin && isStatusDisabled(box.status, opt.system_status);
 
                                         return (
                                             <option 
@@ -391,7 +411,7 @@ export default function BoxesEdit({
                                                 disabled={isDisabled}
                                                 className={isCurrentSaved ? 'font-bold text-brand-rust' : ''}
                                             >
-                                                {isCurrentSaved ? `✓ ${opt.label} (Current)` : opt.label}
+                                                {isCurrentSaved ? `✓ ${opt.label} (Current)` : isRevertOption ? `${opt.label} (Revert / Correction)` : opt.label}
                                             </option>
                                         );
                                     })}
@@ -401,10 +421,74 @@ export default function BoxesEdit({
                                 )}
                             </div>
 
+                            {isBackwardStep && (
+                                <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:p-5 animate-in fade-in duration-300">
+                                    <div className="flex items-center gap-2 text-xs font-bold text-amber-800">
+                                        <AlertTriangle className="size-5 shrink-0 text-amber-600" />
+                                        <span>Admin Journey Correction Required</span>
+                                    </div>
+                                    <p className="text-xs font-medium text-amber-700 leading-relaxed">
+                                        You are moving this box backward from its current position in the journey ({initialSavedLabel} → {allOptions.find((s) => s.value === selectedStepKey)?.label || selectedStepKey}). An explanation of at least 10 characters is required for the immutable audit ledger. Customer status change notifications will be silenced.
+                                    </p>
+
+                                    {/* Quick Autofill Presets */}
+                                    <div className="space-y-1.5 pt-1">
+                                        <span className="text-[10px] font-bold text-amber-900/80 uppercase tracking-wider flex items-center gap-1">
+                                            <Sparkles className="size-3 text-amber-600" />
+                                            Quick Presets (Click to autofill):
+                                        </span>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {CORRECTION_REASON_PRESETS.map((preset) => (
+                                                <button
+                                                    key={preset}
+                                                    type="button"
+                                                    onClick={() => setData('admin_correction_reason', preset)}
+                                                    className="text-[11px] font-medium px-2.5 py-1 rounded-lg bg-white/90 hover:bg-amber-100 text-amber-900 border border-amber-300 transition-all text-left active:scale-95 cursor-pointer shadow-2xs"
+                                                >
+                                                    ⚡ {preset}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1 pt-1">
+                                        <Label htmlFor="admin_correction_reason" className="text-[10px] font-bold uppercase tracking-widest text-amber-800 ml-1">
+                                            Reason for Reversion / Correction *
+                                        </Label>
+                                        <textarea
+                                            id="admin_correction_reason"
+                                            className="min-h-24 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 focus:outline-none transition-all"
+                                            value={data.admin_correction_reason}
+                                            onChange={(e) => setData('admin_correction_reason', e.target.value)}
+                                            placeholder="Example: Box was mistakenly marked unloaded in Manila Warehouse; container is still sailing."
+                                        />
+                                        {errors.admin_correction_reason && (
+                                            <p className="text-sm text-red-500 font-medium ml-1">{errors.admin_correction_reason}</p>
+                                        )}
+                                        <div className="flex items-center justify-between text-[11px] pt-1">
+                                            {data.admin_correction_reason.trim().length === 0 ? (
+                                                <span className="text-amber-700/80">
+                                                    Minimum 10 characters required for audit trail (or select a quick preset above)
+                                                </span>
+                                            ) : data.admin_correction_reason.trim().length < 10 ? (
+                                                <span className="text-red-500 font-semibold flex items-center gap-1">
+                                                    <span>Needs {10 - data.admin_correction_reason.trim().length} more character{10 - data.admin_correction_reason.trim().length === 1 ? '' : 's'}</span>
+                                                    <span className="text-[10px] text-muted-foreground">({data.admin_correction_reason.trim().length}/10)</span>
+                                                </span>
+                                            ) : (
+                                                <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                                                    <CheckCircle2 className="size-3.5" />
+                                                    <span>Valid audit reason ({data.admin_correction_reason.trim().length} characters)</span>
+                                                </span>
+                                            )}
+                                            <span className="text-[10px] text-muted-foreground font-mono">{data.admin_correction_reason.length}/1000</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
                             {(() => {
-                                const currentOrder = getStepOrder(initialSelectedKey);
-                                const newOrder = getStepOrder(selectedStepKey);
-                                const skippedSteps = tracking_steps?.filter((s: any) => s.order > currentOrder && s.order < newOrder) || [];
+                                const skippedSteps = tracking_steps?.filter((s: any) => s.order > currentOrder && s.order < selectedOrder) || [];
                                 
                                 if (skippedSteps.length === 0 || !['admin', 'super_admin'].includes(auth?.user?.role)) return null;
                                 
@@ -579,12 +663,12 @@ export default function BoxesEdit({
                             </Link>
                             <Button
                                 type="submit"
-                                disabled={processing}
+                                disabled={processing || (isBackwardStep && data.admin_correction_reason.trim().length < 10)}
                                 variant="success"
                                 className="flex items-center gap-3 px-10 h-12 rounded-xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed disabled:shadow-none"
                             >
                                 <Save className="size-4" />
-                                Update Box
+                                {isBackwardStep ? 'Apply Journey Correction' : 'Update Box'}
                             </Button>
                         </div>
                     </form>

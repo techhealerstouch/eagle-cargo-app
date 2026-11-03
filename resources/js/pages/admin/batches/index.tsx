@@ -188,7 +188,7 @@ export default function BatchesIndex({
                                             Vessel / Voyage
                                         </th>
                                         <th className="px-4 py-3 font-semibold">
-                                            Utilization
+                                            Container Capacity
                                         </th>
                                         <th className="px-4 py-3 font-semibold">
                                             Status
@@ -248,14 +248,21 @@ export default function BatchesIndex({
                                                     {batch.vessel_name || '—'}
                                                 </td>
                                                 <td className="px-4 py-3.5">
-                                                    <div className="flex min-w-28 flex-col gap-1">
+                                                    <div className="flex min-w-32 flex-col gap-1">
                                                         <div className="flex items-center justify-between text-[11px] font-medium text-brand-text-mid">
-                                                            <span>
-                                                                {batch.current_box_count} / {batch.capacity_boxes || '∞'}
+                                                            <span className="font-semibold text-brand-text">
+                                                                {batch.current_box_count} / {batch.capacity_boxes || '∞'} boxes
                                                             </span>
-                                                            <span>{Math.round(utilization)}%</span>
+                                                            <span className="text-[10px] text-muted-foreground font-mono">
+                                                                {Math.round(utilization)}% full
+                                                            </span>
                                                         </div>
                                                         <Progress value={utilization} className="h-1.5" />
+                                                        <span className="text-[9px] text-brand-text-light/70 uppercase tracking-wider">
+                                                            {['sailed', 'arrived', 'under_customs_clearance', 'released_by_boc', 'received_at_warehouse'].includes(batch.status)
+                                                                ? 'Container Closed'
+                                                                : 'Loading Capacity'}
+                                                        </span>
                                                     </div>
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">

@@ -24,13 +24,7 @@ class BatchResource extends JsonResource
         $trackingStepService = app(TrackingStepService::class);
         $trackingSteps = $this->getConfiguredTrackingSteps($trackingStepService);
 
-        $latestUpdate = BoxUpdate::whereIn('box_id', $this->resource->boxes->pluck('id'))
-            ->whereNotNull('tracking_phase')
-            ->latest()
-            ->orderBy('id', 'desc')
-            ->first();
-
-        $latestTrackingPhase = $latestUpdate?->tracking_phase?->value;
+        $latestTrackingPhase = $this->resolveLatestTrackingPhase($trackingSteps);
 
         return [
             'id' => $this->resource->id,
@@ -115,6 +109,59 @@ class BatchResource extends JsonResource
         }
 
         return $warnings;
+    }
+
+    private function resolveLatestTrackingPhase(Collection $trackingSteps): ?string
+    {
+        $boxes = $this->resource->boxes;
+        if (! $boxes || $boxes->isEmpty()) {
+            return null;
+        }
+
+        $activeBoxes = $boxes->reject(function ($box): bool {
+            $status = $box->status instanceof \BackedEnum ? $box->status->value : (string) $box->status;
+
+            return in_array($status, ['delivered', 'cancelled'], true);
+        });
+
+        $targetBoxes = $activeBoxes->isNotEmpty() ? $activeBoxes : $boxes;
+
+        $highestPhase = null;
+        $highestOrder = -1;
+        $missingStepBoxIds = [];
+
+        foreach ($targetBoxes as $box) {
+            $stepKey = $box->tracking_step_key;
+            if (! empty($stepKey)) {
+                $order = $this->getTrackingStepOrder($trackingSteps, (string) $stepKey);
+                if ($order !== null && $order > $highestOrder) {
+                    $highestOrder = $order;
+                    $highestPhase = (string) $stepKey;
+                }
+            } else {
+                $missingStepBoxIds[] = $box->id;
+            }
+        }
+
+        if (! empty($missingStepBoxIds) || $highestPhase === null) {
+            $lookupIds = ! empty($missingStepBoxIds) ? $missingStepBoxIds : $targetBoxes->pluck('id')->all();
+            $latestUpdate = BoxUpdate::whereIn('box_id', $lookupIds)
+                ->whereNotNull('tracking_phase')
+                ->latest()
+                ->orderBy('id', 'desc')
+                ->first();
+
+            $fallbackPhase = $latestUpdate?->tracking_phase?->value;
+            if ($fallbackPhase) {
+                $fallbackOrder = $this->getTrackingStepOrder($trackingSteps, $fallbackPhase);
+                if ($fallbackOrder !== null && $fallbackOrder > $highestOrder) {
+                    $highestOrder = $fallbackOrder;
+                    $highestPhase = $fallbackPhase;
+                }
+            }
+        }
+
+        return $highestPhase;
     }
 
     private function getConfiguredTrackingSteps(TrackingStepService $service): Collection
