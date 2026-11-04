@@ -9,9 +9,11 @@ use App\Enums\TrackingPhase;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\Sender;
 use App\Models\User;
 use App\Notifications\BoxStatusChanged;
+use App\Repositories\Contracts\TrackingRepositoryInterface;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Notification;
@@ -22,9 +24,13 @@ class BatchTrackingCorrectionTest extends TestCase
     use DatabaseTransactions;
 
     private User $admin;
+
     private User $staff;
+
     private Batch $batch;
+
     private Box $box1;
+
     private Box $deliveredBox;
 
     protected function setUp(): void
@@ -208,5 +214,82 @@ class BatchTrackingCorrectionTest extends TestCase
         $this->assertEquals(BatchStatus::Open, $this->batch->status);
         $this->assertEquals(BoxStatus::Collected, $this->box1->status);
         $this->assertEquals(TrackingPhase::PICKED_UP->value, $this->box1->tracking_step_key);
+    }
+
+    public function test_admin_correction_entries_and_reverted_milestones_are_hidden_from_public_tracking_journey(): void
+    {
+        BoxUpdate::create([
+            'box_id' => $this->box1->id,
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => TrackingPhase::IN_TRANSIT_SEA->value,
+            'tracking_phase' => TrackingPhase::IN_TRANSIT_SEA->value,
+            'location' => 'In-Transit',
+            'description' => 'Vessel has sailed! Your box is sailing across international waters to the Philippines.',
+        ]);
+
+        BoxUpdate::create([
+            'box_id' => $this->box1->id,
+            'status' => BoxStatus::Arrived->value,
+            'tracking_step_key' => TrackingPhase::ARRIVED_MANILA_PORT->value,
+            'tracking_phase' => TrackingPhase::ARRIVED_MANILA_PORT->value,
+            'location' => 'International Transit',
+            'description' => 'Container CONT-TEST-001 has arrived at Philippine port. Ready for customs clearance.',
+        ]);
+
+        BoxUpdate::create([
+            'box_id' => $this->box1->id,
+            'status' => BoxStatus::UnloadedManila->value,
+            'tracking_step_key' => TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+            'tracking_phase' => TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+            'location' => 'Destination',
+            'description' => 'Box received at Manila regional distribution center for route dispatch.',
+        ]);
+
+        $this->actingAs($this->admin)->post(
+            route('admin.batches.bulkUpdateTrackingPhase', $this->batch),
+            [
+                'tracking_phase' => TrackingPhase::IN_TRANSIT_SEA->value,
+                'is_correction' => true,
+                'correction_reason' => 'add new box to container',
+            ]
+        )->assertRedirect();
+
+        // Reverted higher-milestone updates are removed from box_updates
+        $this->assertDatabaseMissing('box_updates', [
+            'box_id' => $this->box1->id,
+            'tracking_step_key' => TrackingPhase::ARRIVED_MANILA_PORT->value,
+        ]);
+        $this->assertDatabaseMissing('box_updates', [
+            'box_id' => $this->box1->id,
+            'tracking_step_key' => TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+        ]);
+
+        // Original in_transit_sea update and internal Admin Correction audit record remain in box_updates
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $this->box1->id,
+            'description' => 'Vessel has sailed! Your box is sailing across international waters to the Philippines.',
+        ]);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $this->box1->id,
+            'description' => 'Admin Correction: add new box to container',
+            'is_admin_override' => true,
+        ]);
+
+        // Public tracking data excludes Admin Correction and reverted milestones
+        $trackingData = app(TrackingRepositoryInterface::class)->getTrackingData($this->box1->tracking_number);
+
+        $this->assertNotNull($trackingData);
+        $this->assertEquals(TrackingPhase::IN_TRANSIT_SEA->value, $trackingData['tracking_step_key']);
+
+        $descriptions = array_column($trackingData['timeline'], 'description');
+        foreach ($descriptions as $desc) {
+            $this->assertStringNotContainsString('Admin Correction', (string) $desc);
+            $this->assertStringNotContainsString('Philippine port', (string) $desc);
+            $this->assertStringNotContainsString('Manila regional distribution center', (string) $desc);
+        }
+        $this->assertContains(
+            'Vessel has sailed! Your box is sailing across international waters to the Philippines.',
+            $descriptions
+        );
     }
 }

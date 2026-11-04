@@ -259,12 +259,15 @@ export function getFriendlyStepDescription(
     statusKey?: string,
     configuredStepDesc?: string
 ): string {
-    const desc = (rawDesc || '').trim();
+    const desc = (rawDesc || '')
+        .replace(/\r?\n*Admin proof override\s*:.*$/is, '')
+        .trim();
 
-    // If description is specific and not generic "status updated", keep original
+    // If description is specific and not generic "status updated" or internal "Admin Correction:", keep original
     const isGeneric = !desc ||
         /^status\s*updated?(\s*by\s*admin)?\.?$/i.test(desc) ||
-        /^status\s*update\.?$/i.test(desc);
+        /^status\s*update\.?$/i.test(desc) ||
+        /^admin\s+correction\s*:/i.test(desc);
 
     if (!isGeneric) {
         return desc;
@@ -310,7 +313,7 @@ export function getFriendlyStepDescription(
     }
 
     if (key.includes('delivered')) {
-        return 'Box successfully delivered to recipient. Thank you for choosing Love Balikbayan!';
+        return 'Box successfully delivered to recipient. Thank you for choosing Eagle Express Cargo!';
     }
 
     if (key.includes('pending') || key.includes('manifested') || key.includes('registered')) {

@@ -9,7 +9,6 @@ use App\Models\Batch;
 use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Repositories\Contracts\BatchRepositoryInterface;
-use App\Services\TrackingCacheService;
 use DateTimeInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -314,6 +313,7 @@ class BatchService
 
             if ($boxes->isEmpty()) {
                 app(TrackingCacheService::class)->forgetBatch($batch);
+
                 return 0;
             }
 
@@ -341,13 +341,15 @@ class BatchService
                         'tracking_step_key' => $trackingPhase->value,
                     ]);
 
+                    $this->trackingStepService->pruneRevertedBoxUpdates($box, $trackingPhase->value, true);
+
                     BoxUpdate::create([
                         'box_id' => $box->id,
                         'status' => $resolvedStatus->value,
                         'tracking_step_key' => $trackingPhase->value,
                         'tracking_phase' => $trackingPhase->value,
                         'location' => $trackingPhase->phase(),
-                        'description' => 'Admin Correction: ' . trim($correctionReason),
+                        'description' => 'Admin Correction: '.trim($correctionReason),
                         'updated_by' => $actorId > 0 ? $actorId : null,
                         'is_admin_override' => true,
                         'steps_bypassed' => 0,

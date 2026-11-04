@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\ShippingUpdate;
 use App\Observers\ShippingUpdateObserver;
 use App\Services\TrackingAnalyticsService;
 use App\Services\TrackingCacheService;
+use App\Services\TrackingStepService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -51,12 +53,7 @@ class TrackingController extends Controller
                     'branch_code' => $box->batch->branch_name,
                     'eta' => $box->batch->eta_at?->toISOString(),
                 ] : null,
-                'updates' => $box->updates->map(fn ($u) => [
-                    'status' => $u->status,
-                    'location' => $u->location,
-                    'description' => $u->description,
-                    'date' => $u->created_at->toISOString(),
-                ])->all(),
+                'updates' => $this->formatPublicApiUpdates($box),
             ];
         });
 
@@ -100,5 +97,37 @@ class TrackingController extends Controller
             'success' => true,
             'data' => $updates,
         ]);
+    }
+
+    private function formatPublicApiUpdates(Box $box): array
+    {
+        $stepService = app(TrackingStepService::class);
+        $activeOrder = $box->tracking_step_key ? $stepService->getStepOrder($box->tracking_step_key) : null;
+
+        return $box->updates
+            ->reject(function (BoxUpdate $u) use ($stepService, $activeOrder): bool {
+                $description = trim((string) ($u->description ?? ''));
+                if (preg_match('/^admin\s+correction\s*:/i', $description)) {
+                    return true;
+                }
+
+                if ($activeOrder !== null) {
+                    $updateOrder = $stepService->resolveUpdateStepOrder($u);
+
+                    if ($updateOrder !== null && $updateOrder > $activeOrder) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->values()
+            ->map(fn (BoxUpdate $u) => [
+                'status' => $u->status,
+                'location' => $u->location,
+                'description' => trim((string) preg_replace('/\R*Admin proof override\s*:.*$/is', '', (string) ($u->description ?? ''))),
+                'date' => $u->created_at->toISOString(),
+            ])
+            ->all();
     }
 }

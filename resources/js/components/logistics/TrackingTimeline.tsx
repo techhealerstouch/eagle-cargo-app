@@ -227,15 +227,25 @@ function isInitialRegistrationEvent(desc: string, rawDesc?: string): boolean {
     );
 }
 
+export function isAdminCorrectionEvent(event: TrackingTimelineItem): boolean {
+    const desc = (event.description || '').trim();
+    return /^admin\s+correction\s*:/i.test(desc);
+}
+
 export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, steps, currentIndex, currentStatus }) => {
     // Build a map: step index → timeline events that belong to it
     const stepEvents = new Map<number, TrackingTimelineItem[]>();
     const unmatchedEvents: TrackingTimelineItem[] = [];
+    const visibleTimeline = (timeline || []).filter((event) => !isAdminCorrectionEvent(event));
 
-    (timeline || []).forEach((event) => {
+    visibleTimeline.forEach((event) => {
         const matchIdx = matchEventToStep(event, steps);
 
         if (matchIdx >= 0) {
+            // Do not attach historical events to future steps beyond currentIndex (e.g. after an admin revert)
+            if (currentIndex >= 0 && matchIdx > currentIndex) {
+                return;
+            }
             const existing = stepEvents.get(matchIdx) || [];
             existing.push(event);
             stepEvents.set(matchIdx, existing);
@@ -248,6 +258,8 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
     stepEvents.forEach((events) => {
         events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     });
+
+    const visibleEventCount = Array.from(stepEvents.values()).reduce((sum, list) => sum + list.length, 0) + unmatchedEvents.length;
 
     const isBoxPending = (currentStatus || '').toLowerCase().includes('pending') ||
         (currentStatus || '').toLowerCase().includes('draft');
@@ -265,7 +277,7 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                     </p>
                 </div>
                 <span className="px-2.5 py-1 rounded-full text-[9px] font-mono font-bold uppercase tracking-wider bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                    {timeline?.length || 0} {(timeline?.length || 0) === 1 ? 'Update' : 'Updates'}
+                    {visibleEventCount} {visibleEventCount === 1 ? 'Update' : 'Updates'}
                 </span>
             </div>
 
@@ -422,14 +434,14 @@ export const TrackingTimeline: React.FC<TrackingTimelineProps> = ({ timeline, st
                                         </div>
                                     )}
 
-                                    {/* Future steps or ongoing step with no events */}
+                                    {/* Future steps or current step with no events */}
                                     {isAwaitingAdmin && events.length === 0 ? (
                                         <div className="p-3 md:p-3.5 rounded-xl border border-amber-200/70 dark:border-amber-900/50 bg-amber-50/60 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 text-xs">
                                             <p className="font-medium leading-relaxed">
                                                 Your booking has been received and is waiting for admin acceptance and scheduling.
                                             </p>
                                         </div>
-                                    ) : isOngoing && events.length === 0 ? (
+                                    ) : isCurrent && !isAwaitingAdmin && events.length === 0 ? (
                                         <div className="p-3.5 md:p-4 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 text-zinc-700 dark:text-zinc-300 text-xs shadow-sm">
                                             <p className="font-medium leading-relaxed">
                                                 {step.customerMessage || step.description || 'Current milestone in progress.'}
