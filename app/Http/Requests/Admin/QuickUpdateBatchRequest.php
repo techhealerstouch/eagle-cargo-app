@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\BatchStatus;
+use App\Enums\TrackingPhase;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -10,7 +11,7 @@ class QuickUpdateBatchRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        return $this->user() !== null;
     }
 
     public function rules(): array
@@ -19,7 +20,7 @@ class QuickUpdateBatchRequest extends FormRequest
 
         return [
             'status' => ['nullable', 'string', Rule::enum(BatchStatus::class)],
-            'tracking_phase' => ['nullable', 'string'],
+            'tracking_phase' => ['nullable', 'string', Rule::enum(TrackingPhase::class)],
             'tracking_description' => ['nullable', 'string', 'max:500'],
             'container_number' => [
                 'nullable',
@@ -31,7 +32,8 @@ class QuickUpdateBatchRequest extends FormRequest
             'vessel_name' => ['nullable', 'string', 'max:255'],
             'voyage_number' => ['nullable', 'string', 'max:50'],
             'eta_at' => ['nullable', 'date'],
-            'override_note' => ['nullable', 'string', 'max:500'],
+            'override_note' => ['nullable', 'string', 'max:1000'],
+            'is_correction' => ['nullable', 'boolean'],
         ];
     }
 }

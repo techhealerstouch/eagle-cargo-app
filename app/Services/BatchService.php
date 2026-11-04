@@ -6,8 +6,10 @@ use App\Enums\BatchStatus;
 use App\Enums\BoxStatus;
 use App\Enums\TrackingPhase;
 use App\Models\Batch;
+use App\Models\Box;
 use App\Models\BoxUpdate;
 use App\Repositories\Contracts\BatchRepositoryInterface;
+use App\Services\TrackingCacheService;
 use DateTimeInterface;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
@@ -62,7 +64,8 @@ class BatchService
     {
         return DB::transaction(function () use ($batch, $attributes): Batch {
             if (array_key_exists('status', $attributes)) {
-                $this->assertValidTransition($batch, $attributes['status']);
+                $overrideNote = $attributes['override_note'] ?? $batch->override_note;
+                $this->assertValidTransition($batch, $attributes['status'], $overrideNote);
                 $attributes = $this->applyStatusTimestamps($batch, $attributes['status'], $attributes);
             }
 
@@ -235,9 +238,144 @@ class BatchService
         return $updated;
     }
 
-    public function getTargetBatchStatusForTrackingPhase(TrackingPhase $phase): ?BatchStatus
+    /**
+     * Admin Correction: Revert or realign a batch and its non-terminal loaded boxes
+     * to a previous tracking milestone and lifecycle status.
+     *
+     * Invariants:
+     * 1. Requires an explicit audit reason of at least 10 characters.
+     * 2. Excludes delivered or cancelled boxes (terminal states).
+     * 3. Mutes customer-facing status notifications so senders are not spammed or confused.
+     * 4. Inserts an immutable BoxUpdate record flagged with is_admin_override = true.
+     * 5. Resets batch lifecycle timestamps (e.g. arrived_at, unloaded_at) appropriately.
+     * 6. Purges tracking caches for all touched boxes and the batch.
+     */
+    public function adminCorrectTrackingPhase(
+        Batch $batch,
+        TrackingPhase|string $trackingPhase,
+        int $actorId,
+        string $correctionReason,
+        BoxStatus|string|null $systemStatus = null,
+        BatchStatus|string|null $explicitBatchStatus = null,
+    ): int {
+        if (blank($correctionReason) || mb_strlen(trim($correctionReason)) < 10) {
+            throw new \InvalidArgumentException('A correction reason of at least 10 characters is required.');
+        }
+
+        $trackingPhase = $trackingPhase instanceof TrackingPhase
+            ? $trackingPhase
+            : TrackingPhase::from((string) $trackingPhase);
+
+        $targetStatus = $systemStatus instanceof BoxStatus
+            ? $systemStatus
+            : ($systemStatus ? BoxStatus::tryFrom((string) $systemStatus) : $this->resolveSystemStatusForTrackingPhase($trackingPhase));
+
+        if ($systemStatus && $targetStatus === null) {
+            throw new \InvalidArgumentException(sprintf(
+                'Tracking phase "%s" has an invalid system status.',
+                $trackingPhase->label(),
+            ));
+        }
+
+        $targetBatchStatus = $explicitBatchStatus instanceof BatchStatus
+            ? $explicitBatchStatus
+            : ($explicitBatchStatus ? BatchStatus::tryFrom((string) $explicitBatchStatus) : $this->getTargetBatchStatusForTrackingPhase($trackingPhase, true));
+
+        return DB::transaction(function () use ($batch, $trackingPhase, $targetStatus, $targetBatchStatus, $actorId, $correctionReason): int {
+            Batch::whereKey($batch->id)->lockForUpdate()->first();
+
+            // 1. Update Batch lifecycle status and override notes without firing cascaded forward updates
+            if ($targetBatchStatus) {
+                $batchUpdates = [
+                    'status' => $targetBatchStatus,
+                    'override_note' => 'Admin Correction: '.trim($correctionReason),
+                ];
+
+                // Reset future timestamps if moving backward
+                if (in_array($targetBatchStatus, [BatchStatus::Open, BatchStatus::Loading, BatchStatus::ReadyToClose], true)) {
+                    $batchUpdates['sailed_at'] = null;
+                    $batchUpdates['arrived_at'] = null;
+                    $batchUpdates['unloaded_at'] = null;
+                } elseif ($targetBatchStatus === BatchStatus::Sailed) {
+                    $batchUpdates['arrived_at'] = null;
+                    $batchUpdates['unloaded_at'] = null;
+                } elseif (in_array($targetBatchStatus, [BatchStatus::Arrived, BatchStatus::UnderCustomsClearance, BatchStatus::ReleasedByBoc], true)) {
+                    $batchUpdates['unloaded_at'] = null;
+                }
+
+                $batch->skipLifecycleCascade = true;
+                $batch->update($batchUpdates);
+            }
+
+            // 2. Fetch loaded boxes
+            $boxes = $batch->boxes()
+                ->select(['id', 'batch_id', 'booking_id', 'serial_number', 'status', 'tracking_number', 'tracking_step_key'])
+                ->get();
+
+            if ($boxes->isEmpty()) {
+                app(TrackingCacheService::class)->forgetBatch($batch);
+                return 0;
+            }
+
+            $cacheService = app(TrackingCacheService::class);
+            $now = now();
+            $updatedCount = 0;
+
+            // 3. Process boxes inside withoutStatusNotifications to prevent email/SMS spam
+            Box::withoutStatusNotifications(function () use ($boxes, $targetStatus, $trackingPhase, $actorId, $correctionReason, $cacheService, $now, &$updatedCount) {
+                foreach ($boxes as $box) {
+                    $currentStatus = $box->status instanceof BoxStatus
+                        ? $box->status
+                        : BoxStatus::tryFrom((string) $box->status);
+
+                    // Guard: Never revert delivered or cancelled boxes
+                    if (in_array($currentStatus, [BoxStatus::Delivered, BoxStatus::Cancelled], true)) {
+                        continue;
+                    }
+
+                    $resolvedStatus = $targetStatus ?? $currentStatus;
+
+                    $box->bypassStatusValidation = true;
+                    $box->update([
+                        'status' => $resolvedStatus,
+                        'tracking_step_key' => $trackingPhase->value,
+                    ]);
+
+                    BoxUpdate::create([
+                        'box_id' => $box->id,
+                        'status' => $resolvedStatus->value,
+                        'tracking_step_key' => $trackingPhase->value,
+                        'tracking_phase' => $trackingPhase->value,
+                        'location' => $trackingPhase->phase(),
+                        'description' => 'Admin Correction: ' . trim($correctionReason),
+                        'updated_by' => $actorId > 0 ? $actorId : null,
+                        'is_admin_override' => true,
+                        'steps_bypassed' => 0,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+
+                    $cacheService->forgetBox($box);
+                    $updatedCount++;
+                }
+            });
+
+            $cacheService->forgetBatch($batch);
+
+            return $updatedCount;
+        });
+    }
+
+    public function getTargetBatchStatusForTrackingPhase(TrackingPhase $phase, bool $forCorrection = false): ?BatchStatus
     {
         return match ($phase) {
+            TrackingPhase::PICKED_UP,
+            TrackingPhase::RECEIVED_BY_WAREHOUSE,
+            TrackingPhase::ARRIVED_AT_WAREHOUSE,
+            TrackingPhase::PROCESSING => $forCorrection ? BatchStatus::Open : null,
+
+            TrackingPhase::LOADING_CONTAINER => $forCorrection ? BatchStatus::Loading : null,
+
             TrackingPhase::DEPARTED_FROM_ORIGIN,
             TrackingPhase::IN_TRANSIT_SEA => BatchStatus::Sailed,
 
@@ -274,9 +412,12 @@ class BatchService
         }
     }
 
-    public function resolveTrackingPhaseForStatus(BatchStatus $status): ?TrackingPhase
+    public function resolveTrackingPhaseForStatus(BatchStatus $status, bool $includePreDeparture = false): ?TrackingPhase
     {
         return match ($status) {
+            BatchStatus::Open => $includePreDeparture ? TrackingPhase::RECEIVED_BY_WAREHOUSE : null,
+            BatchStatus::Loading,
+            BatchStatus::ReadyToClose => $includePreDeparture ? TrackingPhase::LOADING_CONTAINER : null,
             BatchStatus::Sailed => TrackingPhase::IN_TRANSIT_SEA,
             BatchStatus::Arrived => TrackingPhase::ARRIVED_MANILA_PORT,
             BatchStatus::UnderCustomsClearance => TrackingPhase::CUSTOMS_CLEARANCE,
@@ -457,7 +598,7 @@ class BatchService
             ->setTimeFrom($sourceEta);
     }
 
-    private function assertValidTransition(Batch $batch, BatchStatus|string $targetStatus): void
+    private function assertValidTransition(Batch $batch, BatchStatus|string $targetStatus, ?string $overrideNote = null): void
     {
         $current = $batch->status instanceof BatchStatus
             ? $batch->status
@@ -468,6 +609,10 @@ class BatchService
             : BatchStatus::from((string) $targetStatus);
 
         if ($current !== $target && ! $current->canTransitionTo($target)) {
+            if (filled($overrideNote)) {
+                return;
+            }
+
             throw new \InvalidArgumentException(sprintf(
                 'Invalid batch transition from %s to %s.',
                 $current->value,

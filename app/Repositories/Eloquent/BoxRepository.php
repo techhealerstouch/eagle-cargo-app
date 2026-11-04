@@ -215,7 +215,8 @@ class BoxRepository implements BoxRepositoryInterface
 
             // Determine admin override flags at write-time
             $updater = $courierId ? User::find($courierId) : null;
-            $isAdminOverride = $updater && in_array($updater->role, ['admin', 'super_admin']);
+            $updaterRole = $updater?->role instanceof Role ? $updater->role->value : (string) $updater?->role;
+            $isAdminOverride = in_array($updaterRole, ['admin', 'super_admin'], true);
             $stepsBypassed = 0;
 
             if ($isAdminOverride && $trackingStepKey) {

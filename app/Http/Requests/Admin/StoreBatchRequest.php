@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Admin;
 
 use App\Enums\BatchStatus;
+use App\Enums\TrackingPhase;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
@@ -11,7 +12,7 @@ class StoreBatchRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return true;
+        return $this->user() !== null;
     }
 
     public function rules(): array
@@ -78,11 +79,16 @@ class StoreBatchRequest extends FormRequest
             'tracking_phase' => [
                 'nullable',
                 'string',
+                Rule::enum(TrackingPhase::class),
             ],
             'tracking_description' => [
                 'nullable',
                 'string',
                 'max:500',
+            ],
+            'is_correction' => [
+                'nullable',
+                'boolean',
             ],
         ];
     }
