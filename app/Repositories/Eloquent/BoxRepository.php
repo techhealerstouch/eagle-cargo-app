@@ -257,6 +257,12 @@ class BoxRepository implements BoxRepositoryInterface
                 };
             }
 
+            $targetStepForPrune = $trackingStepKey ?: $trackingPhase ?: $newStatusValue;
+            if ($isAdminOverride && ! empty($targetStepForPrune)) {
+                $isCorrection = (bool) preg_match('/^admin\s+correction\s*:/i', trim((string) $description));
+                app(TrackingStepService::class)->pruneRevertedBoxUpdates($lockedBox, (string) $targetStepForPrune, $isCorrection);
+            }
+
             BoxUpdate::create([
                 'box_id' => $lockedBox->id,
                 'area_milestone_id' => $areaMilestoneId,

@@ -1,6 +1,6 @@
 import { Package } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
-import { classifyTimelineStep, matchEventToStep } from '../TrackingTimeline';
+import { classifyTimelineStep, isAdminCorrectionEvent, matchEventToStep } from '../TrackingTimeline';
 import type { NormalizedStep, TrackingTimelineItem } from '@/types/logistics';
 
 const step = (overrides: Partial<NormalizedStep> = {}): NormalizedStep => ({
@@ -50,8 +50,8 @@ describe('TrackingTimeline step classification', () => {
         )).toBe('in_progress');
     });
 
-    it('keeps every step upcoming before pickup', () => {
-        expect(classifyTimelineStep(0, -1, step({ statusKey: 'picked_up' }), 'pending')).toBe('upcoming');
+    it('marks the first step as next and subsequent steps as upcoming before pickup', () => {
+        expect(classifyTimelineStep(0, -1, step({ statusKey: 'picked_up' }), 'pending')).toBe('next');
         expect(classifyTimelineStep(3, -1, step({ statusKey: 'delivered' }), 'pending')).toBe('upcoming');
     });
 });
@@ -111,5 +111,23 @@ describe('TrackingTimeline matchEventToStep', () => {
             date: 'Oct 19, 2026',
         };
         expect(matchEventToStep(event, journeySteps)).toBe(0);
+    });
+});
+
+describe('TrackingTimeline isAdminCorrectionEvent', () => {
+    it('identifies internal admin correction descriptions', () => {
+        expect(isAdminCorrectionEvent({
+            status: 'in_transit',
+            description: 'Admin Correction: add new box',
+            date: 'Nov 4, 2026',
+        })).toBe(true);
+    });
+
+    it('keeps normal customer-facing milestone updates', () => {
+        expect(isAdminCorrectionEvent({
+            status: 'in_transit',
+            description: 'Vessel has sailed! Your box is sailing across international waters to the Philippines.',
+            date: 'Sep 27, 2026',
+        })).toBe(false);
     });
 });

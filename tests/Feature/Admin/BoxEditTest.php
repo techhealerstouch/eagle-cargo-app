@@ -6,6 +6,7 @@ use App\Enums\BoxStatus;
 use App\Enums\Role;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\Sender;
 use App\Models\User;
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
@@ -17,7 +18,9 @@ class BoxEditTest extends TestCase
     use DatabaseTransactions;
 
     private User $admin;
+
     private Booking $booking;
+
     private Box $box;
 
     protected function setUp(): void
@@ -119,6 +122,33 @@ class BoxEditTest extends TestCase
         ]);
         $this->box->bypassStatusValidation = false;
 
+        BoxUpdate::create([
+            'box_id' => $this->box->id,
+            'status' => BoxStatus::InTransit->value,
+            'tracking_step_key' => 'in_transit_sea',
+            'tracking_phase' => 'in_transit_sea',
+            'location' => 'In-Transit',
+            'description' => 'Vessel has sailed! Your box is sailing across international waters to the Philippines.',
+        ]);
+
+        BoxUpdate::create([
+            'box_id' => $this->box->id,
+            'status' => BoxStatus::Arrived->value,
+            'tracking_step_key' => 'arrived_manila_port',
+            'tracking_phase' => 'arrived_manila_port',
+            'location' => 'International Transit',
+            'description' => 'Container has arrived at Philippine port. Ready for customs clearance.',
+        ]);
+
+        BoxUpdate::create([
+            'box_id' => $this->box->id,
+            'status' => BoxStatus::UnloadedManila->value,
+            'tracking_step_key' => 'received_manila_warehouse',
+            'tracking_phase' => 'received_manila_warehouse',
+            'location' => 'Destination',
+            'description' => 'Container arrived at Manila Warehouse. Boxes safely unloaded for sorting and dispatch.',
+        ]);
+
         $response = $this->actingAs($this->admin)->put(route('admin.boxes.update', $this->box), [
             'booking_id' => $this->booking->id,
             'status' => BoxStatus::InTransit->value,
@@ -133,6 +163,18 @@ class BoxEditTest extends TestCase
         $this->assertEquals(BoxStatus::InTransit, $this->box->status);
         $this->assertEquals('in_transit_sea', $this->box->tracking_step_key);
 
+        $this->assertDatabaseMissing('box_updates', [
+            'box_id' => $this->box->id,
+            'tracking_step_key' => 'arrived_manila_port',
+        ]);
+        $this->assertDatabaseMissing('box_updates', [
+            'box_id' => $this->box->id,
+            'tracking_step_key' => 'received_manila_warehouse',
+        ]);
+        $this->assertDatabaseHas('box_updates', [
+            'box_id' => $this->box->id,
+            'description' => 'Vessel has sailed! Your box is sailing across international waters to the Philippines.',
+        ]);
         $this->assertDatabaseHas('box_updates', [
             'box_id' => $this->box->id,
             'status' => BoxStatus::InTransit->value,

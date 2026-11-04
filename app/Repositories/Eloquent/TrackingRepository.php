@@ -17,6 +17,7 @@ use App\Services\TrackingStepService;
 use Carbon\CarbonInterface;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -122,6 +123,7 @@ class TrackingRepository implements TrackingRepositoryInterface
 
         $latestUpdate = $b->updates->first();
         $activeStepKey = $this->resolveActiveStepKey($b, $latestUpdate);
+        $this->selfHealRevertedBoxUpdates($b, $activeStepKey);
 
         return [
             'id' => $b->id,
@@ -171,20 +173,7 @@ class TrackingRepository implements TrackingRepositoryInterface
             'damage_photo_url' => $b->damage_photo_path ? '/uploads/'.ltrim($b->damage_photo_path, '/') : null,
             'has_signature' => ! empty($b->signature_path),
             'signature_url' => $b->signature_path ? '/uploads/'.ltrim($b->signature_path, '/') : null,
-            'timeline' => $b->updates ? $b->updates->map(function ($update) {
-                $stepKey = $update->tracking_step_key ?: $update->tracking_phase?->value;
-
-                return [
-                    'status' => $update->status,
-                    'status_label' => $this->resolveStatusLabel($update, $update->status, $stepKey),
-                    'tracking_step_key' => $stepKey,
-                    'tracking_phase' => $update->tracking_phase?->value,
-                    'location' => $update->location,
-                    'description' => $update->description,
-                    'date' => $update->created_at->format('M d, Y h:i A'),
-                    'raw_date' => $update->created_at,
-                ];
-            })->toArray() : [],
+            'timeline' => $this->formatPublicTimeline($b->updates, $activeStepKey),
         ];
     }
 
@@ -210,6 +199,7 @@ class TrackingRepository implements TrackingRepositoryInterface
 
         $latestUpdate = $primaryBox->updates->first();
         $activeStepKey = $this->resolveActiveStepKey($primaryBox, $latestUpdate);
+        $this->selfHealRevertedBoxUpdates($primaryBox, $activeStepKey);
 
         return [
             'booking_id' => $booking->id,
@@ -278,7 +268,41 @@ class TrackingRepository implements TrackingRepositoryInterface
                 'branch_code' => $primaryBox->batch->branch_name,
                 'eta_at' => $primaryBox->batch->eta_at ? ($primaryBox->batch->eta_at instanceof CarbonInterface ? $primaryBox->batch->eta_at->format('M d, Y') : (string) $primaryBox->batch->eta_at) : null,
             ] : null,
-            'timeline' => $primaryBox->updates ? $primaryBox->updates->map(function ($update) {
+            'timeline' => $this->formatPublicTimeline($primaryBox->updates, $activeStepKey),
+            'is_multi_box' => $booking->boxes->count() > 1,
+            'is_booking_search' => $isBookingSearch,
+            'total_boxes_count' => $booking->boxes->count(),
+            'all_boxes' => $allBoxes,
+        ];
+    }
+
+    private function formatPublicTimeline(?Collection $updates, ?string $activeStepKey): array
+    {
+        if (! $updates || $updates->isEmpty()) {
+            return [];
+        }
+
+        $stepService = app(TrackingStepService::class);
+        $activeOrder = $activeStepKey ? $stepService->getStepOrder($activeStepKey) : null;
+
+        return $updates
+            ->reject(function (BoxUpdate $update) use ($stepService, $activeOrder): bool {
+                if ($this->isInternalAdminCorrection($update)) {
+                    return true;
+                }
+
+                if ($activeOrder !== null) {
+                    $updateOrder = $stepService->resolveUpdateStepOrder($update);
+
+                    if ($updateOrder !== null && $updateOrder > $activeOrder) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->values()
+            ->map(function (BoxUpdate $update): array {
                 $stepKey = $update->tracking_step_key ?: $update->tracking_phase?->value;
 
                 return [
@@ -287,16 +311,61 @@ class TrackingRepository implements TrackingRepositoryInterface
                     'tracking_step_key' => $stepKey,
                     'tracking_phase' => $update->tracking_phase?->value,
                     'location' => $update->location,
-                    'description' => $update->description,
+                    'description' => $this->sanitizePublicDescription($update->description),
                     'date' => $update->created_at->format('M d, Y h:i A'),
                     'raw_date' => $update->created_at,
                 ];
-            })->toArray() : [],
-            'is_multi_box' => $booking->boxes->count() > 1,
-            'is_booking_search' => $isBookingSearch,
-            'total_boxes_count' => $booking->boxes->count(),
-            'all_boxes' => $allBoxes,
-        ];
+            })
+            ->all();
+    }
+
+    private function selfHealRevertedBoxUpdates(Box $box, ?string $activeStepKey): void
+    {
+        if (! $activeStepKey || ! $box->relationLoaded('updates') || $box->updates->isEmpty()) {
+            return;
+        }
+
+        $stepService = app(TrackingStepService::class);
+        $activeOrder = $stepService->getStepOrder($activeStepKey);
+
+        if ($activeOrder === null) {
+            return;
+        }
+
+        $hasFutureUpdates = $box->updates->contains(function (BoxUpdate $update) use ($stepService, $activeOrder): bool {
+            $updateOrder = $stepService->resolveUpdateStepOrder($update);
+
+            return $updateOrder !== null && $updateOrder > $activeOrder;
+        });
+
+        if ($hasFutureUpdates) {
+            $pruned = $stepService->pruneRevertedBoxUpdates($box, $activeStepKey, false);
+            if ($pruned > 0) {
+                $box->load([
+                    'updates' => function ($q) {
+                        $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
+                    },
+                ]);
+            }
+        }
+    }
+
+    private function isInternalAdminCorrection(BoxUpdate $update): bool
+    {
+        $description = trim((string) ($update->description ?? ''));
+
+        return (bool) preg_match('/^admin\s+correction\s*:/i', $description);
+    }
+
+    private function sanitizePublicDescription(?string $description): ?string
+    {
+        if ($description === null) {
+            return null;
+        }
+
+        $cleaned = preg_replace('/\R*Admin proof override\s*:.*$/is', '', $description);
+
+        return trim((string) $cleaned);
     }
 
     private function resolveActiveStepKey(Box $box, ?BoxUpdate $latestUpdate): ?string

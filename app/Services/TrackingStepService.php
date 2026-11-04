@@ -2,7 +2,12 @@
 
 namespace App\Services;
 
+use App\Enums\BoxStatus;
+use App\Enums\TrackingPhase;
+use App\Models\Box;
+use App\Models\BoxUpdate;
 use App\Models\Setting;
+use BackedEnum;
 use Illuminate\Support\Facades\Cache;
 
 class TrackingStepService
@@ -44,7 +49,118 @@ class TrackingStepService
     {
         $step = $this->getStep($key);
 
-        return $step ? (int) $step['order'] : null;
+        if ($step) {
+            return (int) $step['order'];
+        }
+
+        $aliasKey = match ($key) {
+            TrackingPhase::ARRIVED_AT_WAREHOUSE->value,
+            TrackingPhase::PROCESSING->value => TrackingPhase::RECEIVED_BY_WAREHOUSE->value,
+            TrackingPhase::DEPARTED_FROM_ORIGIN->value,
+            BoxStatus::InTransit->value => TrackingPhase::IN_TRANSIT_SEA->value,
+            BoxStatus::Collected->value => TrackingPhase::PICKED_UP->value,
+            BoxStatus::LoadedToContainer->value => TrackingPhase::LOADING_CONTAINER->value,
+            BoxStatus::Arrived->value => TrackingPhase::ARRIVED_MANILA_PORT->value,
+            BoxStatus::ForCheckingUnloading->value,
+            BoxStatus::UnloadedManila->value => TrackingPhase::RECEIVED_MANILA_WAREHOUSE->value,
+            BoxStatus::ForDeliveryScheduling->value,
+            BoxStatus::EnRouteRoRo->value => TrackingPhase::DISPATCHED_TO_LOCAL_HUB->value,
+            default => null,
+        };
+
+        if ($aliasKey !== null) {
+            $aliasStep = $this->getStep($aliasKey);
+
+            return $aliasStep ? (int) $aliasStep['order'] : null;
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve the step order of a BoxUpdate across tracking_step_key, tracking_phase, and status fallbacks.
+     */
+    public function resolveUpdateStepOrder(BoxUpdate $update): ?int
+    {
+        if (! empty($update->tracking_step_key)) {
+            $order = $this->getStepOrder((string) $update->tracking_step_key);
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        if (! empty($update->tracking_phase)) {
+            $phaseValue = $update->tracking_phase instanceof BackedEnum
+                ? (string) $update->tracking_phase->value
+                : (string) $update->tracking_phase;
+            $order = $this->getStepOrder($phaseValue);
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        if (! empty($update->status)) {
+            $statusValue = $update->status instanceof BackedEnum
+                ? (string) $update->status->value
+                : (string) $update->status;
+            $order = $this->getStepOrder($statusValue);
+            if ($order !== null) {
+                return $order;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Delete invalidated box_updates history rows ahead of the target step when a box or batch is reverted.
+     */
+    public function pruneRevertedBoxUpdates(Box $box, string $targetStepKey, bool $pruneTargetCorrections = true): int
+    {
+        $targetOrder = $this->getStepOrder($targetStepKey);
+
+        if ($targetOrder === null) {
+            return 0;
+        }
+
+        $updates = BoxUpdate::where('box_id', $box->id)
+            ->orderBy('created_at', 'asc')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        if ($updates->isEmpty()) {
+            return 0;
+        }
+
+        $idsToDelete = [];
+
+        foreach ($updates as $update) {
+            $updateOrder = $this->resolveUpdateStepOrder($update);
+
+            if ($updateOrder === null) {
+                continue;
+            }
+
+            if ($updateOrder > $targetOrder) {
+                $idsToDelete[] = $update->id;
+
+                continue;
+            }
+
+            if (
+                $pruneTargetCorrections
+                && $updateOrder === $targetOrder
+                && (bool) preg_match('/^admin\s+correction\s*:/i', trim((string) ($update->description ?? '')))
+            ) {
+                $idsToDelete[] = $update->id;
+            }
+        }
+
+        if (empty($idsToDelete)) {
+            return 0;
+        }
+
+        return BoxUpdate::whereIn('id', $idsToDelete)->delete();
     }
 
     /**
