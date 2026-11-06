@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Enums\InvoiceStatus;
+use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetType;
 use App\Http\Controllers\Controller;
@@ -53,7 +54,6 @@ class InvoiceController extends Controller
     {
         $this->authorizePickerInvoiceAccess($invoice);
 
-
         $invoice->load(['booking.sender', 'booking.boxes.boxType', 'booking.runsheets.picker']);
         $invoiceSettings = $settingsService->getInvoiceSettings();
         $senderSnapshot = $invoice->resolveSenderSnapshot();
@@ -70,7 +70,7 @@ class InvoiceController extends Controller
             'adminTeamSnapshot'
         ))->setPaper('a4', 'portrait');
 
-        return $pdf->stream($invoice->invoice_number . '.pdf');
+        return $pdf->stream($invoice->invoice_number.'.pdf');
     }
 
     private function authorizePickerInvoiceAccess(Invoice $invoice): void
@@ -82,7 +82,7 @@ class InvoiceController extends Controller
         }
 
         $isAssigned = $invoice->booking()
-            ->whereHas('runsheets', fn($query) => $query
+            ->whereHas('runsheets', fn ($query) => $query
                 ->where('runsheets.type', RunsheetType::Pickup->value)
                 ->where('runsheets.picker_id', $user->id))
             ->exists();
@@ -91,21 +91,23 @@ class InvoiceController extends Controller
             abort(403, 'Unauthorized. You can only view invoices for your assigned bookings.');
         }
     }
+
     public function edit(Invoice $invoice)
     {
         return Inertia::render('admin/invoices/edit', [
-            'invoice' => $invoice->load(['booking.sender', 'booking.boxes']),
+            'invoice' => $invoice->load(['booking.sender', 'booking.boxes', 'payments']),
         ]);
     }
 
     public function update(UpdateInvoiceRequest $request, Invoice $invoice, SettingsService $settingsService)
     {
-        // Item 50: Invoice immutability after payment
-        if ($invoice->payments()->exists()) {
-            return back()->with('error', 'Invoices with payments cannot be edited.');
+        $validated = $request->validated();
+
+        // Item 50: Invoice amount immutability after payment
+        if ($invoice->payments()->exists() && (float) $validated['amount'] !== (float) $invoice->amount) {
+            return back()->with('error', 'The invoice amount cannot be modified because payments have already been recorded.');
         }
 
-        $validated = $request->validated();
         $vatRate = $settingsService->getInvoiceSettings()['taxRate'];
         $vatBreakdown = Invoice::calculateVatBreakdown((float) $validated['amount'], (float) $vatRate);
 
@@ -113,7 +115,8 @@ class InvoiceController extends Controller
         $paymentFields = ['payment_method', 'reference_number', 'proof_of_payment'];
         $invoiceData = Arr::except(array_merge($validated, $vatBreakdown), $paymentFields);
 
-        $invoice->update($invoiceData);
+        $method = $validated['payment_method'] ?? 'bank_transfer';
+        $reference = ! empty($validated['reference_number']) ? $validated['reference_number'] : (in_array($method, ['cash', 'cash_on_pickup']) ? 'Cash Payment' : 'Manual Admin Entry');
 
         if ($status === 'paid' || $status === InvoiceStatus::Paid->value) {
             $proofPath = null;
@@ -121,24 +124,29 @@ class InvoiceController extends Controller
                 $proofPath = $request->file('proof_of_payment')->store('proofs_of_payment', 'public');
             }
 
-            $method = $validated['payment_method'] ?? 'bank_transfer';
-            $reference = !empty($validated['reference_number']) ? $validated['reference_number'] : (in_array($method, ['cash', 'cash_on_pickup']) ? 'Cash Payment' : 'Manual Admin Entry');
-
             if ($invoice->booking) {
                 $bookingUpdate = [
                     'payment_method' => $method,
                     'payment_reference' => $reference,
+                    'payment_status' => PaymentStatus::Paid,
                 ];
                 if ($proofPath) {
                     $bookingUpdate['proof_of_payment'] = $proofPath;
                 }
                 $invoice->booking->update($bookingUpdate);
             }
+        }
 
-            if (! $invoice->payments()->exists()) {
+        $invoice->update($invoiceData);
+
+        if ($status === 'paid' || $status === InvoiceStatus::Paid->value) {
+            $settledTotal = $invoice->settledPaymentsTotal();
+            $outstanding = max(0.0, round((float) $invoice->amount - $settledTotal, 2));
+
+            if ($outstanding > 0) {
                 Payment::create([
                     'invoice_id' => $invoice->id,
-                    'amount' => $invoice->amount,
+                    'amount' => $outstanding,
                     'payment_method' => $method,
                     'reference_number' => $reference,
                     'paid_at' => now(),
@@ -152,6 +160,7 @@ class InvoiceController extends Controller
         }
 
         $returnUrl = $request->input('return_to') ?? session('admin_return_url.admin.invoices.index') ?? session('admin_return_url') ?? route('admin.invoices.index');
+
         return redirect($returnUrl)->with('success', 'Invoice updated successfully.');
     }
 
@@ -193,7 +202,7 @@ class InvoiceController extends Controller
             }
         }
 
-        return redirect()->back()->with('success', count($invoices) . ' invoices marked as Paid.');
+        return redirect()->back()->with('success', count($invoices).' invoices marked as Paid.');
     }
 
     public function bulkDestroy(Request $request)

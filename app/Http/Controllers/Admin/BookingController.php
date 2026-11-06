@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
@@ -11,7 +12,6 @@ use App\Enums\RunsheetType;
 use App\Enums\SerialNumberStatus;
 use App\Exports\BookingsExport;
 use App\Http\Controllers\Controller;
-use App\Services\DeveloperAccess;
 use App\Http\Requests\Admin\StoreAdminBookingRequest;
 use App\Http\Requests\Admin\UpdateAdminBookingRequest;
 use App\Imports\BookingsImport;
@@ -19,6 +19,7 @@ use App\Models\Booking;
 use App\Models\Box;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Models\Promotion;
 use App\Models\Recipient;
 use App\Models\Runsheet;
 use App\Models\Sender;
@@ -28,7 +29,10 @@ use App\Notifications\AccountCreatedByAdmin;
 use App\Notifications\BookingCreatedByAdmin;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\AuditLogService;
+use App\Services\DeveloperAccess;
 use App\Services\EntityVersionService;
+use App\Services\PaymentService;
+use App\Services\PromotionService;
 use App\Services\ReferenceDataService;
 use App\Services\RunsheetService;
 use App\Services\SettingsService;
@@ -217,7 +221,7 @@ class BookingController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $activePromotions = \App\Models\Promotion::where('is_active', true)
+        $activePromotions = Promotion::where('is_active', true)
             ->where(function ($query) {
                 $query->whereNull('valid_from')->orWhere('valid_from', '<=', now());
             })
@@ -407,18 +411,19 @@ class BookingController extends Controller
             // Reload boxes to get accurate price_charged calculated by BoxObserver
             $booking->load('boxes');
 
-            if (!empty($validated['promo_code'])) {
-                $augmentedBoxes = collect($validated['boxes'])->map(function($boxData, $index) use ($booking) {
+            if (! empty($validated['promo_code'])) {
+                $augmentedBoxes = collect($validated['boxes'])->map(function ($boxData, $index) use ($booking) {
                     $boxModel = $booking->boxes[$index] ?? null;
                     if ($boxModel) {
                         $boxData['price_charged'] = (float) $boxModel->price_charged;
                     }
+
                     return $boxData;
                 })->toArray();
 
                 $subtotal = $booking->boxes->sum('price_charged');
 
-                $promotionService = app(\App\Services\PromotionService::class);
+                $promotionService = app(PromotionService::class);
                 $emptyBoxCount = (int) ($validated['empty_box_count'] ?? 0);
                 $emptyBoxFee = (float) ($validated['empty_box_fee'] ?? 10.00);
 
@@ -560,23 +565,34 @@ class BookingController extends Controller
         $paymentStatus = $booking->payment_status instanceof PaymentStatus ? $booking->payment_status->value : (string) $booking->payment_status;
 
         if ($paymentStatus === PaymentStatus::Paid->value || $paymentStatus === 'paid') {
-            $invoice = $booking->invoice()->first() ?: Invoice::generateForBooking($booking);
-            if ($invoice && ! $invoice->payments()->exists()) {
-                $method = $booking->payment_method ?? 'bank_transfer';
-                $reference = ! empty($booking->payment_reference) ? $booking->payment_reference : (in_array($method, ['cash', 'cash_on_pickup']) ? 'Cash Payment' : 'Manual Admin Entry');
+            $invoice = $booking->invoices()->where('status', '!=', InvoiceStatus::Voided)->latest('id')->first()
+                ?: Invoice::generateForBooking($booking);
 
-                Payment::create([
-                    'invoice_id' => $invoice->id,
-                    'amount' => $invoice->amount,
-                    'payment_method' => $method,
-                    'reference_number' => $reference,
-                    'paid_at' => now(),
-                    'collected_by' => Auth::id(),
-                    'confirmed_at' => now(),
-                    'confirmed_by' => Auth::id(),
-                    'is_cash_payment' => in_array($method, ['cash', 'cash_on_pickup']),
-                    'confirmation_note' => 'Manually recorded via Admin Booking Edit',
-                ]);
+            if ($invoice && $invoice->status !== InvoiceStatus::Voided) {
+                $settledTotal = $invoice->settledPaymentsTotal();
+                $outstanding = max(0.0, round((float) $invoice->amount - $settledTotal, 2));
+
+                if ($outstanding > 0) {
+                    $method = $booking->payment_method ?? 'bank_transfer';
+                    $reference = ! empty($booking->payment_reference) ? $booking->payment_reference : (in_array($method, ['cash', 'cash_on_pickup'], true) ? 'Cash Payment' : 'Manual Admin Entry');
+
+                    Payment::create([
+                        'invoice_id' => $invoice->id,
+                        'amount' => $outstanding,
+                        'payment_method' => $method,
+                        'reference_number' => $reference,
+                        'paid_at' => now(),
+                        'collected_by' => Auth::id(),
+                        'confirmed_at' => now(),
+                        'confirmed_by' => Auth::id(),
+                        'is_cash_payment' => in_array($method, ['cash', 'cash_on_pickup'], true),
+                        'confirmation_note' => 'Manually recorded via Admin Booking Edit',
+                    ]);
+                }
+
+                if ($invoice->status !== InvoiceStatus::Paid) {
+                    $invoice->update(['status' => InvoiceStatus::Paid]);
+                }
             }
         }
 
@@ -974,20 +990,31 @@ class BookingController extends Controller
             $booking->save();
 
             if ($newPaymentStatus === PaymentStatus::Paid) {
-                $invoice = $booking->invoice()->first();
-                if ($invoice && ! $invoice->payments()->exists()) {
-                    Payment::create([
-                        'invoice_id' => $invoice->id,
-                        'amount' => $invoice->amount,
-                        'payment_method' => $booking->payment_method ?? 'bank_transfer',
-                        'reference_number' => $booking->payment_reference ?? 'Bulk Admin Update',
-                        'paid_at' => now(),
-                        'collected_by' => Auth::id(),
-                        'confirmed_at' => now(),
-                        'confirmed_by' => Auth::id(),
-                        'is_cash_payment' => ($booking->payment_method ?? '') === 'cash',
-                        'confirmation_note' => 'Manually recorded via Booking Bulk Payment Status Update',
-                    ]);
+                $invoice = $booking->invoices()->where('status', '!=', InvoiceStatus::Voided)->latest('id')->first()
+                    ?: Invoice::generateForBooking($booking);
+
+                if ($invoice && $invoice->status !== InvoiceStatus::Voided) {
+                    $settledTotal = $invoice->settledPaymentsTotal();
+                    $outstanding = max(0.0, round((float) $invoice->amount - $settledTotal, 2));
+
+                    if ($outstanding > 0) {
+                        Payment::create([
+                            'invoice_id' => $invoice->id,
+                            'amount' => $outstanding,
+                            'payment_method' => $booking->payment_method ?? 'bank_transfer',
+                            'reference_number' => $booking->payment_reference ?? 'Bulk Admin Update',
+                            'paid_at' => now(),
+                            'collected_by' => Auth::id(),
+                            'confirmed_at' => now(),
+                            'confirmed_by' => Auth::id(),
+                            'is_cash_payment' => in_array($booking->payment_method ?? '', ['cash', 'cash_on_pickup'], true),
+                            'confirmation_note' => 'Manually recorded via Booking Bulk Payment Status Update',
+                        ]);
+                    }
+
+                    if ($invoice->status !== InvoiceStatus::Paid) {
+                        $invoice->update(['status' => InvoiceStatus::Paid]);
+                    }
                 }
             }
 

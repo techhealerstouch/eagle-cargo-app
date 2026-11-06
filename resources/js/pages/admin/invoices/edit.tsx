@@ -39,6 +39,8 @@ interface Invoice {
     booking?: {
         id: number;
         reference_number: string;
+        payment_method?: string;
+        payment_reference?: string;
         booking_type?: string;
         destination?: string;
         boxes?: any[];
@@ -50,6 +52,7 @@ interface Invoice {
             address?: string;
         };
     };
+    payments?: any[];
 }
 
 const BOOKING_TYPE_CONFIG: Record<string, { label: string; badgeClass: string; icon: string }> = {
@@ -85,10 +88,12 @@ export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
         status: invoice.status,
         or_number: invoice.or_number || '',
         due_date: invoice.due_date ? invoice.due_date.split('T')[0] : '', // format for date input
-        payment_method: 'bank_transfer',
-        reference_number: '',
+        payment_method: invoice.booking?.payment_method || 'bank_transfer',
+        reference_number: invoice.booking?.payment_reference || '',
         proof_of_payment: null as File | null,
     });
+
+    const hasRecordedPayments = Boolean(invoice.payments && invoice.payments.length > 0);
 
     const breadcrumbs: BreadcrumbItem[] = [
         { title: 'Dashboard', href: '/dashboard' },
@@ -243,12 +248,18 @@ export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
                                             type="number"
                                             step="0.01"
                                             min="0"
-                                            className="h-10 rounded-lg border-input bg-white pl-8 pr-3 text-sm font-medium text-foreground focus:ring-1 focus:ring-ring transition-all"
+                                            disabled={hasRecordedPayments}
+                                            className={`h-10 rounded-lg border-input bg-white pl-8 pr-3 text-sm font-medium text-foreground focus:ring-1 focus:ring-ring transition-all ${hasRecordedPayments ? 'bg-zinc-50 cursor-not-allowed opacity-80' : ''}`}
                                             value={data.amount}
                                             onChange={(e) => setData('amount', e.target.value)}
                                             placeholder="0.00"
                                         />
                                     </div>
+                                    {hasRecordedPayments && (
+                                        <p className="text-[11px] text-amber-700 font-normal">
+                                            Invoice amount cannot be altered because payments have already been recorded.
+                                        </p>
+                                    )}
                                     {errors.amount && (
                                         <p className="text-xs text-red-500">{errors.amount}</p>
                                     )}
@@ -387,15 +398,17 @@ export default function InvoicesEdit({ invoice }: { invoice: Invoice }) {
                                         </div>
 
                                         <div className="space-y-2 md:col-span-2">
-                                            <Label htmlFor="proof_of_payment" className="text-xs font-medium text-emerald-950">
-                                                Proof of Payment (Image or PDF) <span className="text-red-500">*</span>
+                                            <Label htmlFor="proof_of_payment" className="text-xs font-medium text-emerald-950 flex items-center gap-1">
+                                                Proof of Payment (Image or PDF) {['cash', 'cash_on_pickup'].includes(data.payment_method) ? <span className="text-xs text-emerald-700/80 font-normal">(optional for cash)</span> : <span className="text-red-500">*</span>}
                                             </Label>
                                             <div className="relative border border-dashed border-emerald-300 rounded-lg p-4 bg-white/90 hover:bg-white transition-all text-center group cursor-pointer">
                                                 <Upload className="size-6 text-emerald-500 mx-auto mb-1.5 group-hover:text-emerald-700 transition-colors" />
                                                 <div className="text-xs font-medium text-zinc-900 mb-0.5">
                                                     {data.proof_of_payment ? data.proof_of_payment.name : 'Click to select or drag proof of payment document'}
                                                 </div>
-                                                <p className="text-[11px] text-muted-foreground">Supports JPG, PNG, or PDF (Max 5MB)</p>
+                                                <p className="text-[11px] text-muted-foreground">
+                                                    Supports JPG, PNG, or PDF (Max 5MB){['cash', 'cash_on_pickup'].includes(data.payment_method) ? ' • Optional for cash payments' : ''}
+                                                </p>
                                                 <input
                                                     id="proof_of_payment"
                                                     type="file"

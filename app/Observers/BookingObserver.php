@@ -8,13 +8,18 @@ use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Models\Booking;
+use App\Models\BoxUpdate;
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Models\User;
 use App\Notifications\BookingPaymentReceived;
 use App\Notifications\BookingStatusChanged;
 use App\Notifications\DeclarationFormSubmittedNotification;
+use App\Repositories\Contracts\BoxRepositoryInterface;
+use App\Services\PaymentService;
 use App\Services\SettingsService;
 use App\Services\TrackingCacheService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
@@ -102,12 +107,12 @@ class BookingObserver
 
                 // Add timeline event to boxes and clear tracking cache
                 $booking->boxes()->each(function ($box) {
-                    \App\Models\BoxUpdate::create([
+                    BoxUpdate::create([
                         'box_id' => $box->id,
                         'status' => 'confirmed',
                         'description' => 'Booking accepted and confirmed by admin.',
                         'location' => 'Admin Office',
-                        'updated_by' => \Illuminate\Support\Facades\Auth::id(),
+                        'updated_by' => Auth::id(),
                     ]);
                     app(TrackingCacheService::class)->forgetBox($box);
                 });
@@ -119,26 +124,26 @@ class BookingObserver
 
             // Handle Collected side effects — cascade to pending child boxes
             if ($newStatus === BookingStatus::Collected) {
-                $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
+                $boxRepo = app(BoxRepositoryInterface::class);
                 $booking->boxes()->where('status', BoxStatus::Pending)->get()->each(function ($box) use ($boxRepo) {
                     $boxRepo->updateStatus(
                         box: $box,
                         status: BoxStatus::Collected->value,
                         notes: 'Collected as part of booking collection',
-                        courierId: \Illuminate\Support\Facades\Auth::id()
+                        courierId: Auth::id()
                     );
                 });
             }
 
             // Handle Delivered side effects — cascade to undelivered child boxes
             if ($newStatus === BookingStatus::Delivered) {
-                $boxRepo = app(\App\Repositories\Contracts\BoxRepositoryInterface::class);
+                $boxRepo = app(BoxRepositoryInterface::class);
                 $booking->boxes()->whereNotIn('status', [BoxStatus::Delivered, BoxStatus::Cancelled])->get()->each(function ($box) use ($boxRepo) {
                     $boxRepo->updateStatus(
                         box: $box,
                         status: BoxStatus::Delivered->value,
                         notes: 'Delivered as part of booking completion',
-                        courierId: \Illuminate\Support\Facades\Auth::id(),
+                        courierId: Auth::id(),
                         deliveryOverrideReason: 'Marked delivered via booking status update',
                         bypassValidation: true
                     );
@@ -199,10 +204,33 @@ class BookingObserver
         }
 
         if ($booking->wasChanged('payment_status')) {
-            $invoice = $booking->invoice()->first();
+            $invoice = $booking->invoices()->where('status', '!=', InvoiceStatus::Voided)->latest('id')->first();
 
             if ($invoice) {
                 if ($booking->payment_status === PaymentStatus::Paid) {
+                    $settledTotal = $invoice->settledPaymentsTotal();
+                    $outstanding = max(0.0, round((float) $invoice->amount - $settledTotal, 2));
+
+                    if ($outstanding > 0) {
+                        $method = $booking->payment_method ?? 'bank_transfer';
+                        $reference = ! empty($booking->payment_reference)
+                            ? $booking->payment_reference
+                            : (in_array($method, ['cash', 'cash_on_pickup'], true) ? 'Cash Payment' : 'Manual Payment Settlement');
+
+                        Payment::create([
+                            'invoice_id' => $invoice->id,
+                            'amount' => $outstanding,
+                            'payment_method' => $method,
+                            'reference_number' => $reference,
+                            'paid_at' => now(),
+                            'collected_by' => Auth::id(),
+                            'confirmed_at' => now(),
+                            'confirmed_by' => Auth::id(),
+                            'is_cash_payment' => in_array($method, ['cash', 'cash_on_pickup'], true),
+                            'confirmation_note' => 'Remaining balance settled on payment status marked as paid',
+                        ]);
+                    }
+
                     if ($invoice->status !== InvoiceStatus::Paid) {
                         $invoice->update(['status' => InvoiceStatus::Paid]);
                     }
