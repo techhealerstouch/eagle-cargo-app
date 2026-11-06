@@ -762,38 +762,6 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                                                 return null;
                                             })()}
                                         </div>
-                                        {(() => {
-                                            const rawStatus = (activeTrackingData.batch?.status || '').toLowerCase();
-                                            const statusLabel =
-                                                activeTrackingData.batch?.status_label ||
-                                                humanize(rawStatus) ||
-                                                'In Transit';
-                                            const isSailed = rawStatus === 'sailed' || rawStatus.includes('transit');
-                                            const isArrived = rawStatus === 'arrived';
-                                            const isLoading = rawStatus === 'loading' || rawStatus === 'open';
-
-                                            return (
-                                                <div className="text-right shrink-0">
-                                                    <span className="text-[8px] uppercase font-bold tracking-widest text-zinc-400 block mb-0.5">
-                                                        Batch Status
-                                                    </span>
-                                                    <span
-                                                        className={cn(
-                                                            "inline-flex items-center text-[10px] sm:text-xs font-black px-2.5 py-0.5 sm:py-1 rounded-md whitespace-nowrap shadow-xs border",
-                                                            isSailed
-                                                                ? "text-emerald-400 bg-emerald-950/80 border-emerald-500/40"
-                                                                : isArrived
-                                                                    ? "text-sky-300 bg-sky-950/80 border-sky-500/40"
-                                                                    : isLoading
-                                                                        ? "text-amber-300 bg-amber-950/80 border-amber-500/40"
-                                                                        : "text-emerald-400 bg-emerald-950/80 border-emerald-500/40"
-                                                        )}
-                                                    >
-                                                        {statusLabel}
-                                                    </span>
-                                                </div>
-                                            );
-                                        })()}
                                     </div>
                                 </div>
                             )}

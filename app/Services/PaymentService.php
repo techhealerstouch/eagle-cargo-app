@@ -399,23 +399,12 @@ class PaymentService
         });
     }
 
+    /**
+     * Calculate the total confirmed/settled payments for an invoice.
+     */
     public function settledPaymentsTotal(Invoice $invoice): float
     {
-        return (float) $invoice->payments()
-            ->where(function ($query) {
-                $query->where(function ($q) {
-                    $q->whereNotNull('stripe_payment_intent_id')
-                        ->where(function ($sq) {
-                            $sq->whereNotNull('paid_at')
-                                ->orWhere('stripe_status', 'succeeded');
-                        });
-                })
-                ->orWhere(function ($q) {
-                    $q->whereNull('stripe_payment_intent_id')
-                        ->whereNotNull('confirmed_at');
-                });
-            })
-            ->sum('amount');
+        return $invoice->settledPaymentsTotal();
     }
 
     private function isIdempotencyKeyConflict(QueryException $exception): bool
