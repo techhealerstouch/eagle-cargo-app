@@ -73,6 +73,7 @@ interface Booking {
     declaration_form_status: string;
     declaration_form_path?: string | null;
     declaration_data?: any;
+    empty_box_count?: number;
     created_at: string;
     updated_at: string;
     promo_code?: string | null;
@@ -420,16 +421,19 @@ export default function BookingShow({ booking, pendingPayment }: { booking: Book
                                         <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Customs Declaration</h3>
                                     </div>
                                     <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                                        Number(booking.empty_box_count || 0) > 0 && !hasBoxes ? 'bg-zinc-100 text-zinc-700 border-zinc-200' :
                                         booking.declaration_form_status === 'submitted_online' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
                                         booking.declaration_form_status === 'physical_copy_received' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
                                         'bg-muted text-muted-foreground border-border'
                                     }`}>
-                                        {humanize(booking.declaration_form_status)}
+                                        {Number(booking.empty_box_count || 0) > 0 && !hasBoxes ? 'N/A' : humanize(booking.declaration_form_status)}
                                     </div>
                                 </div>
                                 <div className="p-5 flex-1 flex flex-col">
                                     <p className="text-[11px] text-muted-foreground leading-relaxed mb-6">
-                                        {booking.declaration_form_status === 'missing'
+                                        {Number(booking.empty_box_count || 0) > 0 && !hasBoxes
+                                            ? "Empty box orders do not require a customs declaration form."
+                                            : booking.declaration_form_status === 'missing'
                                             ? "No declaration has been submitted yet. Required for customs clearance."
                                             : booking.declaration_form_status === 'physical_copy_received'
                                             ? "A physical copy of the form was handed to the picker and uploaded."
@@ -597,7 +601,28 @@ export default function BookingShow({ booking, pendingPayment }: { booking: Book
                             </div>
 
                             <div className="flex-1">
-                                {hasBoxes ? (
+                                {Number(booking.empty_box_count || 0) > 0 && !hasBoxes ? (
+                                    <div className="p-6">
+                                        <div className="flex items-start gap-4 rounded-xl border border-amber-200/80 bg-amber-50/50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
+                                            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-brand-rust border border-amber-500/20">
+                                                <Package className="size-5" />
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
+                                                        Empty Balikbayan Box Delivery Order
+                                                    </h4>
+                                                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+                                                        {booking.empty_box_count} Box{booking.empty_box_count === 1 ? '' : 'es'}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+                                                    This order is for delivering empty balikbayan box supplies to the customer's Australian address before booking cargo freight. No cargo boxes or customs declaration forms are associated with this order.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : hasBoxes ? (
                                     booking.status !== 'pending' ? (
                                         <div className="flex flex-col divide-y divide-border">
                                             {booking.boxes.map((box, index) => (

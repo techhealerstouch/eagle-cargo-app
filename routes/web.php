@@ -230,6 +230,11 @@ Route::get('/bookings/{booking}', function ($booking) {
     return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
 });
 
+// Public Empty Box Ordering Routes (open to both guests and authenticated senders)
+Route::get('/order-boxes', [SenderDashboardController::class, 'orderBoxesPage'])->name('sender.order-boxes');
+Route::redirect('/guest/order-boxes', '/order-boxes')->name('guest.order-boxes');
+Route::post('/order-boxes', [SenderDashboardController::class, 'storeBoxOrder'])->middleware('throttle:booking-writes')->name('sender.order-boxes.store');
+
 // Informational & Marketing Pages (publicly accessible, dynamically styled based on auth)
 Route::inertia('/about', 'marketing/about')->name('about');
 Route::get('/services', [PublicScheduleAndRateController::class, 'services'])->name('services');

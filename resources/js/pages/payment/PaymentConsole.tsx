@@ -17,6 +17,7 @@ interface Booking {
     id: number;
     reference_number: string;
     payment_status?: string;
+    empty_box_count?: number;
     boxes: Box[];
     proof_of_payment?: string;
     payment_reference?: string | null;
@@ -231,9 +232,38 @@ export default function PaymentConsole({
                         <div className="rounded-xl border border-zinc-200 bg-white shadow-xs overflow-hidden">
                             <div className="p-6 border-b border-zinc-100 bg-zinc-50/60">
                                 <h3 className="font-semibold text-zinc-900 text-base">Order Summary</h3>
-                                <p className="text-xs text-zinc-500 mt-1">{(booking.boxes || []).length} item{(booking.boxes || []).length !== 1 ? 's' : ''}</p>
+                                <p className="text-xs text-zinc-500 mt-1">
+                                    {(booking.boxes || []).length > 0
+                                        ? `${(booking.boxes || []).length} item${(booking.boxes || []).length !== 1 ? 's' : ''}`
+                                        : `${booking.empty_box_count || 0} box${(booking.empty_box_count || 0) !== 1 ? 'es' : ''}`}
+                                </p>
                             </div>
                             <div className="p-6 space-y-3">
+                                {((booking.boxes || []).length === 0 && (booking.empty_box_count || 0) > 0) && (
+                                    <div className="flex items-center gap-4 p-4 rounded-lg bg-zinc-50/80 border border-zinc-100 group/item transition-all hover:bg-white hover:shadow-xs">
+                                        <div className="h-12 w-12 rounded-lg bg-amber-50 flex items-center justify-center border border-amber-200 shrink-0 shadow-xs">
+                                            <Package className="size-5 text-amber-700" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center justify-between mb-1">
+                                                <div className="flex flex-col">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Empty Box Supply</span>
+                                                    <span className="text-sm font-bold text-zinc-800">{booking.empty_box_count || 0}x Empty Balikbayan Box{(booking.empty_box_count || 0) > 1 ? 'es' : ''}</span>
+                                                </div>
+                                                <span className="text-base font-mono font-bold text-zinc-900">${totalAmount.toFixed(2)}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+                                                <p className="truncate flex items-center gap-1">
+                                                    <MapPin className="size-3 text-zinc-400" /> Doorstep Delivery
+                                                </p>
+                                                <span className="text-zinc-300">•</span>
+                                                <p className="truncate font-medium text-emerald-600">
+                                                    Credited towards shipment
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 {(booking.boxes || []).map((box: any, i: number) => (
                                     <div key={i} className="flex items-center gap-4 p-4 rounded-lg bg-zinc-50/80 border border-zinc-100 group/item transition-all hover:bg-white hover:shadow-xs">
                                         <div className="h-12 w-12 rounded-lg bg-white flex items-center justify-center border border-zinc-200 shrink-0 shadow-xs group-hover/item:border-zinc-300 transition-colors">
@@ -278,7 +308,7 @@ export default function PaymentConsole({
                                             </div>
                                             <div className="relative z-10">
                                                 <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500 group-hover:text-zinc-400 transition-colors block mb-1">Final Amount</span>
-                                                
+
                                             </div>
                                             <span className="text-4xl font-black font-mono tracking-tighter relative z-10">${totalAmount.toFixed(2)}</span>
                                         </div>

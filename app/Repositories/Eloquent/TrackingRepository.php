@@ -92,6 +92,7 @@ class TrackingRepository implements TrackingRepositoryInterface
 
         // 2. Check if it's a booking reference number instead of Box tracking number
         $booking = Booking::with([
+            'sender',
             'boxes.updates' => function ($q) {
                 $q->orderBy('created_at', 'desc')->orderBy('id', 'desc');
             },
@@ -111,6 +112,10 @@ class TrackingRepository implements TrackingRepositoryInterface
             $box = $booking->boxes->first();
 
             return $this->formatTrackingResponse($box, $booking, true);
+        }
+
+        if ($booking && ($booking->empty_box_count > 0 || $booking->boxes->count() === 0)) {
+            return $this->formatEmptyBoxTrackingResponse($booking);
         }
 
         return null;
@@ -273,6 +278,71 @@ class TrackingRepository implements TrackingRepositoryInterface
             'is_booking_search' => $isBookingSearch,
             'total_boxes_count' => $booking->boxes->count(),
             'all_boxes' => $allBoxes,
+            'is_empty_box_order' => false,
+            'empty_box_count' => (int) ($booking->empty_box_count ?? 0),
+        ];
+    }
+
+    private function formatEmptyBoxTrackingResponse(Booking $booking): array
+    {
+        $sender = $booking->sender;
+        $senderName = $sender ? trim("{$sender->first_name} {$sender->last_name}") : 'Customer';
+        $location = $sender ? trim("{$sender->suburb}, {$sender->state} {$sender->postcode}") : 'Australia';
+        $etaDate = $booking->preferred_date ? (is_string($booking->preferred_date) ? $booking->preferred_date : $booking->preferred_date->format('Y-m-d')) : null;
+        $etaMessage = $etaDate ? 'Scheduled empty box delivery on or before this date' : 'Scheduling empty box delivery';
+
+        return [
+            'booking_id' => $booking->id,
+            'booking_reference' => $booking->reference_number,
+            'booking_status' => $booking->status instanceof BookingStatus ? $booking->status->value : (string) $booking->status,
+            'confirmed_at' => $booking->confirmed_at ? $booking->confirmed_at->format('M d, Y h:i A') : ($booking->created_at ? $booking->created_at->format('M d, Y h:i A') : null),
+            'is_guest' => (bool) $booking->is_guest,
+            'sender_email_masked' => $this->maskEmail($sender?->email),
+            'tracking_number' => $booking->reference_number,
+            'recipient_name' => $senderName,
+            'status' => $booking->status instanceof BookingStatus ? $booking->status->value : (string) $booking->status,
+            'status_label' => $booking->status === BookingStatus::Delivered ? 'Delivered' : ($booking->status === BookingStatus::Cancelled ? 'Cancelled' : 'Empty Box Order Confirmed'),
+            'tracking_step_key' => 'empty_box_order',
+            'tracking_phase' => 'order_placed',
+            'current_milestone_id' => null,
+            'area_milestones' => [],
+            'destination' => $location,
+            'area' => null,
+            'box_type' => ['name' => "{$booking->empty_box_count}x Empty Box(es)"],
+            'shipped_at' => null,
+            'payment_status' => $booking->payment_status,
+            'declaration_form_status' => 'not_required',
+            'can_edit_declaration' => false,
+            'eta_date' => $etaDate,
+            'eta_message' => $etaMessage,
+            'estimate_delivery_date' => $etaDate,
+            'estimate_delivery_message' => $etaMessage,
+            'has_delivery_proof' => false,
+            'has_pickup_proof' => false,
+            'delivery_proof_url' => null,
+            'pickup_proof_url' => null,
+            'damage_photo_url' => null,
+            'has_signature' => false,
+            'signature_url' => null,
+            'batch' => null,
+            'timeline' => [
+                [
+                    'status' => 'pending',
+                    'status_label' => 'Empty Box Order Placed',
+                    'tracking_step_key' => 'empty_box_order',
+                    'tracking_phase' => 'order_placed',
+                    'location' => $location,
+                    'description' => "Order placed for {$booking->empty_box_count} empty balikbayan box(es). Scheduling dispatch for preferred delivery date.",
+                    'date' => $booking->created_at ? $booking->created_at->format('M d, Y h:i A') : now()->format('M d, Y h:i A'),
+                    'raw_date' => $booking->created_at,
+                ],
+            ],
+            'is_multi_box' => false,
+            'is_booking_search' => true,
+            'total_boxes_count' => (int) $booking->empty_box_count,
+            'all_boxes' => [],
+            'is_empty_box_order' => true,
+            'empty_box_count' => (int) $booking->empty_box_count,
         ];
     }
 

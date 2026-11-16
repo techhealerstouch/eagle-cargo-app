@@ -49,9 +49,15 @@ export const TrackingDetailsCard: React.FC<TrackingDetailsCardProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-zinc-200/60 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300/40 dark:border-zinc-700 flex items-center gap-1">
-                        <Ship className="size-2.5 text-sky-600 dark:text-sky-400" /> Sea Container
-                    </span>
+                    {trackingData.is_empty_box_order ? (
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300/60 dark:border-amber-700/60">
+                            Empty Box Delivery ({trackingData.empty_box_count || 1} Box{trackingData.empty_box_count === 1 ? '' : 'es'})
+                        </span>
+                    ) : (
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-zinc-200/60 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300/40 dark:border-zinc-700 flex items-center gap-1">
+                            <Ship className="size-2.5 text-sky-600 dark:text-sky-400" /> Sea Container
+                        </span>
+                    )}
                     <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
                         {trackingData.box_type?.name || 'Standard Box'}
                     </span>

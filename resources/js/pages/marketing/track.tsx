@@ -619,8 +619,27 @@ export default function Track({ trackingData, tracking_number, trackingSteps, ad
                             />
                         )}
 
+                        {/* Empty Box Order Informational Banner */}
+                        {activeTrackingData.is_empty_box_order && (
+                            <div className="rounded-2xl border border-amber-200/80 bg-amber-50/70 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
+                                <div className="flex items-start gap-3.5">
+                                    <div className="size-9 rounded-xl bg-amber-500/10 text-amber-800 dark:text-amber-300 flex items-center justify-center shrink-0 mt-0.5">
+                                        <Package className="size-5" />
+                                    </div>
+                                    <div>
+                                        <h4 className="text-sm font-bold text-amber-950 dark:text-amber-200">
+                                            Empty Balikbayan Box Delivery Order
+                                        </h4>
+                                        <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-300/80 leading-relaxed">
+                                            This tracking record is for an order of <strong>{activeTrackingData.empty_box_count || 1} empty box(es)</strong> delivered to your Australian address. Once you have packed your boxes, you can schedule a pickup through your dashboard or by booking a shipment. No customs declaration form is required for empty box deliveries.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Customs Declaration Alert */}
-                        {activeTrackingData.booking_id && activeTrackingData.declaration_form_status === 'missing' && activeTrackingData.status?.toLowerCase() !== 'cancelled' && (
+                        {!activeTrackingData.is_empty_box_order && activeTrackingData.booking_id && activeTrackingData.declaration_form_status === 'missing' && activeTrackingData.status?.toLowerCase() !== 'cancelled' && (
                             <DeclarationAlert
                                 bookingId={activeTrackingData.booking_id}
                                 bookingReference={activeTrackingData.booking_reference}

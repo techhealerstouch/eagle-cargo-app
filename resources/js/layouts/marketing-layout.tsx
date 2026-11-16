@@ -49,6 +49,28 @@ export default function MarketingLayout({
                             Book Pickup
                         </Link>
                         <Link
+                            href="/order-boxes"
+                            className={cn(
+                                'text-xs font-bold uppercase tracking-wider transition-colors',
+                                url?.startsWith('/order-boxes')
+                                    ? 'text-brand-rust'
+                                    : 'text-zinc-600 hover:text-brand-rust',
+                            )}
+                        >
+                            Order Empty Boxes
+                        </Link>
+                        <Link
+                            href="/services"
+                            className={cn(
+                                'text-xs font-bold uppercase tracking-wider transition-colors',
+                                url?.startsWith('/services')
+                                    ? 'text-brand-rust'
+                                    : 'text-zinc-600 hover:text-brand-rust',
+                            )}
+                        >
+                            Services & Rates
+                        </Link>
+                        <Link
                             href="/track"
                             className={cn(
                                 'text-xs font-bold uppercase tracking-wider transition-colors',
@@ -117,8 +139,10 @@ export default function MarketingLayout({
                                 &copy; {new Date().getFullYear()} {appName}. All rights reserved.
                             </p>
                             <div className="flex flex-wrap items-center justify-center gap-6">
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest cursor-pointer hover:text-zinc-600 transition-colors">Privacy Policy</span>
-                                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest cursor-pointer hover:text-zinc-600 transition-colors">Terms of Service</span>
+                                <Link href="/services" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest cursor-pointer hover:text-zinc-600 transition-colors">Services & Rates</Link>
+                                <Link href="/order-boxes" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest cursor-pointer hover:text-zinc-600 transition-colors">Order Empty Boxes</Link>
+                                <Link href="/privacy" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest cursor-pointer hover:text-zinc-600 transition-colors">Privacy Policy</Link>
+                                <Link href="/terms" className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest cursor-pointer hover:text-zinc-600 transition-colors">Terms of Service</Link>
                             </div>
                         </div>
                     </div>

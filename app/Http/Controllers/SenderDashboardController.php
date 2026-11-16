@@ -10,9 +10,12 @@ use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
+use App\Events\EnquiryMessageUpdated;
+use App\Http\Requests\StoreEmptyBoxOrderRequest;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
+use App\Models\BoxType;
 use App\Models\DataIntegrityWarning;
 use App\Models\Enquiry;
 use App\Models\Invoice;
@@ -20,13 +23,17 @@ use App\Models\Payment;
 use App\Models\Runsheet;
 use App\Models\Sender;
 use App\Models\User;
+use App\Notifications\BankTransferDetails;
+use App\Notifications\BookingStatusChanged;
 use App\Services\DeveloperAccess;
+use App\Services\GuestBookingAccessService;
 use App\Services\ReferenceDataService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Stripe\PaymentIntent;
 use Stripe\Stripe;
@@ -106,6 +113,14 @@ class SenderDashboardController extends Controller
                         ->limit(20)
                         ->get()
                 )
+                ->concat(
+                    $recentBookings()
+                        ->whereDoesntHave('boxes')
+                        ->where('empty_box_count', '>', 0)
+                        ->latest()
+                        ->limit(20)
+                        ->get()
+                )
                 ->unique('id')
                 ->sortByDesc('created_at')
                 ->values();
@@ -115,6 +130,10 @@ class SenderDashboardController extends Controller
         $missingDeclaration = ($sender
             ? $sender->bookings()
                 ->whereNotIn('status', [BookingStatus::Draft, BookingStatus::Cancelled])
+                ->where(function ($query) {
+                    $query->whereHas('boxes')
+                        ->orWhere('empty_box_count', 0);
+                })
                 ->whereNull('declaration_form_path')
                 ->where(function ($query) {
                     $query->whereNull('declaration_data')
@@ -158,7 +177,14 @@ class SenderDashboardController extends Controller
                 ->count(),
             'pending' => (clone $bookingQuery)
                 ->where('status', '!=', BookingStatus::Draft)
-                ->whereHas('boxes', fn ($query) => $query->where('status', BoxStatus::Pending))
+                ->where(function ($query) {
+                    $query->whereHas('boxes', fn ($q) => $q->where('status', BoxStatus::Pending))
+                        ->orWhere(function ($q) {
+                            $q->whereDoesntHave('boxes')
+                                ->where('empty_box_count', '>', 0)
+                                ->where('status', BookingStatus::Pending);
+                        });
+                })
                 ->count(),
             'delivered' => (clone $bookingQuery)
                 ->where('status', '!=', BookingStatus::Draft)
@@ -472,8 +498,196 @@ class SenderDashboardController extends Controller
             'is_read' => false,
         ]);
 
-        \App\Events\EnquiryMessageUpdated::dispatch($enquiry, $user->id);
+        EnquiryMessageUpdated::dispatch($enquiry, $user->id);
 
         return redirect()->route('sender.enquiries')->with('success', 'Your message has been sent to support.');
+    }
+
+    public function orderBoxesPage(Request $request)
+    {
+        /** @var User|null $user */
+        $user = Auth::user();
+        $isGuest = ! $user;
+
+        if ($user && $user->role !== Role::Sender && ! in_array($user->role?->value, ['admin', 'super_admin'], true)) {
+            return redirect()->route('dashboard');
+        }
+
+        $sender = $user?->sender;
+        $boxTypes = BoxType::query()
+            ->where('is_active', true)
+            ->where('name', 'not like', '%Custom%')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        $confirmedReference = $request->query('confirmed');
+
+        return Inertia::render('sender/OrderBoxes', [
+            'boxTypes' => $boxTypes,
+            'suburbs' => app(ReferenceDataService::class)->activeSuburbs(),
+            'isGuest' => $isGuest,
+            'confirmedReference' => $confirmedReference,
+            'sender' => $sender ? [
+                'first_name' => $sender->first_name,
+                'last_name' => $sender->last_name,
+                'email' => $sender->email,
+                'mobile' => $sender->mobile,
+                'address' => $sender->address,
+                'suburb' => $sender->suburb,
+                'state' => $sender->state,
+                'postcode' => $sender->postcode,
+            ] : null,
+            'emptyBoxFee' => 10.00,
+            'breadcrumbs' => $isGuest ? [
+                ['title' => 'Home', 'href' => route('welcome')],
+                ['title' => 'Order Empty Boxes', 'href' => route('sender.order-boxes')],
+            ] : [
+                ['title' => 'Dashboard', 'href' => route('dashboard')],
+                ['title' => 'Order Empty Boxes', 'href' => route('sender.order-boxes')],
+            ],
+        ]);
+    }
+
+    public function storeBoxOrder(StoreEmptyBoxOrderRequest $request)
+    {
+        if ($request->filled('website')) {
+            return redirect()->back()->withErrors(['website' => 'Invalid submission detected.']);
+        }
+
+        /** @var User|null $user */
+        $user = Auth::user();
+        $isGuest = ! $user;
+        $validated = $request->validated();
+
+        return DB::transaction(function () use ($user, $isGuest, $validated, $request) {
+            if ($user) {
+                $sender = $user->sender;
+                if (! $sender) {
+                    $nameParts = explode(' ', trim($user->name), 2);
+                    $firstName = $nameParts[0] ?? 'Customer';
+                    $lastName = $nameParts[1] ?? 'Sender';
+
+                    $sender = Sender::create([
+                        'user_id' => $user->id,
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'email' => $user->email,
+                        'mobile' => $validated['contact_number'],
+                        'address' => $validated['address'],
+                        'suburb' => $validated['suburb'],
+                        'state' => $validated['state'],
+                        'postcode' => $validated['postcode'],
+                        'country' => 'AU',
+                    ]);
+                } else {
+                    $sender->update([
+                        'mobile' => $validated['contact_number'] ?: $sender->mobile,
+                        'address' => $validated['address'] ?: $sender->address,
+                        'suburb' => $validated['suburb'] ?: $sender->suburb,
+                        'state' => $validated['state'] ?: $sender->state,
+                        'postcode' => $validated['postcode'] ?: $sender->postcode,
+                    ]);
+                }
+            } else {
+                // Guest sender resolution
+                $sender = Sender::where('email', $validated['email'])
+                    ->whereNull('user_id')
+                    ->first();
+
+                $senderAttributes = [
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'mobile' => $validated['contact_number'],
+                    'address' => $validated['address'],
+                    'suburb' => $validated['suburb'],
+                    'state' => $validated['state'],
+                    'postcode' => $validated['postcode'],
+                    'country' => 'AU',
+                ];
+
+                if ($sender) {
+                    $sender->update($senderAttributes);
+                } else {
+                    $sender = Sender::create(array_merge($senderAttributes, [
+                        'email' => $validated['email'],
+                        'user_id' => null,
+                    ]));
+                }
+            }
+
+            // Calculate total empty boxes and build breakdown
+            $boxTypes = BoxType::whereIn('id', collect($validated['items'])->pluck('box_type_id'))->get()->keyBy('id');
+            $breakdown = [];
+            $totalCount = 0;
+            foreach ($validated['items'] as $item) {
+                $qty = (int) ($item['quantity'] ?? 0);
+                if ($qty > 0) {
+                    $boxType = $boxTypes->get($item['box_type_id']);
+                    $typeName = $boxType ? $boxType->name : "Type #{$item['box_type_id']}";
+                    $breakdown[] = "{$qty}x {$typeName}";
+                    $totalCount += $qty;
+                }
+            }
+
+            $orderNotes = "Empty Box Delivery Order:\n".implode(', ', $breakdown);
+            if (! empty($validated['delivery_notes'])) {
+                $orderNotes .= "\nDelivery Instructions: ".trim($validated['delivery_notes']);
+            }
+
+            $emptyBoxFee = 10.00;
+            $paymentMethod = $validated['payment_method'];
+            $paymentStatus = in_array($paymentMethod, ['cash_on_pickup', 'cash'], true)
+                ? PaymentStatus::CashOnPickup
+                : PaymentStatus::Pending;
+
+            $booking = Booking::create([
+                'sender_id' => $sender->id,
+                'booking_type' => 'home_pickup',
+                'status' => BookingStatus::Pending,
+                'payment_status' => $paymentStatus,
+                'payment_method' => $paymentMethod,
+                'preferred_date' => $validated['delivery_date'],
+                'empty_box_count' => $totalCount,
+                'empty_box_fee' => $emptyBoxFee,
+                'notes' => $orderNotes,
+                'is_guest' => $isGuest,
+                'guest_token' => $isGuest ? (string) Str::uuid() : null,
+            ]);
+
+            Invoice::generateForBooking($booking);
+
+            // Notify user or guest sender
+            if ($user) {
+                $user->notify(new BookingStatusChanged($booking));
+                if ($paymentMethod === 'bank_transfer') {
+                    $user->notify(new BankTransferDetails($booking));
+                }
+            } else {
+                $sender->notify(new BookingStatusChanged($booking));
+                if ($paymentMethod === 'bank_transfer') {
+                    $sender->notify(new BankTransferDetails($booking));
+                }
+            }
+
+            if ($isGuest) {
+                if ($paymentMethod === 'stripe') {
+                    $guestAccess = app(GuestBookingAccessService::class);
+                    $guestAccess->markVerified($request, $booking, GuestBookingAccessService::PAYMENT, 120);
+                    $request->session()->put('guest_booking_id', $booking->id);
+
+                    return redirect($guestAccess->paymentUrl($booking));
+                }
+
+                return redirect()->route('sender.order-boxes', ['confirmed' => $booking->reference_number])
+                    ->with('success', "Your order for {$totalCount} empty balikbayan box(es) has been submitted successfully! Booking reference: {$booking->reference_number}");
+            }
+
+            if ($paymentMethod === 'stripe') {
+                return redirect()->route('bookings.pay', $booking->id);
+            }
+
+            return redirect()->route('sender.bookings')
+                ->with('success', "Your order for {$totalCount} empty balikbayan box(es) has been submitted successfully!");
+        });
     }
 }

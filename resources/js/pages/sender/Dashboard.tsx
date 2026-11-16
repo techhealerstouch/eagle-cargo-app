@@ -203,6 +203,14 @@ export default function Dashboard({
 
                         <div className="flex items-center gap-3 w-full md:w-auto">
                             <Link
+                                href="/order-boxes"
+                                className="flex-1 md:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-5 h-11 text-xs font-semibold text-white transition-all duration-300 active:scale-95"
+                                prefetch
+                            >
+                                <Package className="h-4 w-4" />
+                                Order Empty Boxes
+                            </Link>
+                            <Link
                                 href="/book"
                                 className="flex-1 md:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-brand-rust px-6 h-11 text-xs font-semibold text-white shadow-md hover:bg-brand-rust/90 transition-all duration-300 active:scale-95 group"
                                 prefetch
@@ -480,7 +488,11 @@ export default function Dashboard({
                                                         <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 flex items-center gap-2 overflow-hidden">
                                                             <span className="truncate">{new Date(booking.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</span>
                                                             <span className="text-zinc-300 dark:text-zinc-700 shrink-0">•</span>
-                                                            <span className="shrink-0 font-medium">{booking.boxes?.length} {booking.boxes?.length === 1 ? 'Box' : 'Boxes'}</span>
+                                                            <span className="shrink-0 font-medium">
+                                                                {booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0)
+                                                                    ? `${booking.empty_box_count} Empty Box${booking.empty_box_count === 1 ? '' : 'es'}`
+                                                                    : `${booking.boxes?.length || 0} ${(booking.boxes?.length || 0) === 1 ? 'Box' : 'Boxes'}`}
+                                                            </span>
                                                         </div>
                                                     </div>
                                                 </div>

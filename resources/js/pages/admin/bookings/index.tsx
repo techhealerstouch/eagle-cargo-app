@@ -62,6 +62,7 @@ interface Booking {
     declaration_form_status: string;
     declaration_data?: any;
     box_count: number;
+    empty_box_count?: number;
     admin_notes?: string | null;
     created_at: string;
     runsheets?: {
@@ -657,7 +658,9 @@ export default function BookingsIndex({
                                                     <div className="flex flex-col">
                                                         <span className="font-semibold text-brand-text">{booking.sender.first_name} {booking.sender.last_name}</span>
                                                         <span className="text-brand-text-mid text-[11px] font-normal mt-0.5">
-                                                            {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}
+                                                            {Number(booking.empty_box_count || 0) > 0 && Number(booking.box_count || 0) === 0
+                                                                ? `${booking.empty_box_count} Empty Box${booking.empty_box_count === 1 ? '' : 'es'}`
+                                                                : `${booking.box_count} ${booking.box_count === 1 ? 'Box' : 'Boxes'}`}
                                                         </span>
                                                     </div>
                                                 </td>
@@ -671,11 +674,13 @@ export default function BookingsIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
+                                                        Number(booking.empty_box_count || 0) > 0 && Number(booking.box_count || 0) === 0 ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700' :
                                                         booking.declaration_form_status === 'submitted_online' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800' :
                                                         booking.declaration_form_status === 'physical_copy_received' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' :
                                                         'bg-muted text-muted-foreground border border-border'
                                                     }`}>
-                                                        {booking.declaration_form_status === 'missing' ? 'Missing' :
+                                                        {Number(booking.empty_box_count || 0) > 0 && Number(booking.box_count || 0) === 0 ? 'N/A' :
+                                                         booking.declaration_form_status === 'missing' ? 'Missing' :
                                                          booking.declaration_form_status === 'submitted_online' ? 'Digital' : 'Physical'}
                                                     </span>
                                                 </td>

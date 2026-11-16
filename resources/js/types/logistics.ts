@@ -75,6 +75,8 @@ export interface TrackingData {
     area?: { id?: number; name: string } | null;
     timeline: TrackingTimelineItem[];
     is_multi_box: boolean;
+    is_empty_box_order?: boolean;
+    empty_box_count?: number;
     is_booking_search?: boolean;
     total_boxes_count?: number;
     all_boxes: TrackingBox[];

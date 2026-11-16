@@ -324,7 +324,7 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                             <p className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 overflow-hidden truncate">
                                 {isDraft
                                     ? <>Started {new Date(booking.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })} <span className="text-zinc-300 dark:text-zinc-700">•</span> Saved {new Date(booking.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
-                                    : <>Booked {new Date(booking.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })} <span className="text-zinc-300 dark:text-zinc-700">•</span> {booking.boxes?.length} Box(es)</>
+                                    : <>Booked {new Date(booking.created_at).toLocaleDateString(undefined, { dateStyle: 'medium' })} <span className="text-zinc-300 dark:text-zinc-700">•</span> {booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0) ? `${booking.empty_box_count} Empty Box(es)` : `${booking.boxes?.length || 0} Box(es)`}</>
                                 }
                             </p>
                         </div>
@@ -522,7 +522,7 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                 </div>
 
                 {/* Customs Declaration Warning */}
-                {booking.declaration_form_status === 'missing' && !isDraft && !isCancelled && (
+                {!(booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0)) && booking.declaration_form_status === 'missing' && !isDraft && !isCancelled && (
                     <div className="px-6 py-4 bg-amber-50/70 dark:bg-amber-950/30 border-b border-amber-200/60 dark:border-amber-900/40 flex flex-col sm:flex-row items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
@@ -561,6 +561,38 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                             >
                                 Resume <ArrowRight className="size-3.5" />
                             </Link>
+                        </div>
+                    ) : booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0) ? (
+                        <div className="rounded-2xl border border-amber-200/80 bg-white p-5 shadow-2xs dark:border-amber-900/40 dark:bg-zinc-900">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                                <div className="flex items-start gap-3.5">
+                                    <div className="size-10 rounded-xl bg-amber-500/10 text-brand-rust dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
+                                        <Package className="size-5" />
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
+                                                Empty Box Delivery Order
+                                            </h4>
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+                                                {booking.empty_box_count} Box{booking.empty_box_count === 1 ? '' : 'es'}
+                                            </span>
+                                        </div>
+                                        <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                                            Your empty boxes have been scheduled for delivery to your address. Once delivered and packed, you can schedule a pickup through this portal.
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                    <Link
+                                        href={`/track?tracking_number=${booking.reference_number}`}
+                                        className="inline-flex items-center justify-center gap-1.5 px-4 h-9 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-brand-rust dark:text-amber-300 text-xs font-bold transition-colors"
+                                    >
+                                        Track Delivery Status
+                                        <ArrowRight className="size-3.5" />
+                                    </Link>
+                                </div>
+                            </div>
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -644,6 +676,13 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                         </div>
+                        <Link
+                            href="/order-boxes"
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-5 h-11 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all shadow-2xs shrink-0"
+                        >
+                            <Package className="h-4 w-4 text-brand-rust" />
+                            Order Empty Boxes
+                        </Link>
                         <Link
                             href="/book"
                             className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-rust px-6 h-11 text-xs font-semibold text-white shadow-sm hover:bg-brand-rust/90 transition-all duration-300 active:scale-95 shrink-0 group"
