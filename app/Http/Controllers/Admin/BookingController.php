@@ -433,7 +433,8 @@ class BookingController extends Controller
                     $augmentedBoxes,
                     $subtotal,
                     $emptyBoxCount,
-                    $emptyBoxFee
+                    $emptyBoxFee,
+                    $booking->pickup_zone_id ? (int) $booking->pickup_zone_id : null
                 );
 
                 if ($result['valid']) {

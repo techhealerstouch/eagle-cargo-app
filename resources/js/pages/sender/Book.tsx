@@ -1960,6 +1960,7 @@ return 0;
                 subtotal: cargoSubtotal,
                 empty_box_count: data.empty_box_count,
                 empty_box_fee: data.empty_box_fee || 10.00,
+                pickup_zone_id: data.booking_type === 'drop_off' ? null : (activeZoneId ? Number(activeZoneId) : null),
             }),
         });
 
@@ -1995,7 +1996,7 @@ return 0;
       setDiscountAmount(0);
       setPromoSuccessMessage(null);
     }
-  }, [data.promo_code, totalEstimate]);
+  }, [data.promo_code, totalEstimate, activeZoneId, data.booking_type]);
 
   const removePromoCode = () => {
       setPromoCodeInput('');
