@@ -48,12 +48,12 @@ export default function Services({
                         Cargo Box Shipping
                     </h1>
                     <p className="text-lg text-brand-text-mid leading-relaxed">
-                        Whether it's sea cargo or air cargo, we have options
+                        Whether it&apos;s sea cargo or air cargo, we have options
                         crafted for your specific timetable and budget.
                     </p>
                 </div>
 
-                <div className="mx-auto grid max-w-5xl grid-cols-1 gap-8 md:grid-cols-2 mb-20">
+                <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 md:grid-cols-3 mb-20">
                     <div className="card group text-center flex flex-col justify-between border border-border shadow-sm hover:shadow-md transition-all">
                         <div>
                             <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-warm text-brand-rust">
@@ -65,12 +65,12 @@ export default function Services({
                             <p className="mb-6 text-brand-text-mid leading-relaxed">
                                 The classic, highly affordable cargo route for
                                 heavy and large items. Delivered to the Philippines
-                                via ship in 4-8 weeks depending on the island.
+                                via ship in 4–8 weeks depending on the island.
                             </p>
                             <div className="mb-6 rounded-xl bg-slate-50 dark:bg-zinc-800/60 p-4 text-xs space-y-1.5 text-left border border-slate-200/80 dark:border-zinc-700/80">
                                 <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
                                     <Clock className="size-3.5 text-brand-rust shrink-0" />
-                                    <span><strong>Transit Time:</strong> 4�8 weeks door-to-door</span>
+                                    <span><strong>Transit Time:</strong> 4–8 weeks door-to-door</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
                                     <ShieldCheck className="size-3.5 text-brand-rust shrink-0" />
@@ -97,12 +97,12 @@ export default function Services({
                             <p className="mb-6 text-brand-text-mid leading-relaxed">
                                 Quick and reliable transit by air. Ideal for smaller
                                 parcels, gifts, or time-sensitive documents to
-                                arrive in 1-2 weeks.
+                                arrive in 1–2 weeks.
                             </p>
                             <div className="mb-6 rounded-xl bg-slate-50 dark:bg-zinc-800/60 p-4 text-xs space-y-1.5 text-left border border-slate-200/80 dark:border-zinc-700/80">
                                 <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
                                     <Clock className="size-3.5 text-brand-primary shrink-0" />
-                                    <span><strong>Transit Time:</strong> 1�2 weeks door-to-door</span>
+                                    <span><strong>Transit Time:</strong> 1–2 weeks door-to-door</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
                                     <ShieldCheck className="size-3.5 text-brand-primary shrink-0" />
@@ -110,8 +110,38 @@ export default function Services({
                                 </div>
                             </div>
                         </div>
-                        <Link href="/book" className="btn-primary w-full justify-center">
+                        <Link href={isGuest ? '/guest/book' : '/book'} className="btn-primary w-full justify-center">
                             Book Express Priority
+                        </Link>
+                    </div>
+
+                    <div className="card group relative overflow-hidden text-center flex flex-col justify-between border border-amber-200/80 dark:border-amber-800/50 shadow-sm hover:shadow-md transition-all">
+                        <div className="absolute top-4 right-4 rounded-full bg-amber-100 dark:bg-amber-950/80 px-3 py-1 text-[10px] font-bold text-amber-900 dark:text-amber-300 uppercase tracking-wider">
+                            Free Delivery
+                        </div>
+                        <div>
+                            <div className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400">
+                                <Package className="size-8 stroke-[1.8]" />
+                            </div>
+                            <h3 className="mb-4 font-serif text-2xl font-bold">
+                                Empty Box Delivery
+                            </h3>
+                            <p className="mb-6 text-brand-text-mid leading-relaxed">
+                                Need empty boxes before booking your shipment? Order heavy-duty double-wall balikbayan boxes delivered directly to your doorstep to pack at your own pace.
+                            </p>
+                            <div className="mb-6 rounded-xl bg-slate-50 dark:bg-zinc-800/60 p-4 text-xs space-y-1.5 text-left border border-slate-200/80 dark:border-zinc-700/80">
+                                <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
+                                    <Clock className="size-3.5 text-amber-600 shrink-0" />
+                                    <span><strong>Deposit:</strong> $10.00 per box (credited towards shipping)</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-slate-700 dark:text-zinc-300">
+                                    <ShieldCheck className="size-3.5 text-amber-600 shrink-0" />
+                                    <span><strong>Best for:</strong> Packing ahead without an immediate pickup date</span>
+                                </div>
+                            </div>
+                        </div>
+                        <Link href="/order-boxes" className="btn-primary w-full justify-center" id="services-order-empty-boxes-btn">
+                            Order Empty Boxes
                         </Link>
                     </div>
                 </div>

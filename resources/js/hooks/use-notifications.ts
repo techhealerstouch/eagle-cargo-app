@@ -217,8 +217,17 @@ export function useNotifications(options: UseNotificationsOptions = {}): UseNoti
         return () => window.clearInterval(interval);
     }, [fetchUnreadCount, pollInterval, userId]);
 
-    useEchoNotification(userId ? `App.Models.User.${userId}` : '', (notification) => {
-        setNotifications((prev) => [notification as unknown as Notification, ...prev]);
+    useEchoNotification(userId ? `App.Models.User.${userId}` : '', (rawNotification) => {
+        const raw = (rawNotification ?? {}) as Record<string, unknown>;
+        const normalized: Notification = {
+            id: String(raw.id ?? crypto.randomUUID?.() ?? Date.now()),
+            type: String(raw.type ?? 'notification'),
+            data: (raw.data && typeof raw.data === 'object' ? raw.data : raw) as Notification['data'],
+            read_at: typeof raw.read_at === 'string' ? raw.read_at : null,
+            created_at: typeof raw.created_at === 'string' ? raw.created_at : new Date().toISOString(),
+        };
+
+        setNotifications((prev) => [normalized, ...prev]);
         setUnreadCount((prev) => prev + 1);
         cachedData = null;
     });

@@ -178,6 +178,11 @@ class Booking extends Model
         return $this->belongsTo(User::class, 'payment_overridden_by');
     }
 
+    public function operationalThreads(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(OperationalThread::class);
+    }
+
     public function getUndeliveredBoxesCountAttribute(): int
     {
         if ($this->relationLoaded('boxes')) {

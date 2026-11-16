@@ -9,3 +9,11 @@ Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
 Broadcast::channel('admin.system-health', function ($user) {
     return $user->can('access-admin');
 });
+
+Broadcast::channel('admin.enquiries', function ($user) {
+    return $user->can('access-admin');
+});
+
+Broadcast::channel('sender.enquiries.{id}', function ($user, $id) {
+    return (int) $user->id === (int) $id;
+});

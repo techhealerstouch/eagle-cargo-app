@@ -17,6 +17,7 @@ use App\Http\Controllers\Admin\DataIntegrityController;
 use App\Http\Controllers\Admin\EnquiryController;
 use App\Http\Controllers\Admin\FinancialReportController;
 use App\Http\Controllers\Admin\InvoiceController;
+use App\Http\Controllers\Admin\OperationalCommunicationController as AdminCommunicationController;
 use App\Http\Controllers\Admin\PaymentController;
 use App\Http\Controllers\Admin\ProvinceController;
 use App\Http\Controllers\Admin\RecipientController;
@@ -29,6 +30,7 @@ use App\Http\Controllers\GuestBookingController;
 use App\Http\Controllers\CourierController;
 use App\Http\Controllers\MockPaymentController;
 use App\Http\Controllers\Picker\EarningsController;
+use App\Http\Controllers\Picker\OperationalCommunicationController as PickerCommunicationController;
 use App\Http\Controllers\Picker\StripeOnboardingController;
 use App\Http\Controllers\PickerController;
 use App\Http\Controllers\RecipientDashboardController;
@@ -460,6 +462,13 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         // Tracking Analytics
         Route::get('tracking-analytics', [\App\Http\Controllers\Admin\TrackingAnalyticsController::class, 'index'])->name('tracking-analytics.index');
 
+        // Operational Communications Hub
+        Route::get('communications', [AdminCommunicationController::class, 'index'])->name('communications.index');
+        Route::post('communications', [AdminCommunicationController::class, 'store'])->middleware('throttle:admin-mutations')->name('communications.store');
+        Route::post('communications/{thread}/reply', [AdminCommunicationController::class, 'reply'])->middleware('throttle:admin-mutations')->name('communications.reply');
+        Route::post('communications/{thread}/resolve', [AdminCommunicationController::class, 'resolve'])->middleware('throttle:admin-mutations')->name('communications.resolve');
+        Route::post('communications/{thread}/reopen', [AdminCommunicationController::class, 'reopen'])->middleware('throttle:admin-mutations')->name('communications.reopen');
+
         // Configurations
         Route::resource('areas', AreaController::class);
         Route::resource('pickup-zones', PickupZoneController::class);
@@ -511,6 +520,12 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::get('/box/{box:tracking_number}', [PickerController::class, 'showBox'])->name('picker.box.show');
         Route::put('/box/{box}', [PickerController::class, 'updateBoxStatus'])->middleware('throttle:ops-scan')->name('picker.box.update');
         Route::post('/box/{box}/upload-declaration', [PickerController::class, 'uploadDeclaration'])->middleware('throttle:uploads')->name('picker.box.upload-declaration');
+
+        // Picker Operational Communications
+        Route::get('/messages', [PickerCommunicationController::class, 'index'])->name('picker.messages.index');
+        Route::post('/messages', [PickerCommunicationController::class, 'store'])->middleware('throttle:ops-scan')->name('picker.messages.store');
+        Route::post('/messages/{thread}/reply', [PickerCommunicationController::class, 'reply'])->middleware('throttle:ops-scan')->name('picker.messages.reply');
+        Route::post('/messages/{thread}/resolve', [PickerCommunicationController::class, 'resolve'])->middleware('throttle:ops-scan')->name('picker.messages.resolve');
     });
 
     // Warehouse Routes

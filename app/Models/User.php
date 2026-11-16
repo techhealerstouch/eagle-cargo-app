@@ -236,4 +236,10 @@ class User extends Authenticatable implements MustVerifyEmail
 
         return false;
     }
+
+    /** @return \Illuminate\Database\Eloquent\Relations\HasMany<OperationalThread, $this> */
+    public function operationalThreads(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(OperationalThread::class, 'picker_id');
+    }
 }

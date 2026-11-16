@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Admin;
 
+use App\Events\EnquiryMessageUpdated;
 use App\Http\Controllers\Controller;
 use App\Models\Enquiry;
 use App\Models\Sender;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Inertia\Inertia;
 
 class EnquiryController extends Controller
@@ -162,14 +164,35 @@ class EnquiryController extends Controller
             $selectedThread = $threads->first();
         }
 
-        // When viewing a conversation thread, mark all inbound messages as read
-        if ($selectedThread) {
-            Enquiry::where('email', $selectedThread['email'])
+        $preserveUnread = $request->boolean('preserve_unread')
+            || ($selectedThread && strcasecmp((string) $request->session()->get('preserve_unread_email'), (string) $selectedThread['email']) === 0);
+
+        // When viewing a conversation thread, mark all inbound messages as read unless explicitly kept unread
+        if ($selectedThread && ! $preserveUnread) {
+            $markedRead = Enquiry::where('email', $selectedThread['email'])
                 ->where('is_read', false)
                 ->update([
                     'is_read' => true,
                     'read_at' => now(),
                 ]);
+
+            $selectedThread['is_read'] = true;
+            $selectedThread['unread_count'] = 0;
+
+            $threads->setCollection(
+                $threads->getCollection()->map(function (array $thread) use ($selectedThread) {
+                    if (strcasecmp($thread['email'], $selectedThread['email']) === 0) {
+                        $thread['is_read'] = true;
+                        $thread['unread_count'] = 0;
+                    }
+
+                    return $thread;
+                })
+            );
+
+            if ($markedRead > 0 && $request->user()) {
+                Cache::forget("user.{$request->user()->id}.sidebar_counts");
+            }
         }
 
         // Identify the specific enquiry to reply to (prefer awaiting/unreplied, else latest)
@@ -248,6 +271,12 @@ class EnquiryController extends Controller
                 'read_at' => $targetRead ? now() : null,
             ]);
 
+            if (! $targetRead) {
+                $request->session()->flash('preserve_unread_email', $enquiry->email);
+            }
+
+            EnquiryMessageUpdated::dispatch($enquiry);
+
             return redirect()->back()->with('success', 'Conversation read status updated.');
         }
 
@@ -266,6 +295,7 @@ class EnquiryController extends Controller
         }
 
         $enquiry->update($validated);
+        EnquiryMessageUpdated::dispatch($enquiry);
 
         return redirect()->back()->with('success', 'Enquiry reply updated successfully.');
     }
@@ -274,11 +304,13 @@ class EnquiryController extends Controller
     {
         if ($request->boolean('delete_all')) {
             Enquiry::where('email', $enquiry->email)->delete();
+            EnquiryMessageUpdated::dispatch($enquiry);
 
             return redirect()->route('admin.enquiries.index')->with('success', 'Customer conversation deleted successfully.');
         }
 
         $enquiry->delete();
+        EnquiryMessageUpdated::dispatch($enquiry);
 
         return redirect()->route('admin.enquiries.index')->with('success', 'Enquiry message deleted successfully.');
     }

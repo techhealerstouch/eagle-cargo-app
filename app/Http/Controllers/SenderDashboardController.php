@@ -464,13 +464,15 @@ class SenderDashboardController extends Controller
         }
         $mobile = $sender?->mobile;
 
-        Enquiry::create([
+        $enquiry = Enquiry::create([
             'name' => $name,
             'email' => $user->email,
             'mobile' => $mobile,
             'message' => trim($validated['message']),
             'is_read' => false,
         ]);
+
+        \App\Events\EnquiryMessageUpdated::dispatch($enquiry, $user->id);
 
         return redirect()->route('sender.enquiries')->with('success', 'Your message has been sent to support.');
     }

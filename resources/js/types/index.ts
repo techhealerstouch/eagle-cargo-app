@@ -20,6 +20,8 @@ export interface SharedData {
         batches?: number;
         systemHealth?: number;
         myBookings?: number;
+        communications?: number;
+        messages?: number;
     } | null;
     flash?: {
         success?: string;

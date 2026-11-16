@@ -97,6 +97,12 @@ export function AppSidebar() {
                                     icon: Truck,
                                 },
                                 {
+                                    title: 'Communications',
+                                    href: '/admin/communications',
+                                    icon: MessageSquare,
+                                    badge: sidebarCounts?.communications,
+                                },
+                                {
                                     title: 'Track Shipment',
                                     href: '/track',
                                     icon: Search,
@@ -286,6 +292,12 @@ export function AppSidebar() {
                                 title: 'My Runsheets',
                                 href: '/picker/runsheets',
                                 icon: ClipboardList,
+                            },
+                            {
+                                title: 'Messages',
+                                href: '/picker/messages',
+                                icon: MessageSquare,
+                                badge: sidebarCounts?.messages,
                             },
                             {
                                 title: 'Earnings',

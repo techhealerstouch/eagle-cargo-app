@@ -155,6 +155,17 @@ class HandleInertiaRequests extends Middleware
                             'enquiries' => Enquiry::where('is_read', false)->count(),
                             'batches' => Batch::where('status', BatchStatus::Arrived->value)->where('is_read', false)->count(),
                             'systemHealth' => DataIntegrityWarning::where('is_resolved', false)->count(),
+                            'communications' => \App\Models\OperationalThread::where('status', '!=', \App\Enums\OperationalThreadStatus::Resolved->value)
+                                ->whereHas('messages', fn ($q) => $q->whereNull('read_at')->where('sender_id', '!=', $user->id))
+                                ->count(),
+                        ];
+                    }
+
+                    if ($role === 'picker') {
+                        return [
+                            'messages' => \App\Models\OperationalThread::where('picker_id', $user->id)
+                                ->whereHas('messages', fn ($q) => $q->whereNull('read_at')->where('sender_id', '!=', $user->id))
+                                ->count(),
                         ];
                     }
 
