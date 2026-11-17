@@ -67,11 +67,19 @@ class BookingController extends Controller
 
     public function index(Request $request)
     {
-        $query = Booking::with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone'])
+        $relations = [
+            'sender' => fn ($q) => $q->withTrashed(),
+            'runsheets.courier',
+            'runsheets.picker',
+            'boxes.recipient' => fn ($q) => $q->withTrashed(),
+            'boxes.updates.milestone',
+        ];
+
+        $query = Booking::with($relations)
             ->where('status', '!=', BookingStatus::Draft->value);
 
         if ($request->boolean('trashed') && app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
-            $query = Booking::onlyTrashed()->with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone']);
+            $query = Booking::onlyTrashed()->with($relations);
         }
 
         $query = $this->applyFilters($query, $request);
@@ -1169,7 +1177,14 @@ class BookingController extends Controller
 
     public function exportExcel(Request $request)
     {
-        $query = Booking::with(['sender', 'boxes.recipient', 'boxes.boxType', 'runsheets.courier', 'runsheets.picker', 'invoice']);
+        $query = Booking::with([
+            'sender' => fn ($q) => $q->withTrashed(),
+            'boxes.recipient' => fn ($q) => $q->withTrashed(),
+            'boxes.boxType',
+            'runsheets.courier',
+            'runsheets.picker',
+            'invoice',
+        ]);
 
         if ($request->filled('ids')) {
             $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
