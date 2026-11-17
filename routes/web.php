@@ -1,17 +1,14 @@
 <?php
 
-use App\Http\Controllers\PublicScheduleAndRateController;
-use App\Http\Controllers\SenderCalendarController;
-
-
+use App\Enums\Role;
+use App\Http\Controllers\Admin\ActivityLogController;
 use App\Http\Controllers\Admin\AreaController;
-use App\Http\Controllers\Admin\PickupZoneController;
-use App\Http\Controllers\Admin\SuburbController;
 use App\Http\Controllers\Admin\AreaMilestoneController;
 use App\Http\Controllers\Admin\BatchController;
 use App\Http\Controllers\Admin\BoxController;
 use App\Http\Controllers\Admin\BoxPriceController;
 use App\Http\Controllers\Admin\BoxTypeController;
+use App\Http\Controllers\Admin\CalendarEventController;
 use App\Http\Controllers\Admin\CommissionController;
 use App\Http\Controllers\Admin\DataIntegrityController;
 use App\Http\Controllers\Admin\EnquiryController;
@@ -19,28 +16,42 @@ use App\Http\Controllers\Admin\FinancialReportController;
 use App\Http\Controllers\Admin\InvoiceController;
 use App\Http\Controllers\Admin\OperationalCommunicationController as AdminCommunicationController;
 use App\Http\Controllers\Admin\PaymentController;
+use App\Http\Controllers\Admin\PickupZoneController;
+use App\Http\Controllers\Admin\PromotionController;
 use App\Http\Controllers\Admin\ProvinceController;
 use App\Http\Controllers\Admin\RecipientController;
 use App\Http\Controllers\Admin\RunsheetController;
 use App\Http\Controllers\Admin\SenderController;
+use App\Http\Controllers\Admin\SerialNumberController;
 use App\Http\Controllers\Admin\ShippingUpdateController;
+use App\Http\Controllers\Admin\SuburbController;
+use App\Http\Controllers\Admin\TrackingAnalyticsController;
 use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\BookingController;
-use App\Http\Controllers\GuestBookingController;
 use App\Http\Controllers\CourierController;
+use App\Http\Controllers\DeveloperFeatureController;
+use App\Http\Controllers\GuestBookingController;
 use App\Http\Controllers\MockPaymentController;
 use App\Http\Controllers\Picker\EarningsController;
 use App\Http\Controllers\Picker\OperationalCommunicationController as PickerCommunicationController;
 use App\Http\Controllers\Picker\StripeOnboardingController;
 use App\Http\Controllers\PickerController;
+use App\Http\Controllers\PublicScheduleAndRateController;
 use App\Http\Controllers\RecipientDashboardController;
+use App\Http\Controllers\SenderCalendarController;
 use App\Http\Controllers\SenderDashboardController;
 use App\Http\Controllers\SenderRecipientController;
 use App\Http\Controllers\StripePaymentController;
 use App\Http\Controllers\TrackingController;
 use App\Http\Controllers\WarehouseController;
+use App\Models\Booking;
+use App\Models\ShippingUpdate;
+use App\Services\SettingsService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Storage;
 
@@ -58,10 +69,10 @@ Route::get('/uploads/{path}', function (string $path) {
 
     if ($disk->exists($relativePath)) {
         $fullPath = $disk->path($relativePath);
-    } elseif (file_exists(storage_path('app/public/' . $relativePath))) {
-        $fullPath = storage_path('app/public/' . $relativePath);
-    } elseif (file_exists(public_path('uploads/' . $relativePath))) {
-        $fullPath = public_path('uploads/' . $relativePath);
+    } elseif (file_exists(storage_path('app/public/'.$relativePath))) {
+        $fullPath = storage_path('app/public/'.$relativePath);
+    } elseif (file_exists(public_path('uploads/'.$relativePath))) {
+        $fullPath = public_path('uploads/'.$relativePath);
     }
 
     if (! $fullPath || ! is_file($fullPath)) {
@@ -70,7 +81,7 @@ Route::get('/uploads/{path}', function (string $path) {
 
     // Ensure the file is actually readable by the web server
     if (! is_readable($fullPath)) {
-        \Illuminate\Support\Facades\Log::error('Storage file exists but is not readable (403)', [
+        Log::error('Storage file exists but is not readable (403)', [
             'path' => $relativePath,
             'full_path' => $fullPath,
             'permissions' => substr(sprintf('%o', fileperms($fullPath)), -4),
@@ -92,8 +103,8 @@ Route::get('/uploads/{path}', function (string $path) {
     $extension = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
 
     try {
-        $mimeType = \Illuminate\Support\Facades\File::mimeType($fullPath);
-    } catch (\Exception $e) {
+        $mimeType = File::mimeType($fullPath);
+    } catch (Exception $e) {
         $mimeType = null;
     }
 
@@ -123,8 +134,8 @@ Route::get('/storage/{path}', function (string $path) {
 
     if ($disk->exists($relativePath)) {
         $fullPath = $disk->path($relativePath);
-    } elseif (file_exists(storage_path('app/public/' . $relativePath))) {
-        $fullPath = storage_path('app/public/' . $relativePath);
+    } elseif (file_exists(storage_path('app/public/'.$relativePath))) {
+        $fullPath = storage_path('app/public/'.$relativePath);
     }
 
     if (! $fullPath || ! is_file($fullPath)) {
@@ -148,8 +159,8 @@ Route::get('/storage/{path}', function (string $path) {
     $extension = strtolower(pathinfo($fullPath, PATHINFO_EXTENSION));
 
     try {
-        $mimeType = \Illuminate\Support\Facades\File::mimeType($fullPath);
-    } catch (\Exception $e) {
+        $mimeType = File::mimeType($fullPath);
+    } catch (Exception $e) {
         $mimeType = null;
     }
 
@@ -166,9 +177,6 @@ Route::get('/storage/{path}', function (string $path) {
         'Content-Type' => $mimeType,
     ]);
 })->where('path', '.*')->name('public.storage');
-
-
-
 
 if (app()->environment('local')) {
     Route::get('/run-tests', function () {
@@ -209,24 +217,28 @@ Route::post('/guest/booking/{booking}/stripe-intent', [StripePaymentController::
 Route::post('/guest/booking/{booking}/stripe-verify', [StripePaymentController::class, 'verifyPayment'])->middleware('throttle:payments')->name('guest.bookings.stripe-verify');
 Route::post('/guest/booking/{booking}/bank-transfer', [BookingController::class, 'requestBankTransferDetails'])->middleware('throttle:booking-writes')->name('guest.bookings.bank-transfer');
 Route::post('/guest/booking/{booking}/upload-proof', [BookingController::class, 'guestUploadProofOfPayment'])->middleware('throttle:uploads')->name('guest.bookings.upload-proof');
+Route::post('/guest/booking/{booking}/schedule-pickup', [GuestBookingController::class, 'schedulePackedPickup'])->middleware('throttle:booking-writes')->name('guest.bookings.schedule-pickup');
 
 // Booking URL aliases and fallbacks to prevent 404s
 Route::get('/guest/bookings/{booking}/confirmed', function (Request $request, $booking) {
     return redirect()->route('guest.booking.confirmed', array_merge(['booking' => $booking], $request->query()));
 });
 Route::get('/guest/booking/{booking}', function ($booking) {
-    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    $ref = is_numeric($booking) ? Booking::find($booking)?->reference_number : $booking;
+
     return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
 });
 Route::get('/guest/bookings/{booking}', function ($booking) {
-    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
+    $ref = is_numeric($booking) ? Booking::find($booking)?->reference_number : $booking;
+
     return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
 });
 Route::get('/bookings/{booking}', function ($booking) {
-    $ref = is_numeric($booking) ? \App\Models\Booking::find($booking)?->reference_number : $booking;
-    if (\Illuminate\Support\Facades\Auth::check()) {
+    $ref = is_numeric($booking) ? Booking::find($booking)?->reference_number : $booking;
+    if (Auth::check()) {
         return redirect()->route('sender.bookings', ['highlight' => $ref ?? $booking]);
     }
+
     return redirect()->route('track', ['tracking_number' => $ref ?? $booking]);
 });
 
@@ -239,8 +251,8 @@ Route::post('/order-boxes', [SenderDashboardController::class, 'storeBoxOrder'])
 Route::inertia('/about', 'marketing/about')->name('about');
 Route::get('/services', [PublicScheduleAndRateController::class, 'services'])->name('services');
 Route::inertia('/faq', 'marketing/faq')->name('faq');
-Route::get('/contact', function (\App\Services\SettingsService $settingsService) {
-    if (\Illuminate\Support\Facades\Auth::check() && \Illuminate\Support\Facades\Auth::user()->role === \App\Enums\Role::Sender) {
+Route::get('/contact', function (SettingsService $settingsService) {
+    if (Auth::check() && Auth::user()->role === Role::Sender) {
         return redirect()->route('sender.enquiries');
     }
     $general = $settingsService->getGeneralSettings();
@@ -250,7 +262,7 @@ Route::get('/contact', function (\App\Services\SettingsService $settingsService)
         'contactInfo' => [
             'phone' => $general['contactPhone'] ?: '+61 406 828 471',
             'email' => $general['supportEmail'] ?: 'support@eaglecargo.com.au',
-            'address' => $invoice['address'] ?: "6 Ivan St, Arundel QLD 4214, Australia",
+            'address' => $invoice['address'] ?: '6 Ivan St, Arundel QLD 4214, Australia',
             'hours' => 'Monday – Saturday: 8:00 AM – 6:00 PM AEST',
         ],
     ]);
@@ -258,7 +270,7 @@ Route::get('/contact', function (\App\Services\SettingsService $settingsService)
 Route::post('/contact', [App\Http\Controllers\EnquiryController::class, 'store'])->middleware('throttle:forms')->name('enquiries.store');
 Route::inertia('/our-story', 'marketing/community-story')->name('our-story');
 Route::get('/shipping-updates', function () {
-    $updates = \App\Models\ShippingUpdate::where('is_published', true)
+    $updates = ShippingUpdate::where('is_published', true)
         ->orderBy('published_at', 'desc')
         ->get(['id', 'title', 'body', 'published_at', 'type']);
 
@@ -298,6 +310,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('/bookings/{booking}/edit', [BookingController::class, 'edit'])->name('bookings.edit');
     Route::put('/bookings/{booking}', [BookingController::class, 'update'])->middleware('throttle:booking-writes')->name('bookings.update');
+    Route::post('/bookings/{booking}/schedule-pickup', [BookingController::class, 'schedulePackedPickup'])->middleware('throttle:booking-writes')->name('bookings.schedule-pickup');
     Route::delete('/bookings/{booking}', [BookingController::class, 'destroy'])->middleware('throttle:booking-writes')->name('bookings.destroy');
 
     Route::get('/dashboard', [SenderDashboardController::class, 'index'])->name('dashboard');
@@ -305,9 +318,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/enquiries', [SenderDashboardController::class, 'enquiries'])->name('sender.enquiries');
     Route::post('/enquiries', [SenderDashboardController::class, 'storeEnquiry'])->middleware('throttle:forms')->name('sender.enquiries.store');
     Route::get('/enquiries/{enquiry}', function ($enquiry) {
-        if (\Illuminate\Support\Facades\Auth::check() && in_array(\Illuminate\Support\Facades\Auth::user()->role, [\App\Enums\Role::Admin, \App\Enums\Role::SuperAdmin, \App\Enums\Role::Warehouse])) {
+        if (Auth::check() && in_array(Auth::user()->role, [Role::Admin, Role::SuperAdmin, Role::Warehouse])) {
             return redirect()->route('admin.enquiries.show', $enquiry);
         }
+
         return redirect()->route('sender.enquiries');
     });
     Route::get('/calendar', [SenderCalendarController::class, 'index'])->name('sender.calendar');
@@ -317,10 +331,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::middleware(['role:sender'])->prefix('recipients')->name('sender.recipients.')->group(function () {
         Route::get('/', [SenderRecipientController::class, 'index'])->name('index');
 
-// Legal & Public Guides
-Route::inertia('/terms', 'marketing/terms')->name('terms');
-Route::inertia('/customs-guide', 'marketing/customs-guide')->name('customs-guide');
-Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
+        // Legal & Public Guides
+        Route::inertia('/terms', 'marketing/terms')->name('terms');
+        Route::inertia('/customs-guide', 'marketing/customs-guide')->name('customs-guide');
+        Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::get('/{recipient}/edit', [SenderRecipientController::class, 'edit'])->name('edit');
         Route::put('/{recipient}', [SenderRecipientController::class, 'update'])->middleware('throttle:booking-writes')->name('update');
         Route::delete('/{recipient}', [SenderRecipientController::class, 'destroy'])->middleware('throttle:booking-writes')->name('destroy');
@@ -340,37 +354,37 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::post('boxes/{id}/restore', [BoxController::class, 'restore'])->middleware('throttle:admin-mutations')->name('boxes.restore');
         Route::resource('boxes', BoxController::class);
         // Promotions Management
-        Route::post('promotions/{promotion}/toggle', [\App\Http\Controllers\Admin\PromotionController::class, 'toggle'])->name('promotions.toggle');
-        Route::resource('promotions', \App\Http\Controllers\Admin\PromotionController::class)->except(['create', 'show', 'edit']);
+        Route::post('promotions/{promotion}/toggle', [PromotionController::class, 'toggle'])->name('promotions.toggle');
+        Route::resource('promotions', PromotionController::class)->except(['create', 'show', 'edit']);
 
         // Activity Logs / Audit Trails
-        Route::get('activity-logs', [\App\Http\Controllers\Admin\ActivityLogController::class, 'index'])->name('activity-logs.index');
-        Route::get('activity-logs/export', [\App\Http\Controllers\Admin\ActivityLogController::class, 'export'])->name('activity-logs.export');
-        Route::get('activity-logs/{activityLog}', [\App\Http\Controllers\Admin\ActivityLogController::class, 'show'])->name('activity-logs.show');
+        Route::get('activity-logs', [ActivityLogController::class, 'index'])->name('activity-logs.index');
+        Route::get('activity-logs/export', [ActivityLogController::class, 'export'])->name('activity-logs.export');
+        Route::get('activity-logs/{activityLog}', [ActivityLogController::class, 'show'])->name('activity-logs.show');
 
         // Operations & Marketing Calendar
-        Route::get('calendar/feed', [\App\Http\Controllers\Admin\CalendarEventController::class, 'feed'])->name('calendar.feed');
-        Route::get('calendar/export.ics', [\App\Http\Controllers\Admin\CalendarEventController::class, 'exportIcs'])->name('calendar.export-ics');
-        Route::resource('calendar', \App\Http\Controllers\Admin\CalendarEventController::class)->parameters(['calendar' => 'event'])->except(['create', 'show', 'edit']);
+        Route::get('calendar/feed', [CalendarEventController::class, 'feed'])->name('calendar.feed');
+        Route::get('calendar/export.ics', [CalendarEventController::class, 'exportIcs'])->name('calendar.export-ics');
+        Route::resource('calendar', CalendarEventController::class)->parameters(['calendar' => 'event'])->except(['create', 'show', 'edit']);
 
         // Excel Import/Export
-        Route::get('boxes/export-excel', [\App\Http\Controllers\Admin\BoxController::class, 'exportExcel'])->name('boxes.export-excel');
-        Route::get('boxes/import-template', [\App\Http\Controllers\Admin\BoxController::class, 'downloadImportTemplate'])->name('boxes.import-template');
-        Route::post('boxes/import-excel', [\App\Http\Controllers\Admin\BoxController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('boxes.import-excel');
+        Route::get('boxes/export-excel', [BoxController::class, 'exportExcel'])->name('boxes.export-excel');
+        Route::get('boxes/import-template', [BoxController::class, 'downloadImportTemplate'])->name('boxes.import-template');
+        Route::post('boxes/import-excel', [BoxController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('boxes.import-excel');
 
-        Route::get('bookings/export-excel', [\App\Http\Controllers\Admin\BookingController::class, 'exportExcel'])->name('bookings.export-excel');
-        Route::get('bookings/import-template', [\App\Http\Controllers\Admin\BookingController::class, 'downloadImportTemplate'])->name('bookings.import-template');
+        Route::get('bookings/export-excel', [App\Http\Controllers\Admin\BookingController::class, 'exportExcel'])->name('bookings.export-excel');
+        Route::get('bookings/import-template', [App\Http\Controllers\Admin\BookingController::class, 'downloadImportTemplate'])->name('bookings.import-template');
 
-        Route::get('senders/export-excel', [\App\Http\Controllers\Admin\SenderController::class, 'exportExcel'])->name('senders.export-excel');
-        Route::get('senders/import-template', [\App\Http\Controllers\Admin\SenderController::class, 'downloadImportTemplate'])->name('senders.import-template');
-        Route::post('senders/import-excel', [\App\Http\Controllers\Admin\SenderController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('senders.import-excel');
-        Route::post('senders/bulk-send-credentials', [\App\Http\Controllers\Admin\SenderController::class, 'bulkSendCredentials'])->middleware('throttle:admin-mutations')->name('senders.bulk-send-credentials');
-        Route::post('senders/bulk-hold', [\App\Http\Controllers\Admin\SenderController::class, 'bulkHold'])->middleware('throttle:admin-mutations')->name('senders.bulk-hold');
-        Route::post('senders/{sender}/send-credentials', [\App\Http\Controllers\Admin\SenderController::class, 'sendCredentials'])->middleware('throttle:admin-mutations')->name('senders.send-credentials');
+        Route::get('senders/export-excel', [SenderController::class, 'exportExcel'])->name('senders.export-excel');
+        Route::get('senders/import-template', [SenderController::class, 'downloadImportTemplate'])->name('senders.import-template');
+        Route::post('senders/import-excel', [SenderController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('senders.import-excel');
+        Route::post('senders/bulk-send-credentials', [SenderController::class, 'bulkSendCredentials'])->middleware('throttle:admin-mutations')->name('senders.bulk-send-credentials');
+        Route::post('senders/bulk-hold', [SenderController::class, 'bulkHold'])->middleware('throttle:admin-mutations')->name('senders.bulk-hold');
+        Route::post('senders/{sender}/send-credentials', [SenderController::class, 'sendCredentials'])->middleware('throttle:admin-mutations')->name('senders.send-credentials');
 
-        Route::get('recipients/export-excel', [\App\Http\Controllers\Admin\RecipientController::class, 'exportExcel'])->name('recipients.export-excel');
-        Route::get('recipients/import-template', [\App\Http\Controllers\Admin\RecipientController::class, 'downloadImportTemplate'])->name('recipients.import-template');
-        Route::post('recipients/import-excel', [\App\Http\Controllers\Admin\RecipientController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('recipients.import-excel');
+        Route::get('recipients/export-excel', [RecipientController::class, 'exportExcel'])->name('recipients.export-excel');
+        Route::get('recipients/import-template', [RecipientController::class, 'downloadImportTemplate'])->name('recipients.import-template');
+        Route::post('recipients/import-excel', [RecipientController::class, 'importExcel'])->middleware('throttle:admin-mutations')->name('recipients.import-excel');
         Route::get('runsheets/pickups', [RunsheetController::class, 'pickups'])->name('runsheets.pickups');
         Route::get('runsheets/pickups/calendar', [RunsheetController::class, 'pickupCalendar'])->name('runsheets.pickups.calendar');
         Route::get('runsheets/deliveries', [RunsheetController::class, 'deliveries'])->name('runsheets.deliveries');
@@ -436,10 +450,10 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::match(['get', 'post'], 'users/check-email', [UserController::class, 'checkEmail'])->name('users.check-email');
         Route::post('users/{id}/restore', [UserController::class, 'restore'])->middleware('throttle:admin-mutations')->name('users.restore');
         Route::resource('users', UserController::class)->withTrashed();
-        Route::post('serial-numbers/bulk-void', [App\Http\Controllers\Admin\SerialNumberController::class, 'bulkVoid'])->name('serial-numbers.bulk-void');
-        Route::post('serial-numbers/{serialNumber}/void', [App\Http\Controllers\Admin\SerialNumberController::class, 'void'])->name('serial-numbers.void');
-        Route::get('serial-numbers/export', [App\Http\Controllers\Admin\SerialNumberController::class, 'export'])->name('serial-numbers.export');
-        Route::resource('serial-numbers', App\Http\Controllers\Admin\SerialNumberController::class)->only(['index', 'store', 'show']);
+        Route::post('serial-numbers/bulk-void', [SerialNumberController::class, 'bulkVoid'])->name('serial-numbers.bulk-void');
+        Route::post('serial-numbers/{serialNumber}/void', [SerialNumberController::class, 'void'])->name('serial-numbers.void');
+        Route::get('serial-numbers/export', [SerialNumberController::class, 'export'])->name('serial-numbers.export');
+        Route::resource('serial-numbers', SerialNumberController::class)->only(['index', 'store', 'show']);
         Route::resource('recipients', RecipientController::class)->only(['index', 'show', 'edit', 'update', 'destroy']);
 
         // Commissions
@@ -465,7 +479,7 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::get('reports/financial/csv', [FinancialReportController::class, 'downloadCsv'])->name('reports.financial.csv');
 
         // Tracking Analytics
-        Route::get('tracking-analytics', [\App\Http\Controllers\Admin\TrackingAnalyticsController::class, 'index'])->name('tracking-analytics.index');
+        Route::get('tracking-analytics', [TrackingAnalyticsController::class, 'index'])->name('tracking-analytics.index');
 
         // Operational Communications Hub
         Route::get('communications', [AdminCommunicationController::class, 'index'])->name('communications.index');
@@ -486,7 +500,6 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::resource('box-prices', BoxPriceController::class)->only(['store', 'update']);
         Route::resource('provinces', ProvinceController::class);
     });
-
 
     // Courier Routes
     Route::middleware(['role:courier'])->prefix('courier')->group(function () {
@@ -544,7 +557,7 @@ Route::inertia('/privacy', 'marketing/privacy')->name('privacy');
         Route::post('/mark-damaged', [WarehouseController::class, 'markDamaged'])->middleware('throttle:ops-scan')->name('warehouse.mark-damaged');
         Route::post('/mark-held', [WarehouseController::class, 'markHeld'])->middleware('throttle:ops-scan')->name('warehouse.mark-held');
         Route::post('/update-physicals', [WarehouseController::class, 'updatePhysicals'])->middleware('throttle:ops-scan')->name('warehouse.update-physicals');
-        
+
         // API Endpoints for Dashboard
         Route::get('/api/batches/{batch}', [WarehouseController::class, 'apiBatchDetails'])->name('warehouse.api.batches.show');
     });
@@ -556,10 +569,9 @@ if (app()->environment('local') && file_exists(__DIR__.'/local.php')) {
     require __DIR__.'/local.php';
 }
 
-
 Route::middleware('developer')->prefix('developer')->name('developer.')->group(function () {
-    Route::get('features', [\App\Http\Controllers\DeveloperFeatureController::class, 'index'])->name('features.index');
-    Route::post('features', [\App\Http\Controllers\DeveloperFeatureController::class, 'store'])->name('features.store');
-    Route::match(['patch', 'put'], 'features/{feature}', [\App\Http\Controllers\DeveloperFeatureController::class, 'update'])->name('features.update');
-    Route::delete('features/{feature}', [\App\Http\Controllers\DeveloperFeatureController::class, 'destroy'])->name('features.destroy');
+    Route::get('features', [DeveloperFeatureController::class, 'index'])->name('features.index');
+    Route::post('features', [DeveloperFeatureController::class, 'store'])->name('features.store');
+    Route::match(['patch', 'put'], 'features/{feature}', [DeveloperFeatureController::class, 'update'])->name('features.update');
+    Route::delete('features/{feature}', [DeveloperFeatureController::class, 'destroy'])->name('features.destroy');
 });

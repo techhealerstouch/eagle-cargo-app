@@ -8,13 +8,13 @@ use App\Models\GuestBookingAccessChallenge;
 use App\Models\Recipient;
 use App\Models\Sender;
 use App\Models\User;
+use App\Notifications\GuestBookingAccessCode;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\URL;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
-use App\Notifications\GuestBookingAccessCode;
 
 class GuestBookingAccessService
 {
@@ -156,7 +156,7 @@ class GuestBookingAccessService
             throw new AccessDeniedHttpException('Invalid guest access token.');
         }
 
-        if (! $request->hasValidSignature() || $request->query('purpose') !== $purpose) {
+        if (! $request->hasValidSignatureWhileIgnoring(['resend']) || $request->query('purpose') !== $purpose) {
             throw new AccessDeniedHttpException('This guest access link is invalid or expired.');
         }
     }

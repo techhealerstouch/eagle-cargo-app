@@ -1,5 +1,5 @@
 import { Head, Link, router, useForm } from '@inertiajs/react';
-import { Package, Search, PlusCircle, ArrowRight, User, Edit2, Trash2, AlertCircle, FileEdit, FileText, CheckCircle2, Printer, SlidersHorizontal, CreditCard, Filter, Ban, Tag, Upload, Eye, X, Building2, Loader2, Hash, Copy, Check } from 'lucide-react';
+import { Package, Search, PlusCircle, ArrowRight, User, Edit2, Trash2, AlertCircle, FileEdit, FileText, CheckCircle2, Printer, SlidersHorizontal, CreditCard, Filter, Ban, Tag, Upload, Eye, X, Building2, Loader2, Hash, Copy, Check, Calendar } from 'lucide-react';
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import ConfirmModal from '@/components/common/confirm-modal';
@@ -34,7 +34,37 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
     const [uploadingProofFor, setUploadingProofFor] = useState<any>(null);
     const [declarationPromptBookingId, setDeclarationPromptBookingId] = useState<number | null>(null);
     const [copiedRef, setCopiedRef] = useState(false);
+    const [schedulingBooking, setSchedulingBooking] = useState<any>(null);
+    const [scheduleDate, setScheduleDate] = useState('');
+    const [scheduleNotes, setScheduleNotes] = useState('');
+    const [isScheduling, setIsScheduling] = useState(false);
     const initialUrlHandled = useRef(false);
+
+    const handleSchedulePickup = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!schedulingBooking || !scheduleDate) {
+            toast.error('Please choose a preferred pickup date.');
+            return;
+        }
+
+        setIsScheduling(true);
+        router.post(`/bookings/${schedulingBooking.id}/schedule-pickup`, {
+            preferred_date: scheduleDate,
+            pickup_notes: scheduleNotes,
+        }, {
+            onSuccess: () => {
+                setSchedulingBooking(null);
+                setScheduleDate('');
+                setScheduleNotes('');
+                toast.success('Pickup date scheduled successfully! Our dispatch team has been notified.');
+            },
+            onError: (errs) => {
+                const firstErr = Object.values(errs)[0];
+                toast.error(typeof firstErr === 'string' ? firstErr : 'Could not schedule pickup. Please check the date.');
+            },
+            onFinish: () => setIsScheduling(false),
+        });
+    };
 
     const handleCopyReference = (ref: string) => {
         if (!ref) return;
@@ -521,8 +551,40 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                     </div>
                 </div>
 
+                {/* Packing In Progress — Schedule Pickup Prompt */}
+                {booking.is_ready_for_pickup === false && !isDraft && !isCancelled && (
+                    <div className="px-6 py-4 bg-sky-50/70 dark:bg-sky-950/30 border-b border-sky-200/60 dark:border-sky-900/40 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-500/15 text-sky-600 dark:text-sky-400">
+                                <Package className="size-5" />
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <h4 className="text-xs font-bold text-sky-950 dark:text-sky-200">Packing In Progress</h4>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">
+                                        Pickup Not Yet Scheduled
+                                    </span>
+                                </div>
+                                <p className="text-[11px] text-sky-800 dark:text-sky-300/80 mt-0.5">
+                                    Take all the time you need to pack. Once your boxes are full and sealed, schedule your collection date.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSchedulingBooking(booking);
+                                setScheduleDate(booking.preferred_date ? booking.preferred_date.slice(0, 10) : '');
+                            }}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-5 h-9 text-xs font-bold text-white hover:bg-sky-700 transition-all shadow-xs active:scale-95 shrink-0 cursor-pointer"
+                        >
+                            <Calendar className="size-3.5" /> Schedule Pickup Date <ArrowRight className="size-3.5" />
+                        </button>
+                    </div>
+                )}
+
                 {/* Customs Declaration Warning */}
-                {!(booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0)) && booking.declaration_form_status === 'missing' && !isDraft && !isCancelled && (
+                {!(booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0)) && booking.declaration_form_status === 'missing' && !isDraft && !isCancelled && booking.is_ready_for_pickup !== false && (
                     <div className="px-6 py-4 bg-amber-50/70 dark:bg-amber-950/30 border-b border-amber-200/60 dark:border-amber-900/40 flex flex-col sm:flex-row items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
@@ -563,35 +625,58 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                             </Link>
                         </div>
                     ) : booking.empty_box_count > 0 && (!booking.boxes || booking.boxes.length === 0) ? (
-                        <div className="rounded-2xl border border-amber-200/80 bg-white p-5 shadow-2xs dark:border-amber-900/40 dark:bg-zinc-900">
-                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                                <div className="flex items-start gap-3.5">
-                                    <div className="size-10 rounded-xl bg-amber-500/10 text-brand-rust dark:text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
-                                        <Package className="size-5" />
-                                    </div>
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
-                                                Empty Box Delivery Order
-                                            </h4>
-                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
-                                                {booking.empty_box_count} Box{booking.empty_box_count === 1 ? '' : 'es'}
+                        <div className="col-span-full bg-white dark:bg-zinc-950 border border-amber-200/80 dark:border-amber-900/40 p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xs">
+                            <div className="flex items-start sm:items-center gap-3.5">
+                                <div className="size-11 rounded-xl bg-amber-500/10 dark:bg-amber-950/30 text-brand-rust flex items-center justify-center shrink-0 border border-amber-500/20">
+                                    <Package className="size-5" />
+                                </div>
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h5 className="font-bold text-sm text-zinc-900 dark:text-white">
+                                            Empty Box Delivery Order
+                                        </h5>
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                            {booking.empty_box_count} Box{booking.empty_box_count !== 1 ? 'es' : ''}
+                                        </span>
+                                        {booking.converted_cargo_booking && booking.converted_cargo_booking.status !== 'cancelled' && (
+                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                ✓ Converted to #{booking.converted_cargo_booking.reference_number}
                                             </span>
-                                        </div>
-                                        <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                                            Your empty boxes have been scheduled for delivery to your address. Once delivered and packed, you can schedule a pickup through this portal.
-                                        </p>
+                                        )}
                                     </div>
+
+                                    {/* Structured empty box items breakdown */}
+                                    {booking.empty_box_items && Array.isArray(booking.empty_box_items) && booking.empty_box_items.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 pt-1">
+                                            {booking.empty_box_items.map((item: any, idx: number) => (
+                                                <span key={idx} className="inline-flex items-center px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-[10px] font-semibold text-zinc-700 dark:text-zinc-300">
+                                                    {item.quantity}x {item.name || 'Box'}{item.dimensions ? ` (${item.dimensions})` : ''}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                        {booking.preferred_date ? `Preferred delivery date: ${new Date(booking.preferred_date).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : 'Scheduling delivery to your address'}
+                                    </p>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                                {(!booking.converted_cargo_booking || booking.converted_cargo_booking.status === 'cancelled') && !isCancelled && (
                                     <Link
-                                        href={`/track?tracking_number=${booking.reference_number}`}
-                                        className="inline-flex items-center justify-center gap-1.5 px-4 h-9 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-brand-rust dark:text-amber-300 text-xs font-bold transition-colors"
+                                        href={`/book?from_empty_box=${booking.id}`}
+                                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors shadow-xs"
                                     >
-                                        Track Delivery Status
-                                        <ArrowRight className="size-3.5" />
+                                        Boxes Packed — Schedule Pickup <ArrowRight className="size-3.5" />
                                     </Link>
-                                </div>
+                                )}
+                                <Link
+                                    href={`/track?tracking_number=${booking.reference_number}`}
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-bold transition-colors shrink-0"
+                                >
+                                    Track Delivery <ArrowRight className="size-3.5" />
+                                </Link>
                             </div>
                         </div>
                     ) : (
@@ -1098,6 +1183,69 @@ export default function Bookings({ sender, history, filters = {}, pageTitle = 'M
                 bookingId={declarationPromptBookingId}
                 badgeText="Payment Initiated"
             />
+
+            {/* Schedule Pickup Dialog */}
+            <Dialog open={!!schedulingBooking} onOpenChange={(open) => { if (!open) setSchedulingBooking(null); }}>
+                <DialogContent className="sm:max-w-md rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                            <Calendar className="size-5 text-sky-600" />
+                            Schedule Pickup Date
+                        </DialogTitle>
+                        <DialogDescription className="text-xs text-zinc-500">
+                            Booking #{schedulingBooking?.reference_number} • Choose when our driver should arrive to collect your packed boxes.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <form onSubmit={handleSchedulePickup} className="space-y-4 pt-2">
+                        <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                                Preferred Collection Date <span className="text-red-500">*</span>
+                            </label>
+                            <input
+                                type="date"
+                                required
+                                min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)}
+                                value={scheduleDate}
+                                onChange={(e) => setScheduleDate(e.target.value)}
+                                className="w-full h-11 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-sm"
+                            />
+                            <p className="text-[11px] text-zinc-400">Please allow at least 24–48 hours advance notice for dispatch.</p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                                Special Pickup Instructions <span className="text-zinc-400 text-[11px] font-normal">(Optional)</span>
+                            </label>
+                            <textarea
+                                rows={2}
+                                value={scheduleNotes}
+                                onChange={(e) => setScheduleNotes(e.target.value)}
+                                placeholder="E.g. Boxes are on ground floor porch, ring gate bell"
+                                className="w-full p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs"
+                            />
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-2">
+                            <button
+                                type="button"
+                                onClick={() => setSchedulingBooking(null)}
+                                className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={isScheduling || !scheduleDate}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
+                            >
+                                {isScheduling ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                                Confirm Pickup Date
+                            </button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
         </AppLayout>
     );
 }

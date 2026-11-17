@@ -3,6 +3,7 @@
 namespace App\Repositories\Eloquent;
 
 use App\Enums\BookingStatus;
+use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
 use App\Enums\RunsheetStatus;
@@ -18,9 +19,13 @@ use App\Models\Sender;
 use App\Models\User;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\ReferenceDataService;
+use App\Services\RunsheetService;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Stripe\PaymentIntent;
+use Stripe\Stripe;
 
 class BookingRepository implements BookingRepositoryInterface
 {
@@ -60,6 +65,13 @@ class BookingRepository implements BookingRepositoryInterface
                 );
             }
 
+            $requestedSourceId = ! empty($data['source_empty_box_booking_id']) ? (int) $data['source_empty_box_booking_id'] : null;
+            [$sourceEmptyBoxBookingId, $depositCredit] = $this->resolveEmptyBoxDepositConversion(
+                $requestedSourceId,
+                $sender,
+                count($data['boxes'] ?? []),
+            );
+
             // Generate Booking Shell
             $booking = $sender->bookings()->create([
                 'reference_number' => null, // Handled by BookingObserver
@@ -71,8 +83,11 @@ class BookingRepository implements BookingRepositoryInterface
                 'pickup_zone_id' => $data['pickup_zone_id'] ?? null,
                 'payment_method' => $data['payment_method'] ?? 'stripe',
                 'payment_status' => ($data['payment_method'] ?? null) === 'cash_on_pickup' ? PaymentStatus::CashOnPickup : PaymentStatus::Pending,
-                'empty_box_count' => !empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : (int) ($data['empty_box_count'] ?? 0),
+                'empty_box_count' => ! empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : (int) ($data['empty_box_count'] ?? 0),
                 'empty_box_fee' => (float) ($data['empty_box_fee'] ?? 10.00),
+                'source_empty_box_booking_id' => $sourceEmptyBoxBookingId,
+                'empty_box_deposit_credit' => $depositCredit,
+                'is_ready_for_pickup' => array_key_exists('is_ready_for_pickup', $data) ? (bool) $data['is_ready_for_pickup'] : true,
                 'notes' => $data['notes'] ?? null,
             ]);
 
@@ -121,23 +136,23 @@ class BookingRepository implements BookingRepositoryInterface
 
             $invoice = $booking->invoice;
             if ($invoice) {
-                if ($invoice->status !== \App\Enums\InvoiceStatus::Unpaid) {
+                if ($invoice->status !== InvoiceStatus::Unpaid) {
                     throw new \RuntimeException('Cannot update a booking that has already been partially or fully paid.');
                 }
-                
+
                 $pendingPayments = $invoice->payments()->whereNotNull('stripe_payment_intent_id')->get();
                 foreach ($pendingPayments as $payment) {
                     try {
-                        \Stripe\Stripe::setApiKey(config('services.stripe.secret'));
-                        $intent = \Stripe\PaymentIntent::retrieve($payment->stripe_payment_intent_id);
-                        if (!in_array($intent->status, ['canceled', 'succeeded'])) {
+                        Stripe::setApiKey(config('services.stripe.secret'));
+                        $intent = PaymentIntent::retrieve($payment->stripe_payment_intent_id);
+                        if (! in_array($intent->status, ['canceled', 'succeeded'])) {
                             $intent->cancel();
                         }
                     } catch (\Exception $e) {
-                        \Illuminate\Support\Facades\Log::warning('Failed to cancel intent during booking update: ' . $e->getMessage());
+                        Log::warning('Failed to cancel intent during booking update: '.$e->getMessage());
                     }
                 }
-                
+
                 $invoice->payments()->delete();
                 $invoice->delete();
             }
@@ -155,6 +170,22 @@ class BookingRepository implements BookingRepositoryInterface
                 'postcode' => $data['postcode'] ?? $sender->postcode,
             ]);
 
+            $sourceEmptyBoxBookingId = array_key_exists('source_empty_box_booking_id', $data)
+                ? (! empty($data['source_empty_box_booking_id']) ? (int) $data['source_empty_box_booking_id'] : null)
+                : $booking->source_empty_box_booking_id;
+            $depositCredit = (float) $booking->empty_box_deposit_credit;
+
+            if ($sourceEmptyBoxBookingId && ($sourceEmptyBoxBookingId !== $booking->source_empty_box_booking_id || $depositCredit <= 0)) {
+                [$sourceEmptyBoxBookingId, $depositCredit] = $this->resolveEmptyBoxDepositConversion(
+                    $sourceEmptyBoxBookingId,
+                    $sender,
+                    count($data['boxes'] ?? []),
+                    $booking->id,
+                );
+            } elseif (! $sourceEmptyBoxBookingId) {
+                $depositCredit = 0.0;
+            }
+
             // Update Booking Root
             $booking->update([
                 'initialization_key' => $data['initialization_key'] ?? $booking->initialization_key,
@@ -163,9 +194,12 @@ class BookingRepository implements BookingRepositoryInterface
                 'pickup_zone_id' => array_key_exists('pickup_zone_id', $data) ? $data['pickup_zone_id'] : $booking->pickup_zone_id,
                 'payment_method' => $data['payment_method'] ?? $booking->payment_method,
                 'empty_box_count' => array_key_exists('request_empty_box', $data)
-                    ? (!empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : 0)
+                    ? (! empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : 0)
                     : (isset($data['empty_box_count']) ? (int) $data['empty_box_count'] : $booking->empty_box_count),
                 'empty_box_fee' => isset($data['empty_box_fee']) ? (float) $data['empty_box_fee'] : $booking->empty_box_fee,
+                'source_empty_box_booking_id' => $sourceEmptyBoxBookingId,
+                'empty_box_deposit_credit' => $depositCredit,
+                'is_ready_for_pickup' => array_key_exists('is_ready_for_pickup', $data) ? (bool) $data['is_ready_for_pickup'] : $booking->is_ready_for_pickup,
                 'notes' => $data['notes'] ?? $booking->notes,
             ]);
 
@@ -209,6 +243,7 @@ class BookingRepository implements BookingRepositoryInterface
         }
 
         $booking->bypassStatusValidation = true;
+
         return $booking->update(['status' => BookingStatus::Cancelled]);
     }
 
@@ -297,6 +332,14 @@ class BookingRepository implements BookingRepositoryInterface
             // Remove any existing draft boxes
             $draft->boxes()->delete();
 
+            $requestedSourceId = ! empty($data['source_empty_box_booking_id']) ? (int) $data['source_empty_box_booking_id'] : null;
+            [$sourceEmptyBoxBookingId, $depositCredit] = $this->resolveEmptyBoxDepositConversion(
+                $requestedSourceId,
+                $sender,
+                count($data['boxes'] ?? []),
+                $draft->id,
+            );
+
             // Update booking to pending
             $draft->update([
                 'status' => BookingStatus::Pending,
@@ -308,6 +351,11 @@ class BookingRepository implements BookingRepositoryInterface
                 'payment_status' => ($data['payment_method'] ?? null) === 'cash_on_pickup'
                     ? PaymentStatus::CashOnPickup
                     : PaymentStatus::Pending,
+                'empty_box_count' => ! empty($data['request_empty_box']) ? (int) ($data['empty_box_count'] ?? 1) : (int) ($data['empty_box_count'] ?? 0),
+                'empty_box_fee' => (float) ($data['empty_box_fee'] ?? 10.00),
+                'source_empty_box_booking_id' => $sourceEmptyBoxBookingId,
+                'empty_box_deposit_credit' => $depositCredit,
+                'is_ready_for_pickup' => array_key_exists('is_ready_for_pickup', $data) ? (bool) $data['is_ready_for_pickup'] : true,
                 'notes' => $data['notes'] ?? null,
             ]);
 
@@ -536,7 +584,7 @@ class BookingRepository implements BookingRepositoryInterface
                 throw new \InvalidArgumentException('Booking must have at least one box before courier assignment.');
             }
 
-            app(\App\Services\RunsheetService::class)->attachBoxes($runsheet, $boxIds);
+            app(RunsheetService::class)->attachBoxes($runsheet, $boxIds);
 
             return $lockedBooking->load('boxes.runsheets');
         });
@@ -747,5 +795,65 @@ class BookingRepository implements BookingRepositoryInterface
         }
 
         return $recipient;
+    }
+
+    /**
+     * Resolve and lock a linked empty-box booking conversion, returning [$resolvedSourceId, $depositCredit].
+     *
+     * @return array{0: int|null, 1: float}
+     */
+    private function resolveEmptyBoxDepositConversion(?int $sourceEmptyBoxBookingId, Sender $sender, int $boxCount, ?int $ignoreBookingId = null): array
+    {
+        if (! $sourceEmptyBoxBookingId) {
+            return [null, 0.0];
+        }
+
+        $sourceBooking = Booking::query()
+            ->with('sender')
+            ->whereKey($sourceEmptyBoxBookingId)
+            ->lockForUpdate()
+            ->first();
+
+        if (! $sourceBooking
+            || $sourceBooking->status === BookingStatus::Cancelled
+            || (int) $sourceBooking->empty_box_count <= 0
+        ) {
+            return [null, 0.0];
+        }
+
+        $sameSender = (int) $sourceBooking->sender_id === (int) $sender->id
+            || ($sourceBooking->sender && $sender->email && strcasecmp($sourceBooking->sender->email, $sender->email) === 0);
+
+        if (! $sameSender) {
+            return [null, 0.0];
+        }
+
+        $alreadyClaimed = Booking::query()
+            ->where('source_empty_box_booking_id', $sourceEmptyBoxBookingId)
+            ->when($ignoreBookingId !== null, fn ($q) => $q->where('id', '!=', $ignoreBookingId))
+            ->where('status', '!=', BookingStatus::Cancelled)
+            ->exists();
+
+        if ($alreadyClaimed) {
+            return [null, 0.0];
+        }
+
+        $isEligibleForCredit = in_array($sourceBooking->payment_status, [
+            PaymentStatus::Paid,
+            PaymentStatus::CashCollected,
+        ], true) || in_array($sourceBooking->status, [
+            BookingStatus::Confirmed,
+            BookingStatus::Collected,
+            BookingStatus::Delivered,
+        ], true);
+
+        if (! $isEligibleForCredit) {
+            return [$sourceBooking->id, 0.0];
+        }
+
+        $countToCredit = min((int) $sourceBooking->empty_box_count, max(0, $boxCount));
+        $feePerBox = (float) ($sourceBooking->empty_box_fee ?: 10.00);
+
+        return [$sourceBooking->id, round($countToCredit * $feePerBox, 2)];
     }
 }

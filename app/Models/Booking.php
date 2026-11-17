@@ -16,6 +16,7 @@ use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -66,6 +67,10 @@ class Booking extends Model
         'is_manual',
         'empty_box_count',
         'empty_box_fee',
+        'empty_box_items',
+        'source_empty_box_booking_id',
+        'empty_box_deposit_credit',
+        'is_ready_for_pickup',
         'pickup_zone_id',
         'attention_required',
         'tracking_views_count',
@@ -94,6 +99,10 @@ class Booking extends Model
         'is_manual' => 'boolean',
         'empty_box_count' => 'integer',
         'empty_box_fee' => 'decimal:2',
+        'empty_box_items' => 'array',
+        'source_empty_box_booking_id' => 'integer',
+        'empty_box_deposit_credit' => 'decimal:2',
+        'is_ready_for_pickup' => 'boolean',
         'attention_required' => 'boolean',
         'tracking_views_count' => 'integer',
         'last_tracked_at' => 'datetime',
@@ -178,7 +187,7 @@ class Booking extends Model
         return $this->belongsTo(User::class, 'payment_overridden_by');
     }
 
-    public function operationalThreads(): \Illuminate\Database\Eloquent\Relations\HasMany
+    public function operationalThreads(): HasMany
     {
         return $this->hasMany(OperationalThread::class);
     }
@@ -333,6 +342,18 @@ class Booking extends Model
         return $this->hasOne(Invoice::class)->latestOfMany();
     }
 
+    public function sourceEmptyBoxBooking(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'source_empty_box_booking_id');
+    }
+
+    public function convertedCargoBooking(): HasOne
+    {
+        return $this->hasOne(self::class, 'source_empty_box_booking_id')
+            ->where('status', '!=', BookingStatus::Cancelled->value)
+            ->orderByDesc('id');
+    }
+
     public function getTotalAmountAttribute(): float
     {
         if ($this->relationLoaded('invoice')) {
@@ -349,9 +370,10 @@ class Booking extends Model
         $boxes = $this->relationLoaded('boxes') ? $this->boxes : $this->boxes()->get();
         $boxesPrice = (float) $boxes->sum('price_charged');
         $emptyBoxTotal = (float) (($this->empty_box_count ?? 0) * ($this->empty_box_fee ?? 10.00));
+        $emptyBoxDepositCredit = (float) ($this->empty_box_deposit_credit ?? 0.00);
         $discountAmount = (float) ($this->discount_amount ?? 0.00);
 
-        return max(0.0, $boxesPrice + $emptyBoxTotal - $discountAmount);
+        return max(0.0, $boxesPrice + $emptyBoxTotal - $emptyBoxDepositCredit - $discountAmount);
     }
 
     public function undeliveredBoxes()
@@ -654,7 +676,7 @@ class Booking extends Model
      *
      * @param  mixed  $value
      * @param  string|null  $field
-     * @return \Illuminate\Database\Eloquent\Model|null
+     * @return Model|null
      */
     public function resolveRouteBinding($value, $field = null)
     {

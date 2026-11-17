@@ -18,6 +18,7 @@ use App\Notifications\BankTransferDetails;
 use App\Notifications\PartialCancellationRequested;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Rules\SecureFile;
+use App\Rules\ValidPickupDate;
 use App\Services\GuestBookingAccessService;
 use App\Services\PaymentService;
 use App\Services\ReferenceDataService;
@@ -61,6 +62,35 @@ class BookingController extends Controller
             // Ensure security - only clone if it belongs to this user/sender
             if ($cloneSource && (! $user || ! $user->sender || $cloneSource->sender_id !== $user->sender->id)) {
                 $cloneSource = null;
+            }
+        }
+
+        $emptyBoxSource = null;
+        if ($request->has('from_empty_box')) {
+            $sourceId = (int) $request->query('from_empty_box');
+            $source = Booking::with('sender')->find($sourceId);
+            if ($source && $user && $user->sender && $source->sender_id === $user->sender->id) {
+                if ($source->status !== BookingStatus::Cancelled && (int) $source->empty_box_count > 0) {
+                    $alreadyClaimed = Booking::where('source_empty_box_booking_id', $source->id)
+                        ->where('status', '!=', BookingStatus::Cancelled)
+                        ->exists();
+
+                    if (! $alreadyClaimed) {
+                        $isPaidOrConfirmed = in_array($source->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)
+                            || in_array($source->status, [BookingStatus::Confirmed, BookingStatus::Collected, BookingStatus::Delivered], true);
+
+                        $emptyBoxSource = [
+                            'id' => $source->id,
+                            'reference_number' => $source->reference_number,
+                            'empty_box_count' => (int) $source->empty_box_count,
+                            'empty_box_fee' => (float) ($source->empty_box_fee ?: 10.00),
+                            'empty_box_items' => $source->empty_box_items ?: [],
+                            'sender' => $source->sender,
+                            'is_credit_eligible' => $isPaidOrConfirmed,
+                            'estimated_deposit_credit' => $isPaidOrConfirmed ? round((int) $source->empty_box_count * (float) ($source->empty_box_fee ?: 10.00), 2) : 0.00,
+                        ];
+                    }
+                }
             }
         }
 
@@ -129,6 +159,7 @@ class BookingController extends Controller
             'suburbs' => $this->referenceData->activeSuburbs(),
             'savedRecipients' => $recipients,
             'cloneSource' => $cloneSource,
+            'emptyBoxSource' => $emptyBoxSource,
             'editingBooking' => null,
             'draftBooking' => $draftBooking,
             'sender' => $user ? $user->sender?->load('pickupZone') : null,
@@ -811,6 +842,42 @@ class BookingController extends Controller
             'success' => true,
             'message' => __('messages.notifications.bank_transfer_details.sent_toast'),
         ]);
+    }
+
+    public function schedulePackedPickup(Request $request, Booking $booking)
+    {
+        $user = Auth::user();
+        if (! $user || ! $user->sender || $booking->sender_id !== $user->sender->id) {
+            abort(403, 'Unauthorized.');
+        }
+
+        if ($booking->status === BookingStatus::Cancelled) {
+            return redirect()->back()->with('error', 'Cancelled bookings cannot be scheduled for pickup.');
+        }
+
+        $validated = $request->validate([
+            'preferred_date' => [
+                'required',
+                'date',
+                new ValidPickupDate(
+                    $booking,
+                    $booking->booking_type?->value === 'drop_off' || $booking->booking_type === 'drop_off'
+                        ? null
+                        : ($booking->pickup_zone_id ? (int) $booking->pickup_zone_id : ($user->sender->pickup_zone_id ?? null))
+                ),
+            ],
+            'pickup_notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $booking->update([
+            'preferred_date' => $validated['preferred_date'],
+            'is_ready_for_pickup' => true,
+            'notes' => ! empty($validated['pickup_notes'])
+                ? trim($booking->notes."\nPickup Note: ".$validated['pickup_notes'])
+                : $booking->notes,
+        ]);
+
+        return redirect()->back()->with('success', 'Pickup date scheduled successfully! Our dispatch team has been notified.');
     }
 
     private function redirectAfterBookingSubmission(Booking $booking, string $paymentMethod)

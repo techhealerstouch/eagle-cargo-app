@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Head, useForm, Link } from '@inertiajs/react';
 import { format } from 'date-fns';
 import {
@@ -9,6 +9,7 @@ import {
     CheckCircle2,
     Check,
     AlertCircle,
+    AlertTriangle,
     Plus,
     Minus,
     CreditCard,
@@ -16,6 +17,8 @@ import {
     Lock,
     ArrowLeft,
     ArrowRight,
+    ChevronRight,
+    Loader2,
     Sparkles,
     ShieldCheck,
     Box as BoxIcon,
@@ -120,6 +123,8 @@ export default function OrderBoxes({
 }: Props) {
     const Layout = isGuest ? MarketingLayout : AppLayout;
     const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+    const [isRegisteredEmail, setIsRegisteredEmail] = useState(false);
+    const [checkingEmail, setCheckingEmail] = useState(false);
 
     const { data, setData, post, processing, errors, clearErrors } = useForm({
         first_name: sender?.first_name || '',
@@ -139,6 +144,30 @@ export default function OrderBoxes({
         delivery_notes: '',
         website: '',
     });
+
+    useEffect(() => {
+        if (!isGuest || !data.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+            setIsRegisteredEmail(false);
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            try {
+                setCheckingEmail(true);
+                const res = await fetch(`/api/users/check-email?email=${encodeURIComponent(data.email)}`);
+                if (res.ok) {
+                    const json = await res.json();
+                    setIsRegisteredEmail(json.available === false);
+                }
+            } catch {
+                // Ignore network failure
+            } finally {
+                setCheckingEmail(false);
+            }
+        }, 400);
+
+        return () => clearTimeout(timer);
+    }, [data.email, isGuest]);
 
     const updateQuantity = (boxTypeId: number, delta: number) => {
         setData(
@@ -209,6 +238,11 @@ export default function OrderBoxes({
         e.preventDefault();
         if (totalBoxes < 1) {
             toast.error('Please select at least 1 empty box to order.');
+            return;
+        }
+
+        if (isGuest && isRegisteredEmail) {
+            toast.error('An account with this email already exists. Please log in to place your order.');
             return;
         }
 
@@ -532,21 +566,60 @@ export default function OrderBoxes({
                                         <Field
                                             label="Email Address"
                                             required
-                                            error={errors.email}
-                                            hint="We will send your empty box order confirmation, receipt, and invoice to this email."
+                                            error={
+                                                errors.email ||
+                                                (isGuest && isRegisteredEmail
+                                                    ? 'An account with this email already exists. Please log in to place your order.'
+                                                    : undefined)
+                                            }
+                                            hint="We will send your verification code, order confirmation, receipt, and invoice to this email."
                                         >
-                                            <input
-                                                id="email"
-                                                type="email"
-                                                value={data.email}
-                                                onChange={(e) => {
-                                                    setData('email', e.target.value);
-                                                    clearErrors('email');
-                                                }}
-                                                placeholder="e.g. maria.santos@gmail.com"
-                                                className={baseInputClass}
-                                            />
+                                            <div className="relative">
+                                                <input
+                                                    id="email"
+                                                    type="email"
+                                                    value={data.email}
+                                                    onChange={(e) => {
+                                                        setData('email', e.target.value);
+                                                        clearErrors('email');
+                                                        if (isRegisteredEmail) setIsRegisteredEmail(false);
+                                                    }}
+                                                    placeholder="e.g. maria.santos@gmail.com"
+                                                    className={cn(
+                                                        baseInputClass,
+                                                        isGuest &&
+                                                            isRegisteredEmail &&
+                                                            'border-amber-500 dark:border-amber-500 focus:border-amber-600 focus:ring-amber-100 dark:focus:ring-amber-950/40'
+                                                    )}
+                                                />
+                                                {checkingEmail && (
+                                                    <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-xs text-zinc-400">
+                                                        <Loader2 className="size-3.5 animate-spin" />
+                                                    </div>
+                                                )}
+                                            </div>
                                         </Field>
+
+                                        {isGuest && isRegisteredEmail && (
+                                            <div className="p-3.5 rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/80 dark:bg-amber-950/30 flex items-start gap-3 animate-in fade-in duration-200">
+                                                <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                                                <div className="text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
+                                                    <p className="font-bold">Existing Account Found</p>
+                                                    <p>
+                                                        An account already exists for <span className="font-semibold">{data.email}</span>. Please log in to continue and keep your orders linked to your account.
+                                                    </p>
+                                                    <div className="pt-0.5">
+                                                        <a
+                                                            href={`/login?email=${encodeURIComponent(data.email)}`}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs transition-colors shadow-2xs"
+                                                        >
+                                                            <span>Log In to Your Account</span>
+                                                            <ChevronRight className="size-3.5" />
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </>
                                 )}
 

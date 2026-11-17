@@ -302,6 +302,7 @@ interface PageProps {
     sender?: any;
     logistics?: any;
     activePromotions?: any[];
+    emptyBoxSource?: any;
     isGuest?: boolean;
     initialQuery?: Record<string, string>;
 }
@@ -310,7 +311,7 @@ export default function Book(props?: PageProps) {
   const pageProps = usePage().props as any;
   const mergedProps = { ...pageProps, ...(props || {}) };
   const isGuest = Boolean(props?.isGuest || mergedProps.isGuest || !mergedProps.auth?.user);
-  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [], initialQuery } = mergedProps;
+  const { auth, areas, provinces, boxTypes, boxPrices, pickupZones, suburbs = [], savedRecipients, cloneSource, editingBooking, draftBooking, sender, logistics, activePromotions = [], emptyBoxSource, initialQuery } = mergedProps;
 
   const depotAddress = logistics?.depotAddress || '6 Ivan St, Arundel QLD 4214';
   const depotInstructions = logistics?.depotInstructions || '';
@@ -764,35 +765,41 @@ export default function Book(props?: PageProps) {
     return { isInvalid: false, timeStart: '08:00', timeEnd: '17:00' };
   };
 
-  const { data, setData, post, put, processing, errors, setError, clearErrors, transform } = useForm({
-    // Sender Information
-    first_name: user ? user.name.split(' ')[0] : '',
-    last_name: user ? user.name.split(' ').slice(1).join(' ') : '',
-    email: user ? user.email : '',
-    mobile: sender?.mobile || '',
-    secondary_mobile: sender?.secondary_mobile || '',
-    address: sender?.address || '',
-    suburb: queryParams.suburb || sender?.suburb || '',
-    state: queryParams.state || (queryParams.suburb ? 'VIC' : (sender?.state || 'NSW')),
-    postcode: resolvedQueryPostcode || sender?.postcode || '',
-    latitude: sender?.latitude || null,
-    longitude: sender?.longitude || null,
-    pickup_zone_id: editingBooking?.pickup_zone_id?.toString() || (!isGuest && !isEditingSender && sender?.pickup_zone_id ? sender.pickup_zone_id.toString() : (resolvedQueryZoneId || (sender?.suburb ? resolveZoneIdForSuburb(sender.suburb) : '') || '')),
-    website: '',
+  const initialBoxes = useMemo(() => {
+    if (emptyBoxSource?.empty_box_items && Array.isArray(emptyBoxSource.empty_box_items) && emptyBoxSource.empty_box_items.length > 0) {
+      const generatedBoxes: any[] = [];
+      emptyBoxSource.empty_box_items.forEach((item: any) => {
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        for (let i = 0; i < qty; i++) {
+          generatedBoxes.push({
+            recipient_id: '',
+            recipient_first_name: '',
+            recipient_last_name: '',
+            recipient_email: '',
+            recipient_address: '',
+            recipient_city: '',
+            recipient_province: resolvedQueryProvince || '',
+            recipient_zip_code: '',
+            recipient_phone: '',
+            recipient_secondary_phone: '',
+            recipient_landmarks: '',
+            recipient_latitude: null,
+            recipient_longitude: null,
+            area_id: resolvedQueryAreaId || '',
+            box_type_id: item.box_type_id ? String(item.box_type_id) : (queryParams.box_type_id ? String(queryParams.box_type_id) : ''),
+            is_custom_size: false,
+            custom_length: '',
+            custom_width: '',
+            custom_height: '',
+          });
+        }
+      });
+      if (generatedBoxes.length > 0) {
+        return generatedBoxes;
+      }
+    }
 
-    // Shared Booking Data
-    booking_type: 'home_pickup',
-    preferred_date: editingBooking?.preferred_date
-      ? new Date(editingBooking.preferred_date).toISOString().slice(0, 16)
-      : '',
-    payment_method: 'stripe',
-    notes: '',
-    promo_code: '',
-    empty_box_count: editingBooking?.empty_box_count || 0,
-    empty_box_fee: editingBooking?.empty_box_fee || 10.00,
-
-    // Boxes & Their Recipients
-    boxes: [
+    return [
       {
         recipient_id: '',
         recipient_first_name: '',
@@ -814,7 +821,40 @@ export default function Book(props?: PageProps) {
         custom_width: '',
         custom_height: '',
       }
-    ],
+    ];
+  }, [emptyBoxSource, resolvedQueryProvince, resolvedQueryAreaId, queryParams.box_type_id]);
+
+  const { data, setData, post, put, processing, errors, setError, clearErrors, transform } = useForm({
+    // Sender Information
+    first_name: user ? user.name.split(' ')[0] : (emptyBoxSource?.sender?.first_name || ''),
+    last_name: user ? user.name.split(' ').slice(1).join(' ') : (emptyBoxSource?.sender?.last_name || ''),
+    email: user ? user.email : (emptyBoxSource?.sender?.email || ''),
+    mobile: sender?.mobile || emptyBoxSource?.sender?.mobile || '',
+    secondary_mobile: sender?.secondary_mobile || emptyBoxSource?.sender?.secondary_mobile || '',
+    address: sender?.address || emptyBoxSource?.sender?.address || '',
+    suburb: queryParams.suburb || sender?.suburb || emptyBoxSource?.sender?.suburb || '',
+    state: queryParams.state || (queryParams.suburb ? 'VIC' : (sender?.state || emptyBoxSource?.sender?.state || 'NSW')),
+    postcode: resolvedQueryPostcode || sender?.postcode || emptyBoxSource?.sender?.postcode || '',
+    latitude: sender?.latitude || null,
+    longitude: sender?.longitude || null,
+    pickup_zone_id: editingBooking?.pickup_zone_id?.toString() || (!isGuest && !isEditingSender && sender?.pickup_zone_id ? sender.pickup_zone_id.toString() : (resolvedQueryZoneId || (sender?.suburb ? resolveZoneIdForSuburb(sender.suburb) : (emptyBoxSource?.sender?.suburb ? resolveZoneIdForSuburb(emptyBoxSource.sender.suburb) : '')) || '')),
+    website: '',
+
+    // Shared Booking Data
+    booking_type: 'home_pickup',
+    preferred_date: editingBooking?.preferred_date
+      ? new Date(editingBooking.preferred_date).toISOString().slice(0, 16)
+      : '',
+    payment_method: 'stripe',
+    notes: '',
+    promo_code: '',
+    empty_box_count: editingBooking?.empty_box_count || 0,
+    empty_box_fee: editingBooking?.empty_box_fee || 10.00,
+    source_empty_box_booking_id: emptyBoxSource?.id || null,
+    is_ready_for_pickup: true,
+
+    // Boxes & Their Recipients
+    boxes: initialBoxes,
   });
 
   useEffect(() => {
@@ -999,7 +1039,7 @@ export default function Book(props?: PageProps) {
   }, [data.suburb, data.booking_type, resolveZoneIdForSuburb]);
 
   useEffect(() => {
-    if (!activeLogistics) return;
+    if (!activeLogistics || (data.booking_type === 'home_pickup' && !data.is_ready_for_pickup)) return;
 
     if (!data.preferred_date) {
       const initialDate = getInitialValidDate(data.pickup_zone_id);
@@ -1018,7 +1058,7 @@ export default function Book(props?: PageProps) {
         setData('preferred_date', newValidDate);
       }
     }
-  }, [data.pickup_zone_id, activeLogistics, data.preferred_date, getInitialValidDate]);
+  }, [data.pickup_zone_id, activeLogistics, data.preferred_date, data.is_ready_for_pickup, data.booking_type, getInitialValidDate]);
 
   const getUpcomingAvailableDates = useCallback((logisticsObj: any, limit = 6) => {
     if (!logisticsObj) return [];
@@ -1721,8 +1761,7 @@ export default function Book(props?: PageProps) {
 
   const updateBox = (index: number, field: string, value: any) => {
     const newBoxes = [...data.boxes];
-    // @ts-expect-error - TS doesn't know the exact keys here
-    newBoxes[index][field] = value;
+    (newBoxes[index] as Record<string, any>)[field] = value;
 
     if (field === 'recipient_province' || field === 'recipient_city') {
         newBoxes[index]['area_id'] = resolveDestinationAreaId(
@@ -1846,17 +1885,20 @@ return 0;
     return isValidRecipient ? recipientId : null;
   };
 
+  const depositCredit = emptyBoxSource?.is_credit_eligible ? (Number(emptyBoxSource.estimated_deposit_credit) || 0) : 0;
   const cargoSubtotal = data.boxes.reduce((acc, box) => acc + getBoxPrice(box), 0);
   const emptyBoxTotal = (Number(data.empty_box_count) || 0) * (Number(data.empty_box_fee) || 10.00);
   const totalEstimate = cargoSubtotal + emptyBoxTotal;
-  const finalEstimate = Math.max(0, totalEstimate - discountAmount);
+  const finalEstimate = Math.max(0, totalEstimate - discountAmount - depositCredit);
 
   const senderStep1Summary = useMemo(() => {
     const isDropOff = data.booking_type === 'drop_off';
     const methodStr = isDropOff ? 'Drop-Off' : 'Pick-Up';
     const name = `${data.first_name || ''} ${data.last_name || ''}`.trim();
     let dateStr = '';
-    if (data.preferred_date) {
+    if (!isDropOff && !data.is_ready_for_pickup) {
+      dateStr = 'Pack First (Schedule Later)';
+    } else if (data.preferred_date) {
       try {
         dateStr = format(new Date(data.preferred_date), 'MMM d');
       } catch {
@@ -1867,7 +1909,7 @@ return 0;
     if (name) return `${methodStr} • ${name}`;
     if (dateStr) return `${methodStr} ${dateStr}`;
     return methodStr;
-  }, [data.booking_type, data.first_name, data.last_name, data.preferred_date]);
+  }, [data.booking_type, data.first_name, data.last_name, data.preferred_date, data.is_ready_for_pickup]);
 
   const senderStep2Summary = useMemo(() => {
     const count = data.boxes.length;
@@ -2074,6 +2116,7 @@ field = 'recipient mobile number';
 
     if (step === 1) {
       const isDropOff = data.booking_type === 'drop_off';
+      const requiresPickupDate = isDropOff || data.is_ready_for_pickup;
       const requiredFields: Record<string, string> = {
         first_name: 'First Name',
         last_name: 'Last Name',
@@ -2083,7 +2126,7 @@ field = 'recipient mobile number';
         suburb: 'Suburb',
         state: 'State',
         postcode: 'Postcode',
-        preferred_date: isDropOff ? 'Preferred Drop-Off Date' : 'Preferred Pickup Time',
+        ...(requiresPickupDate ? { preferred_date: isDropOff ? 'Preferred Drop-Off Date' : 'Preferred Pickup Time' } : {}),
       };
       Object.entries(requiredFields).forEach(([field, label]) => {
         if (!data[field as keyof typeof data]) {
@@ -2106,8 +2149,8 @@ field = 'recipient mobile number';
         }
       }
 
-      // Thorough Schedule Validation
-      if (data.preferred_date) {
+      // Thorough Schedule Validation (only when date is required and chosen)
+      if (requiresPickupDate && data.preferred_date) {
         const selectedDate = new Date(data.preferred_date);
         const now = new Date();
 
@@ -2590,6 +2633,30 @@ if (step === 2) {
             </div>
         </div>
 
+        {/* Linked Empty Box Order Banner */}
+        {emptyBoxSource && (
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/70 dark:bg-emerald-950/30 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-sm text-emerald-900 dark:text-emerald-100">
+                    Linked to Empty Box Order #{emptyBoxSource.reference_number}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-200 dark:bg-emerald-800 text-emerald-900 dark:text-emerald-100">
+                    ${(Number(emptyBoxSource.estimated_deposit_credit) || 0).toFixed(2)} Deposit Credit
+                  </span>
+                </div>
+                <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-0.5">
+                  Your empty box sizes have been pre-filled. Your ${emptyBoxSource.empty_box_fee || 10}/box deposit previously paid will be credited back on your shipping invoice!
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-8">
 
             {/* STEP 1: SENDER & PICKUP DETAILS */}
@@ -2965,14 +3032,94 @@ if (step === 2) {
                     </div>
                   )}
 
+                  {/* Pickup Readiness Mode (Home Pickup) */}
+                  {data.booking_type === 'home_pickup' && !!selectedZone && !emptyBoxSource && (
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                          Pickup Readiness
+                        </label>
+                        <span className="text-[11px] text-zinc-400">Choose when our driver should arrive</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setData('is_ready_for_pickup', true);
+                            clearErrors('preferred_date');
+                          }}
+                          className={cn(
+                            "relative flex flex-col items-start p-4 rounded-xl border text-left transition-all cursor-pointer shadow-2xs group",
+                            data.is_ready_for_pickup
+                              ? "bg-brand-warm/15 dark:bg-brand-rust/20 border-brand-rust dark:border-brand-rust ring-2 ring-brand-rust/30 text-brand-rust dark:text-amber-200"
+                              : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-700 dark:text-zinc-300"
+                          )}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <Truck className="size-4 text-brand-rust" />
+                            <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100">
+                              Schedule Pickup Date Now
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                            My boxes are ready (or will be soon). Reserve an upcoming pickup date from the schedule below.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setData((prev) => ({
+                              ...prev,
+                              is_ready_for_pickup: false,
+                              preferred_date: '',
+                              empty_box_count: Math.max(Number(prev.empty_box_count) || 0, prev.boxes.length || 1),
+                            }));
+                            clearErrors('preferred_date');
+                          }}
+                          className={cn(
+                            "relative flex flex-col items-start p-4 rounded-xl border text-left transition-all cursor-pointer shadow-2xs group",
+                            !data.is_ready_for_pickup
+                              ? "bg-brand-warm/15 dark:bg-brand-rust/20 border-brand-rust dark:border-brand-rust ring-2 ring-brand-rust/30 text-brand-rust dark:text-amber-200"
+                              : "bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-700 dark:text-zinc-300"
+                          )}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <Package className="size-4 text-emerald-600" />
+                            <span className="font-bold text-xs text-zinc-900 dark:text-zinc-100">
+                              Pack First, Schedule Pickup Later
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                            Take your time packing pasalubong and gifts. We won't dispatch courier runsheets until you click 'Schedule Pickup' on your dashboard.
+                          </p>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pack First Reassurance Notice */}
+                  {data.booking_type === 'home_pickup' && !!selectedZone && !data.is_ready_for_pickup && (
+                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20 p-5 space-y-2">
+                      <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold text-xs">
+                        <CheckCircle className="size-4 text-emerald-600 shrink-0" />
+                        <span>Pack at your own pace! No immediate pickup date required.</span>
+                      </div>
+                      <p className="text-xs text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                        Your shipment details and rates are locked in. Whenever your boxes are taped and full, you can pick a collection date anytime with 1-click from your dashboard or confirmation email.
+                      </p>
+                    </div>
+                  )}
+
                   {/* Pickup Rules & Schedule Showcase */}
-                  {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!selectedZone)) && (
+                  {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!selectedZone && data.is_ready_for_pickup)) && (
                     <PickupScheduleShowcase />
                   )}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-                    {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!selectedZone)) && (
+                    {(data.booking_type === 'drop_off' || (data.booking_type === 'home_pickup' && !!selectedZone && data.is_ready_for_pickup)) && (
                       <Field
                         label={data.booking_type === 'drop_off' ? 'Preferred Drop-Off Date' : 'Preferred Pickup Date'}
                         required
@@ -3626,7 +3773,9 @@ if (step === 2) {
                           </p>
                           <p className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
                             <CalendarIcon className="size-3.5" />
-                            {data.preferred_date ? format(new Date(data.preferred_date), 'PPP') : 'Not specified'}
+                            {data.booking_type === 'home_pickup' && !data.is_ready_for_pickup
+                              ? 'Pack First — Schedule Later'
+                              : (data.preferred_date ? format(new Date(data.preferred_date), 'PPP') : 'Not specified')}
                           </p>
                         </div>
                         <div>
@@ -3835,6 +3984,15 @@ if (step === 2) {
                               <Tag className="size-3.5" /> Promo Discount
                             </span>
                             <span className="font-mono">-${discountAmount.toFixed(2)}</span>
+                          </div>
+                        )}
+
+                        {depositCredit > 0 && (
+                          <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium">
+                            <span className="flex items-center gap-1.5">
+                              <ShieldCheck className="size-3.5" /> Empty Box Deposit Credit (#{emptyBoxSource?.reference_number})
+                            </span>
+                            <span className="font-mono">-${depositCredit.toFixed(2)}</span>
                           </div>
                         )}
 
@@ -4221,7 +4379,7 @@ if (step === 2) {
                     <Button
                       type="button"
                       onClick={nextStep}
-                      disabled={!data.address || !data.preferred_date || !data.first_name || !data.last_name || !data.mobile || !data.email}
+                      disabled={!data.address || ((data.booking_type === 'drop_off' || data.is_ready_for_pickup) && !data.preferred_date) || !data.first_name || !data.last_name || !data.mobile || !data.email}
                       className="flex-1 md:w-64 h-12 rounded-xl bg-brand-rust text-white font-semibold hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-brand-rust/20 flex items-center justify-center gap-2"
                     >
                       Continue <ArrowRight className="size-4" />

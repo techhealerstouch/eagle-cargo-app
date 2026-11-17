@@ -41,6 +41,10 @@ interface Booking {
     status?: string;
     empty_box_count?: number;
     empty_box_fee?: number | string;
+    empty_box_items?: Array<{ box_type_id?: number | string; quantity: number; name?: string; dimensions?: string }> | null;
+    is_ready_for_pickup?: boolean;
+    source_empty_box_booking_id?: number | null;
+    empty_box_deposit_credit?: number | string | null;
     preferred_date?: string | null;
     payment_method: string;
     payment_status: string;
@@ -66,9 +70,10 @@ interface Props {
     booking: Booking;
     declarationUrl: string;
     paymentUrl: string;
+    convertEmptyBoxUrl?: string;
 }
 
-export default function BookingConfirmed({ booking, declarationUrl, paymentUrl }: Props) {
+export default function BookingConfirmed({ booking, declarationUrl, paymentUrl, convertEmptyBoxUrl }: Props) {
     const [copied, setCopied] = useState(false);
 
     const isEmptyBoxOrder = Number(booking.empty_box_count || 0) > 0 && (booking.boxes || []).length === 0;
@@ -205,8 +210,56 @@ export default function BookingConfirmed({ booking, declarationUrl, paymentUrl }
                         </div>
                     </div>
 
-                    {/* Step 2 Alert: Customs Declaration Required (Hidden for standalone empty box orders) */}
-                    {!isEmptyBoxOrder && (
+                    {/* Action Banners */}
+                    {isEmptyBoxOrder ? (
+                        <div className="rounded-2xl border border-emerald-500/40 bg-linear-to-r from-emerald-500/10 via-emerald-500/5 to-transparent p-4 sm:p-5 shadow-xs relative overflow-hidden">
+                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                <div className="flex items-start gap-3.5">
+                                    <div className="size-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                                        <Package className="size-5" />
+                                    </div>
+                                    <div>
+                                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-[10px] font-bold uppercase tracking-wider mb-1">
+                                            <span>Pack Over Time • No Rush</span>
+                                        </div>
+                                        <h3 className="font-serif text-base sm:text-lg font-bold text-brand-text tracking-tight">
+                                            Take Your Time Packing Your Balikbayan Box
+                                        </h3>
+                                        <p className="text-xs text-brand-text-mid mt-1 max-w-xl leading-relaxed">
+                                            Collect pasalubong and pack gradually at your own pace. Once full, schedule your shipping pickup to get your <strong>${emptyBoxFallback.toFixed(2)} deposit credited</strong> toward your shipping invoice!
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <Button asChild size="sm" className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold tracking-wide shadow-xs shrink-0 w-full md:w-auto h-10 px-4 text-xs cursor-pointer">
+                                    <Link href={convertEmptyBoxUrl || `/guest/book?from_empty_box=${booking.id}`}>
+                                        Schedule Pickup When Packed <ArrowRight className="size-3.5 ml-1.5" />
+                                    </Link>
+                                </Button>
+                            </div>
+                        </div>
+                    ) : booking.is_ready_for_pickup === false ? (
+                        <div className="rounded-2xl border border-sky-500/40 bg-linear-to-r from-sky-500/10 via-sky-500/5 to-transparent p-4 sm:p-5 shadow-xs relative overflow-hidden">
+                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                <div className="flex items-start gap-3.5">
+                                    <div className="size-10 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                                        <Package className="size-5" />
+                                    </div>
+                                    <div>
+                                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-800 dark:text-sky-300 text-[10px] font-bold uppercase tracking-wider mb-1">
+                                            <span>Pack First • Schedule Later</span>
+                                        </div>
+                                        <h3 className="font-serif text-base sm:text-lg font-bold text-brand-text tracking-tight">
+                                            Your Shipment is Reserved!
+                                        </h3>
+                                        <p className="text-xs text-brand-text-mid mt-1 max-w-xl leading-relaxed">
+                                            Your shipping rates and details are locked in. When you finish packing your boxes, use the link sent to your email to schedule driver pickup.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
                         <div className="rounded-2xl border border-amber-500/40 bg-linear-to-r from-amber-500/10 via-amber-500/5 to-transparent p-4 sm:p-5 shadow-xs relative overflow-hidden">
                             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                                 <div className="flex items-start gap-3.5">
@@ -295,19 +348,37 @@ export default function BookingConfirmed({ booking, declarationUrl, paymentUrl }
 
                             <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                                 {isEmptyBoxOrder ? (
-                                    <div className="p-2.5 rounded-xl bg-brand-cream/30 dark:bg-zinc-800/50 border border-border/60 flex items-center justify-between text-xs">
-                                        <div>
-                                            <span className="font-bold text-brand-text block">
-                                                {booking.empty_box_count}x Empty Balikbayan Box{Number(booking.empty_box_count || 0) > 1 ? 'es' : ''}
-                                            </span>
-                                            <span className="text-brand-text-light text-[11px]">
-                                                Doorstep Delivery • Deposit credited on shipment
+                                    booking.empty_box_items && Array.isArray(booking.empty_box_items) && booking.empty_box_items.length > 0 ? (
+                                        booking.empty_box_items.map((item, idx) => (
+                                            <div key={idx} className="p-2.5 rounded-xl bg-brand-cream/30 dark:bg-zinc-800/50 border border-border/60 flex items-center justify-between text-xs">
+                                                <div>
+                                                    <span className="font-bold text-brand-text block">
+                                                        {item.quantity}x {item.name || 'Empty Balikbayan Box'}
+                                                    </span>
+                                                    <span className="text-brand-text-light text-[11px]">
+                                                        {item.dimensions ? `${item.dimensions} • ` : ''}${(Number(booking.empty_box_fee) || 10).toFixed(2)} deposit credited on shipping
+                                                    </span>
+                                                </div>
+                                                <span className="font-mono font-bold text-brand-text text-xs">
+                                                    ${(Number(item.quantity || 1) * Number(booking.empty_box_fee || 10)).toFixed(2)}
+                                                </span>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="p-2.5 rounded-xl bg-brand-cream/30 dark:bg-zinc-800/50 border border-border/60 flex items-center justify-between text-xs">
+                                            <div>
+                                                <span className="font-bold text-brand-text block">
+                                                    {booking.empty_box_count}x Empty Balikbayan Box{Number(booking.empty_box_count || 0) > 1 ? 'es' : ''}
+                                                </span>
+                                                <span className="text-brand-text-light text-[11px]">
+                                                    Doorstep Delivery • Deposit credited on shipment
+                                                </span>
+                                            </div>
+                                            <span className="font-mono font-bold text-brand-text text-xs">
+                                                ${totalAmount}
                                             </span>
                                         </div>
-                                        <span className="font-mono font-bold text-brand-text text-xs">
-                                            ${totalAmount}
-                                        </span>
-                                    </div>
+                                    )
                                 ) : (
                                     booking.boxes.map((box, idx) => {
                                         const recipientName = box.recipient?.name || `${box.recipient?.first_name || ''} ${box.recipient?.last_name || ''}`.trim() || 'Pending';

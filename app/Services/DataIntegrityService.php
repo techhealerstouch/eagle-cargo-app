@@ -13,7 +13,6 @@ use App\Enums\TrackingPhase;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
-use App\Models\BoxUpdate;
 use App\Models\DataIntegrityWarning;
 use App\Models\Invoice;
 use App\Models\Runsheet;
@@ -64,6 +63,7 @@ class DataIntegrityService
         'port_dwell_overrun',
         'orphan_runsheet_stop',
         'payment_overcollection',
+        'unreturned_empty_box',
     ];
 
     private const SECURITY_WARNING_TYPES = [
@@ -103,6 +103,7 @@ class DataIntegrityService
             'port_dwell_overrun' => $this->checkPortDwellOverruns(),
             'orphan_runsheet_stop' => $this->checkOrphanRunsheetStops(),
             'payment_overcollection' => $this->checkPaymentOvercollections(),
+            'unreturned_empty_box' => $this->checkUnreturnedEmptyBoxes(),
             'privileged_users_without_2fa' => $this->checkPrivilegedUsersWithoutTwoFactor(),
             'production_debug_mode' => $this->checkProductionDebugMode(),
         ];
@@ -309,11 +310,13 @@ class DataIntegrityService
             ->where('type', RunsheetType::Pickup->value)
             ->whereIn('status', RunsheetStatus::activeValues())
             ->where('scheduled_date', '<=', now()->subHours($thresholdHours))
+            ->whereHas('bookings', fn ($query) => $query->where('is_ready_for_pickup', '!=', false))
             ->whereHas('bookings.boxes', fn ($query) => $query->where('status', BoxStatus::Pending->value))
             ->get();
 
         foreach ($runsheets as $runsheet) {
             $pendingBoxes = $runsheet->bookings
+                ->filter(fn (Booking $booking) => $booking->is_ready_for_pickup !== false)
                 ->flatMap(fn (Booking $booking) => $booking->boxes)
                 ->filter(fn (Box $box) => $box->status === BoxStatus::Pending);
 
@@ -1035,6 +1038,56 @@ class DataIntegrityService
         return $invoices->count();
     }
 
+    public function checkUnreturnedEmptyBoxes(): int
+    {
+        $thresholdDays = (int) config('logistics.sla_hours.unreturned_empty_box_days', 60);
+        $cutoff = now()->subDays($thresholdDays);
+
+        $bookings = Booking::with('sender')
+            ->whereNotIn('status', [BookingStatus::Cancelled->value, BookingStatus::Draft->value])
+            ->where('created_at', '<=', $cutoff)
+            ->where(function ($query) {
+                // Case 1: Pure empty box supply orders not yet converted
+                $query->where(function ($q) {
+                    $q->where('empty_box_count', '>', 0)
+                        ->doesntHave('boxes')
+                        ->whereDoesntHave('convertedCargoBooking', function ($cq) {
+                            $cq->where('status', '!=', BookingStatus::Cancelled->value);
+                        });
+                })
+                // Case 2: Cargo bookings where sender chose "pack first, schedule later" and never scheduled
+                    ->orWhere(function ($q) {
+                        $q->where('is_ready_for_pickup', false)
+                            ->whereIn('status', [BookingStatus::Pending->value, BookingStatus::Confirmed->value]);
+                    });
+            })
+            ->get();
+
+        foreach ($bookings as $booking) {
+            $this->upsertRecordWarning(
+                type: 'unreturned_empty_box',
+                record: $booking,
+                severity: 'medium',
+                message: "Empty box booking #{$booking->reference_number} reserved {$thresholdDays}+ days ago has not scheduled pickup or converted to shipment.",
+                metadata: [
+                    'booking_id' => $booking->id,
+                    'reference_number' => $booking->reference_number,
+                    'sender_name' => $booking->sender?->full_name ?? $booking->sender?->name,
+                    'sender_email' => $booking->sender?->email,
+                    'sender_mobile' => $booking->sender?->mobile,
+                    'empty_box_count' => $booking->empty_box_count,
+                    'created_at' => $booking->created_at?->toDateTimeString(),
+                    'recommended_action' => 'Contact sender to check packing status or encourage scheduling pickup.',
+                    'severity_reason' => 'Empty boxes held beyond 60 days without shipment conversion.',
+                    'target_url' => route('admin.bookings.show', $booking, false),
+                    'resolve_url' => route('admin.bookings.show', $booking, false),
+                ],
+            );
+        }
+
+        return $bookings->count();
+    }
+
     public function checkPrivilegedUsersWithoutTwoFactor(): int
     {
         $users = User::query()
@@ -1283,6 +1336,7 @@ class DataIntegrityService
             'port_dwell_overrun',
             'orphan_runsheet_stop',
             'payment_overcollection',
+            'unreturned_empty_box',
         ], true)) {
             return match ($warning->type) {
                 'missed_pickup' => $this->missedPickupStillApplies($warning),
@@ -1298,6 +1352,7 @@ class DataIntegrityService
                 'port_dwell_overrun' => $this->portDwellOverrunStillApplies($warning),
                 'orphan_runsheet_stop' => $this->orphanRunsheetStopStillApplies($warning),
                 'payment_overcollection' => $this->paymentOvercollectionStillApplies($warning),
+                'unreturned_empty_box' => $this->unreturnedEmptyBoxStillApplies($warning),
             };
         }
 
@@ -1381,8 +1436,40 @@ class DataIntegrityService
             && in_array($runsheet->status, [RunsheetStatus::Assigned, RunsheetStatus::InProgress], true)
             && $runsheet->scheduled_date?->lessThanOrEqualTo(now()->subHours($this->slaHours('missed_pickup')))
             && $runsheet->bookings
+                ->filter(fn (Booking $booking) => $booking->is_ready_for_pickup !== false)
                 ->flatMap(fn (Booking $booking) => $booking->boxes)
                 ->contains(fn (Box $box) => $box->status === BoxStatus::Pending);
+    }
+
+    private function unreturnedEmptyBoxStillApplies(DataIntegrityWarning $warning): bool
+    {
+        $booking = $warning->record;
+
+        if (! $booking instanceof Booking) {
+            return false;
+        }
+
+        if (in_array($booking->status, [BookingStatus::Cancelled, BookingStatus::Draft], true)) {
+            return false;
+        }
+
+        $isStandaloneEmptyOrder = (int) ($booking->empty_box_count ?? 0) > 0 && ! $booking->boxes()->exists();
+
+        if ($isStandaloneEmptyOrder) {
+            $hasConverted = Booking::where('source_empty_box_booking_id', $booking->id)
+                ->where('status', '!=', BookingStatus::Cancelled->value)
+                ->exists();
+
+            if ($hasConverted) {
+                return false;
+            }
+        } elseif ($booking->is_ready_for_pickup) {
+            return false;
+        }
+
+        $thresholdDays = (int) config('logistics.sla_hours.unreturned_empty_box_days', 60);
+
+        return $booking->created_at?->lessThanOrEqualTo(now()->subDays($thresholdDays)) ?? false;
     }
 
     private function partialPickupStillApplies(DataIntegrityWarning $warning): bool

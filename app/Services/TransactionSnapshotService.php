@@ -10,7 +10,6 @@ use App\Models\Box;
 use App\Models\Invoice;
 use App\Models\Recipient;
 use App\Models\Sender;
-use App\Services\ReferenceDataService;
 
 /**
  * Service for managing transactional data snapshots.
@@ -220,15 +219,38 @@ class TransactionSnapshotService
             $count = (int) $booking->empty_box_count;
             $fee = (float) ($booking->empty_box_fee ?? 10.00);
             $items[] = [
-                'id' => 'empty_box_' . $booking->id,
+                'id' => 'empty_box_'.$booking->id,
                 'is_add_on' => true,
                 'item_type' => 'empty_box',
-                'item_name' => 'Empty Box Delivery (' . $count . ' @ $' . number_format($fee, 2) . ')',
+                'item_name' => 'Empty Box Delivery ('.$count.' @ $'.number_format($fee, 2).')',
                 'tracking_number' => 'ADD-ON-EMPTY-BOX',
                 'price_charged' => round($count * $fee, 2),
                 'destination' => 'N/A',
                 'box_type' => [
                     'name' => 'Empty Box Delivery',
+                    'dimensions' => 'N/A',
+                ],
+            ];
+        }
+
+        if ($booking && (float) ($booking->empty_box_deposit_credit ?? 0) > 0) {
+            $credit = (float) $booking->empty_box_deposit_credit;
+            $sourceBooking = $booking->relationLoaded('sourceEmptyBoxBooking')
+                ? $booking->sourceEmptyBoxBooking
+                : $booking->sourceEmptyBoxBooking()->first();
+            $sourceRef = $sourceBooking?->reference_number ?? ($booking->source_empty_box_booking_id ? 'BK-'.$booking->source_empty_box_booking_id : null);
+            $nameSuffix = $sourceRef ? ' (Ref #'.$sourceRef.')' : '';
+
+            $items[] = [
+                'id' => 'empty_box_credit_'.$booking->id,
+                'is_add_on' => true,
+                'item_type' => 'empty_box_credit',
+                'item_name' => 'Empty Box Deposit Credit'.$nameSuffix,
+                'tracking_number' => 'CREDIT-EMPTY-BOX',
+                'price_charged' => -round($credit, 2),
+                'destination' => 'N/A',
+                'box_type' => [
+                    'name' => 'Deposit Credit',
                     'dimensions' => 'N/A',
                 ],
             ];

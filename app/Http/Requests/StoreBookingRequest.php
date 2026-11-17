@@ -114,7 +114,7 @@ class StoreBookingRequest extends FormRequest
 
             // Shared Booking details
             'preferred_date' => [
-                'required',
+                $this->boolean('is_ready_for_pickup', true) ? 'required' : 'nullable',
                 'date',
                 new ValidPickupDate(
                     $this->route('booking'),
@@ -130,6 +130,8 @@ class StoreBookingRequest extends FormRequest
             'promo_code' => ['nullable', 'string', 'max:50'],
             'empty_box_count' => ['nullable', 'integer', 'min:0'],
             'empty_box_fee' => ['nullable', 'numeric', 'min:0'],
+            'source_empty_box_booking_id' => ['nullable', 'integer', 'exists:bookings,id'],
+            'is_ready_for_pickup' => ['nullable', 'boolean'],
 
             // Array of boxes, each containing recipient details and size
             'boxes' => ['required', 'array', 'min:1'],

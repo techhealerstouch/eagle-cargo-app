@@ -232,7 +232,7 @@ class RunsheetController extends Controller
                 $items = $rs->bookings->map(fn ($b) => [
                     'id' => $b->id,
                     'reference_number' => $b->reference_number,
-                    'customer_name' => $b->sender ? trim($b->sender->first_name . ' ' . $b->sender->last_name) : 'Customer',
+                    'customer_name' => $b->sender ? trim($b->sender->first_name.' '.$b->sender->last_name) : 'Customer',
                     'phone' => $b->sender?->mobile,
                     'address' => implode(', ', array_filter([$b->sender?->address, $b->sender?->suburb, $b->sender?->state])),
                     'suburb' => $b->sender?->suburb,
@@ -249,7 +249,7 @@ class RunsheetController extends Controller
                 $items = $rs->boxes->map(fn ($box) => [
                     'id' => $box->id,
                     'tracking_number' => $box->tracking_number,
-                    'customer_name' => $box->recipient ? trim($box->recipient->first_name . ' ' . $box->recipient->last_name) : 'Recipient',
+                    'customer_name' => $box->recipient ? trim($box->recipient->first_name.' '.$box->recipient->last_name) : 'Recipient',
                     'phone' => $box->recipient?->mobile,
                     'address' => implode(', ', array_filter([$box->recipient?->address, $box->recipient?->city, $box->recipient?->province])),
                     'area' => $box->recipient?->area?->name,
@@ -280,6 +280,7 @@ class RunsheetController extends Controller
         if ($type === 'pickup' || $type === 'all') {
             $pickupBookings = Booking::query()
                 ->where('status', BookingStatus::Confirmed)
+                ->where('is_ready_for_pickup', true)
                 ->whereBetween('preferred_date', [$startDate, $endDate])
                 ->whereHas('boxes', function ($q) {
                     $q->where('status', BoxStatus::Pending);
@@ -296,7 +297,7 @@ class RunsheetController extends Controller
             if ($zoneId) {
                 $pickupBookings->where(function ($q) use ($zoneId) {
                     $q->where('pickup_zone_id', $zoneId)
-                      ->orWhereHas('sender', fn ($sq) => $sq->where('pickup_zone_id', $zoneId));
+                        ->orWhereHas('sender', fn ($sq) => $sq->where('pickup_zone_id', $zoneId));
                 });
             }
 
@@ -309,7 +310,7 @@ class RunsheetController extends Controller
                     'id' => $booking->id,
                     'reference_number' => $booking->reference_number,
                     'date' => $dateStr,
-                    'customer_name' => $booking->sender ? trim($booking->sender->first_name . ' ' . $booking->sender->last_name) : 'Customer',
+                    'customer_name' => $booking->sender ? trim($booking->sender->first_name.' '.$booking->sender->last_name) : 'Customer',
                     'phone' => $booking->sender?->mobile,
                     'address' => implode(', ', array_filter([$booking->sender?->address, $booking->sender?->suburb, $booking->sender?->state])),
                     'suburb' => $booking->sender?->suburb,
@@ -342,7 +343,7 @@ class RunsheetController extends Controller
                         'id' => $box->id,
                         'reference_number' => $box->tracking_number,
                         'date' => $box->updated_at ? Carbon::parse($box->updated_at)->format('Y-m-d') : now()->toDateString(),
-                        'customer_name' => $box->recipient ? trim($box->recipient->first_name . ' ' . $box->recipient->last_name) : 'Recipient',
+                        'customer_name' => $box->recipient ? trim($box->recipient->first_name.' '.$box->recipient->last_name) : 'Recipient',
                         'phone' => $box->recipient?->mobile,
                         'address' => implode(', ', array_filter([$box->recipient?->address, $box->recipient?->city, $box->recipient?->province])),
                         'area_id' => $box->recipient?->area_id,
@@ -881,6 +882,7 @@ class RunsheetController extends Controller
     {
         return Booking::query()
             ->where('status', BookingStatus::Confirmed)
+            ->where('is_ready_for_pickup', true)
             ->whereIn('payment_status', [PaymentStatus::Paid, PaymentStatus::Pending, PaymentStatus::CashOnPickup])
             ->whereHas('boxes', function ($query) {
                 $query->where('status', BoxStatus::Pending->value);

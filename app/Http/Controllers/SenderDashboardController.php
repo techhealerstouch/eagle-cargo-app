@@ -222,11 +222,15 @@ class SenderDashboardController extends Controller
     {
         $dashboard = Cache::remember(self::DASHBOARD_CACHE_KEY, now()->addMinutes(10), function () {
             $activeBoxes = Box::whereNotIn('status', [BoxStatus::Delivered, BoxStatus::Cancelled])->count();
-            $pendingCollections = Booking::where('status', BookingStatus::Pending)->doesntHave('runsheets')->count();
+            $pendingCollections = Booking::where('status', BookingStatus::Pending)->where('is_ready_for_pickup', true)->doesntHave('runsheets')->count();
             $batchesInTransit = Batch::where('status', BatchStatus::Sailed)->count();
             $totalSenders = Sender::count();
 
             $missingDeclarations = Booking::whereNotIn('status', [BookingStatus::Draft, BookingStatus::Cancelled])
+                ->where(function ($q) {
+                    $q->whereHas('boxes')
+                        ->orWhere('empty_box_count', 0);
+                })
                 ->where(function ($q) {
                     $q->where('declaration_form_status', 'missing')
                         ->orWhereNull('declaration_form_status');
@@ -298,6 +302,7 @@ class SenderDashboardController extends Controller
         $pickupReadyBoxes = Box::where('status', BoxStatus::Pending)
             ->whereHas('booking', function ($q) {
                 $q->where('status', BookingStatus::Confirmed)
+                    ->where('is_ready_for_pickup', true)
                     ->whereDoesntHave('runsheets', function ($query) {
                         $query->where('type', RunsheetType::Pickup->value)
                             ->whereIn('status', RunsheetStatus::activeValues());
@@ -398,7 +403,14 @@ class SenderDashboardController extends Controller
         $search = trim((string) $request->input('search', ''));
         $history = $sender
             ? $sender->bookings()
-                ->with(['boxes.recipient.area', 'boxes.boxType', 'boxes.updates', 'invoice'])
+                ->with([
+                    'boxes.recipient.area',
+                    'boxes.boxType',
+                    'boxes.updates',
+                    'invoice',
+                    'sourceEmptyBoxBooking:id,reference_number',
+                    'convertedCargoBooking:id,source_empty_box_booking_id,reference_number,status',
+                ])
                 ->when($search !== '', function ($query) use ($search) {
                     $query->where(function ($bookingQuery) use ($search) {
                         $bookingQuery->where('reference_number', 'like', "%{$search}%")
@@ -559,7 +571,7 @@ class SenderDashboardController extends Controller
         $isGuest = ! $user;
         $validated = $request->validated();
 
-        return DB::transaction(function () use ($user, $isGuest, $validated, $request) {
+        return DB::transaction(function () use ($user, $isGuest, $validated) {
             if ($user) {
                 $sender = $user->sender;
                 if (! $sender) {
@@ -618,6 +630,7 @@ class SenderDashboardController extends Controller
             // Calculate total empty boxes and build breakdown
             $boxTypes = BoxType::whereIn('id', collect($validated['items'])->pluck('box_type_id'))->get()->keyBy('id');
             $breakdown = [];
+            $emptyBoxItems = [];
             $totalCount = 0;
             foreach ($validated['items'] as $item) {
                 $qty = (int) ($item['quantity'] ?? 0);
@@ -625,6 +638,12 @@ class SenderDashboardController extends Controller
                     $boxType = $boxTypes->get($item['box_type_id']);
                     $typeName = $boxType ? $boxType->name : "Type #{$item['box_type_id']}";
                     $breakdown[] = "{$qty}x {$typeName}";
+                    $emptyBoxItems[] = [
+                        'box_type_id' => $boxType?->id ?? (int) $item['box_type_id'],
+                        'name' => $typeName,
+                        'dimensions' => $boxType?->dimensions,
+                        'quantity' => $qty,
+                    ];
                     $totalCount += $qty;
                 }
             }
@@ -649,6 +668,7 @@ class SenderDashboardController extends Controller
                 'preferred_date' => $validated['delivery_date'],
                 'empty_box_count' => $totalCount,
                 'empty_box_fee' => $emptyBoxFee,
+                'empty_box_items' => $emptyBoxItems,
                 'notes' => $orderNotes,
                 'is_guest' => $isGuest,
                 'guest_token' => $isGuest ? (string) Str::uuid() : null,
@@ -670,16 +690,12 @@ class SenderDashboardController extends Controller
             }
 
             if ($isGuest) {
-                if ($paymentMethod === 'stripe') {
-                    $guestAccess = app(GuestBookingAccessService::class);
-                    $guestAccess->markVerified($request, $booking, GuestBookingAccessService::PAYMENT, 120);
-                    $request->session()->put('guest_booking_id', $booking->id);
+                $guestAccess = app(GuestBookingAccessService::class);
+                $purpose = $paymentMethod === 'stripe'
+                    ? GuestBookingAccessService::PAYMENT
+                    : GuestBookingAccessService::CONFIRMATION;
 
-                    return redirect($guestAccess->paymentUrl($booking));
-                }
-
-                return redirect()->route('sender.order-boxes', ['confirmed' => $booking->reference_number])
-                    ->with('success', "Your order for {$totalCount} empty balikbayan box(es) has been submitted successfully! Booking reference: {$booking->reference_number}");
+                return redirect($guestAccess->verificationUrl($booking, $purpose));
             }
 
             if ($paymentMethod === 'stripe') {
