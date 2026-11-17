@@ -126,4 +126,6 @@ return [
         'table' => 'failed_jobs',
     ],
 
+    'run_in_scheduler' => (bool) env('QUEUE_RUN_IN_SCHEDULER', false),
+
 ];

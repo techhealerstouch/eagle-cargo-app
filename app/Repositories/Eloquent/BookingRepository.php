@@ -119,7 +119,7 @@ class BookingRepository implements BookingRepositoryInterface
             $booking->loadMissing(['sender', 'boxes.recipient']);
 
             // Dispatch notifications (async)
-            SendBookingConfirmationMail::dispatch($booking)->afterCommit();
+            SendBookingConfirmationMail::dispatchForBooking($booking);
             NotifyAdminOfNewBooking::dispatch($booking)->afterCommit();
 
             return $booking;
@@ -386,7 +386,7 @@ class BookingRepository implements BookingRepositoryInterface
             $draft->loadMissing(['sender', 'boxes.recipient']);
 
             // Dispatch notifications
-            SendBookingConfirmationMail::dispatch($draft)->afterCommit();
+            SendBookingConfirmationMail::dispatchForBooking($draft);
             NotifyAdminOfNewBooking::dispatch($draft)->afterCommit();
 
             return $draft;

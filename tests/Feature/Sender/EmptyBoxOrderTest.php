@@ -6,6 +6,7 @@ use App\Enums\BookingStatus;
 use App\Enums\InvoiceStatus;
 use App\Enums\PaymentStatus;
 use App\Enums\Role;
+use App\Jobs\SendBookingConfirmationMail;
 use App\Models\Area;
 use App\Models\Booking;
 use App\Models\BoxPrice;
@@ -25,6 +26,7 @@ use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
@@ -959,5 +961,41 @@ class EmptyBoxOrderTest extends TestCase
             ->where('emptyBoxSource.id', $guestEmptyOrder->id)
             ->where('emptyBoxSource.sender.email', 'private.guest@example.com')
         );
+    }
+
+    public function test_guest_empty_box_order_dispatches_confirmation_mail(): void
+    {
+        Queue::fake();
+
+        $boxType = BoxType::firstOrCreate(
+            ['name' => 'Standard Balikbayan Box'],
+            ['dimensions' => '50x50x50', 'is_active' => true]
+        );
+
+        $response = $this->post(route('sender.order-boxes.store'), [
+            'first_name' => 'Ana',
+            'last_name' => 'Reyes',
+            'email' => 'ana.reyes@example.com',
+            'address' => '45 Queen St',
+            'suburb' => 'Auburn',
+            'state' => 'NSW',
+            'postcode' => '2144',
+            'contact_number' => '0412345678',
+            'delivery_date' => now()->addDays(2)->toDateString(),
+            'payment_method' => 'cash_on_pickup',
+            'items' => [
+                [
+                    'box_type_id' => $boxType->id,
+                    'quantity' => 2,
+                ],
+            ],
+        ]);
+
+        $response->assertRedirect();
+
+        Queue::assertPushed(SendBookingConfirmationMail::class, function ($job) {
+            return $job->booking->sender->email === 'ana.reyes@example.com'
+                && (int) $job->booking->empty_box_count === 2;
+        });
     }
 }

@@ -10,10 +10,14 @@ use App\Mail\EnquiryReceived;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\Enquiry;
+use App\Models\Invoice;
 use App\Models\Sender;
+use App\Notifications\BookingPaymentReceived;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class BookingMailJobsTest extends TestCase
@@ -120,5 +124,123 @@ class BookingMailJobsTest extends TestCase
         $this->assertStringContainsString('New website enquiry', $html);
         $this->assertStringContainsString('Juan Dela Cruz', $html);
         $this->assertStringContainsString('I need help shipping a box.', $html);
+    }
+
+    public function test_booking_confirmation_mail_renders_for_guest_booking(): void
+    {
+        $sender = Sender::factory()->create([
+            'first_name' => 'Guest',
+            'last_name' => 'User',
+            'email' => 'guest@example.com',
+            'user_id' => null,
+        ]);
+
+        $booking = Booking::factory()
+            ->pending()
+            ->create([
+                'reference_number' => 'BBB-GUEST-001',
+                'sender_id' => $sender->id,
+                'is_guest' => true,
+                'guest_token' => (string) Str::uuid(),
+                'payment_method' => 'bank_transfer',
+            ]);
+
+        Box::factory()->create([
+            'booking_id' => $booking->id,
+            'tracking_number' => 'TRK-GUEST-001',
+        ]);
+
+        $html = (new BookingConfirmation($booking))->render();
+
+        $this->assertStringContainsString('Booking received, Guest', $html);
+        $this->assertStringContainsString('BBB-GUEST-001', $html);
+        $this->assertStringContainsString('TRK-GUEST-001', $html);
+        $this->assertStringContainsString('guest/booking/'.$booking->id.'/confirmed', $html);
+    }
+
+    public function test_booking_confirmation_mail_renders_for_empty_box_order(): void
+    {
+        $sender = Sender::factory()->create([
+            'first_name' => 'EmptyBox',
+            'last_name' => 'Buyer',
+            'email' => 'emptybox@example.com',
+            'user_id' => null,
+        ]);
+
+        $booking = Booking::factory()
+            ->pending()
+            ->create([
+                'reference_number' => 'BBB-EMPTY-001',
+                'sender_id' => $sender->id,
+                'is_guest' => true,
+                'guest_token' => (string) Str::uuid(),
+                'empty_box_count' => 3,
+                'empty_box_fee' => 10.00,
+                'empty_box_items' => [
+                    ['box_type_id' => 1, 'name' => 'Jumbo Balikbayan Box', 'quantity' => 3],
+                ],
+                'payment_method' => 'bank_transfer',
+            ]);
+
+        $html = (new BookingConfirmation($booking))->render();
+
+        $this->assertStringContainsString('Empty Boxes Ordered', $html);
+        $this->assertStringContainsString('Jumbo Balikbayan Box', $html);
+        $this->assertStringNotContainsString('Required: Customs Declaration Form', $html);
+    }
+
+    public function test_booking_payment_received_notification_routes_guest_to_confirmation_url(): void
+    {
+        $sender = Sender::factory()->create([
+            'first_name' => 'Guest',
+            'last_name' => 'Payer',
+            'email' => 'payer@example.com',
+            'user_id' => null,
+        ]);
+
+        $booking = Booking::factory()->create([
+            'sender_id' => $sender->id,
+            'is_guest' => true,
+            'guest_token' => (string) Str::uuid(),
+        ]);
+
+        $invoice = Invoice::create([
+            'booking_id' => $booking->id,
+            'invoice_number' => 'INV-TEST-001',
+            'amount' => 120.00,
+            'status' => 'paid',
+        ]);
+
+        $notification = new BookingPaymentReceived($booking, $invoice);
+        $mail = $notification->toMail($sender);
+
+        $this->assertStringContainsString('guest/booking/'.$booking->id.'/confirmed', $mail->actionUrl);
+        $this->assertStringNotContainsString('/bookings', $mail->actionUrl);
+    }
+
+    public function test_dispatch_for_booking_queues_job_when_after_response_is_disabled(): void
+    {
+        Queue::fake();
+        config(['mail.booking_confirmation_after_response' => false]);
+
+        $booking = Booking::factory()->create();
+
+        SendBookingConfirmationMail::dispatchForBooking($booking);
+
+        Queue::assertPushed(SendBookingConfirmationMail::class, fn (SendBookingConfirmationMail $job): bool => $job->booking->id === $booking->id);
+    }
+
+    public function test_dispatch_for_booking_sends_after_response_when_enabled(): void
+    {
+        Mail::fake();
+        config(['mail.booking_confirmation_after_response' => true]);
+
+        $sender = Sender::factory()->create(['email' => 'after-response@example.com']);
+        $booking = Booking::factory()->create(['sender_id' => $sender->id]);
+
+        SendBookingConfirmationMail::dispatchForBooking($booking);
+        app()->terminate();
+
+        Mail::assertSent(BookingConfirmation::class, fn (BookingConfirmation $mail): bool => $mail->hasTo('after-response@example.com'));
     }
 }

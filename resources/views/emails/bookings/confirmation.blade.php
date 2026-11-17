@@ -18,19 +18,22 @@
 
     $calculatedAmount = $booking->invoice?->amount !== null 
         ? (float) $booking->invoice->amount 
-        : ($booking->boxes->isNotEmpty() ? (float) $booking->boxes->sum('price_charged') : null);
+        : ($booking->boxes->isNotEmpty() 
+            ? (float) $booking->boxes->sum('price_charged') 
+            : (($booking->empty_box_count ?? 0) > 0 ? (float) (($booking->empty_box_count ?? 0) * ($booking->empty_box_fee ?? 10.00)) : null));
     $amount = $calculatedAmount !== null ? 'AUD ' . number_format($calculatedAmount, 2) : 'To be confirmed';
 
-    $isGuest = empty($sender?->user_id);
+    $isGuest = $booking->is_guest || empty($sender?->user_id);
+    $guestAccess = app(\App\Services\GuestBookingAccessService::class);
     $trackingNumber = $booking->boxes->first()?->tracking_number ?? $booking->reference_number;
     $trackingUrl = route('track', ['tracking_number' => $trackingNumber]);
-    $paymentUrl = $isGuest && !empty($booking->guest_token)
-        ? route('guest.booking.confirmed', ['token' => $booking->guest_token])
+    $confirmationUrl = $isGuest ? $guestAccess->confirmationUrl($booking) : $trackingUrl;
+    $paymentUrl = $isGuest
+        ? $guestAccess->verificationUrl($booking, \App\Services\GuestBookingAccessService::PAYMENT)
         : route('bookings.pay', $booking);
-    $declarationUrl = route('track.declaration.form', array_filter([
-        'booking' => $booking->id,
-        'token' => $booking->guest_token,
-    ]));
+    $declarationUrl = $isGuest
+        ? $guestAccess->verificationUrl($booking, \App\Services\GuestBookingAccessService::DECLARATION)
+        : route('track.declaration.form', $booking);
     $needsDeclaration = $booking->needsDeclaration();
 @endphp
 
@@ -61,6 +64,20 @@ Thanks for booking with {{ config('app.name') }}. We have received your balikbay
 | {{ $box->boxType?->name ?? 'Box' }} | {{ $box->recipient?->name ?? 'Receiver pending' }} | {{ $box->destination ?? 'Destination pending' }} | {{ $box->tracking_number ?? 'Assigned after confirmation' }} |
 @endforeach
 </x-mail::table>
+@elseif (! empty($booking->empty_box_items) || ($booking->empty_box_count ?? 0) > 0)
+## Empty Boxes Ordered
+
+<x-mail::table>
+| Item | Quantity |
+| --- | --- |
+@if (! empty($booking->empty_box_items))
+@foreach ($booking->empty_box_items as $item)
+| {{ $item['name'] ?? 'Balikbayan Box' }} | {{ $item['quantity'] ?? 1 }} |
+@endforeach
+@else
+| Balikbayan Box | {{ $booking->empty_box_count }} |
+@endif
+</x-mail::table>
 @endif
 
 @if ($booking->payment_method === 'bank_transfer' && ($paymentStatus ?? null) !== 'paid')
@@ -78,7 +95,7 @@ Please transfer your payment using the following bank details:
 **Important:** Please enter your booking reference **{{ $reference }}** in the payment description so our team can immediately credit your transfer.
 
 Once transferred, you can upload your deposit receipt or transfer screenshot online:
-<x-mail::button :url="$isGuest && !empty($booking->guest_token) ? route('guest.booking.confirmed', ['token' => $booking->guest_token]) : route('bookings.pay', $booking)">
+<x-mail::button :url="$isGuest ? $confirmationUrl : route('bookings.pay', $booking)">
 Upload Payment Receipt
 </x-mail::button>
 </x-mail::panel>

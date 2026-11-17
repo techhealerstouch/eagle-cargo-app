@@ -12,6 +12,7 @@ use App\Enums\RunsheetStatus;
 use App\Enums\RunsheetType;
 use App\Events\EnquiryMessageUpdated;
 use App\Http\Requests\StoreEmptyBoxOrderRequest;
+use App\Jobs\SendBookingConfirmationMail;
 use App\Models\Batch;
 use App\Models\Booking;
 use App\Models\Box;
@@ -675,6 +676,9 @@ class SenderDashboardController extends Controller
             ]);
 
             Invoice::generateForBooking($booking);
+
+            // Dispatch rich booking confirmation email
+            SendBookingConfirmationMail::dispatchForBooking($booking);
 
             // Notify user or guest sender
             if ($user) {

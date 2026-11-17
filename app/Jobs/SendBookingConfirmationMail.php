@@ -24,6 +24,18 @@ class SendBookingConfirmationMail implements ShouldBeEncrypted, ShouldQueue
     public Booking $booking;
 
     /**
+     * Dispatch the confirmation mail job using either post-response execution or database queue.
+     */
+    public static function dispatchForBooking(Booking $booking): mixed
+    {
+        if (config('mail.booking_confirmation_after_response', false)) {
+            return static::dispatchAfterResponse($booking);
+        }
+
+        return static::dispatch($booking)->afterCommit();
+    }
+
+    /**
      * Create a new job instance.
      */
     public function __construct(Booking $booking)

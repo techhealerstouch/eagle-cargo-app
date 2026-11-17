@@ -317,6 +317,15 @@ class Booking extends Model
             return false;
         }
 
+        // Empty box orders without cargo boxes do not require customs declaration.
+        // Check empty_box_count first so ordinary cargo bookings never trigger an extra query.
+        if (($this->empty_box_count ?? 0) > 0) {
+            $boxesCount = $this->relationLoaded('boxes') ? $this->boxes->count() : $this->boxes()->count();
+            if ($boxesCount === 0) {
+                return false;
+            }
+        }
+
         // If explicitly marked as received, we don't need it
         if (in_array($this->declaration_form_status, ['submitted_online', 'physical_copy_received'])) {
             return false;
