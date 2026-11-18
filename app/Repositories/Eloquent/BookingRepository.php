@@ -120,7 +120,7 @@ class BookingRepository implements BookingRepositoryInterface
 
             // Dispatch notifications (async)
             SendBookingConfirmationMail::dispatchForBooking($booking);
-            NotifyAdminOfNewBooking::dispatch($booking)->afterCommit();
+            NotifyAdminOfNewBooking::dispatchForBooking($booking);
 
             return $booking;
         });
@@ -387,7 +387,7 @@ class BookingRepository implements BookingRepositoryInterface
 
             // Dispatch notifications
             SendBookingConfirmationMail::dispatchForBooking($draft);
-            NotifyAdminOfNewBooking::dispatch($draft)->afterCommit();
+            NotifyAdminOfNewBooking::dispatchForBooking($draft);
 
             return $draft;
         });

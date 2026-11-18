@@ -555,8 +555,9 @@ export default function BookingsIndex({
                                 queryParams={activeFilters}
                                 placeholder="All Payments"
                                 options={[
-                                    { label: 'Paid', value: 'paid' },
+                                    { label: 'Pending', value: 'pending' },
                                     { label: 'Unpaid', value: 'unpaid' },
+                                    { label: 'Paid', value: 'paid' },
                                     { label: 'Partial', value: 'partial' },
                                 ]}
                             />
@@ -590,6 +591,12 @@ export default function BookingsIndex({
                     <ActiveFilterChips
                         routeName="/admin/bookings"
                         queryParams={activeFilters}
+                        labels={{
+                            payment_status: 'Payment',
+                            declaration_form_status: 'Declaration',
+                            customer_type: 'Customer',
+                            booking_type: 'Type',
+                        }}
                     />
                 </div>
 

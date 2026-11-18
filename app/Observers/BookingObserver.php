@@ -12,6 +12,7 @@ use App\Models\BoxUpdate;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\User;
+use App\Http\Controllers\SenderDashboardController;
 use App\Notifications\BookingPaymentReceived;
 use App\Notifications\BookingStatusChanged;
 use App\Notifications\DeclarationFormSubmittedNotification;
@@ -20,6 +21,7 @@ use App\Services\PaymentService;
 use App\Services\SettingsService;
 use App\Services\TrackingCacheService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
 
@@ -53,6 +55,7 @@ class BookingObserver
     public function created(Booking $booking): void
     {
         app(TrackingCacheService::class)->forgetBooking($booking);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
 
         if (! Str::startsWith($booking->reference_number, 'TMP-')) {
             return;
@@ -86,6 +89,7 @@ class BookingObserver
     public function updated(Booking $booking): void
     {
         app(TrackingCacheService::class)->forgetBooking($booking);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
 
         if ($booking->wasChanged('status')) {
             $oldStatus = $booking->getOriginal('status');
@@ -264,15 +268,18 @@ class BookingObserver
     public function deleted(Booking $booking): void
     {
         app(TrackingCacheService::class)->forgetBooking($booking);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
     }
 
     public function restored(Booking $booking): void
     {
         app(TrackingCacheService::class)->forgetBooking($booking);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
     }
 
     public function forceDeleted(Booking $booking): void
     {
         app(TrackingCacheService::class)->forgetBooking($booking);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
     }
 }

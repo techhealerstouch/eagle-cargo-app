@@ -1372,7 +1372,10 @@ class BookingController extends Controller
                     PaymentStatus::Pending->value,
                     PaymentStatus::CashOnPickup->value,
                     PaymentStatus::BalancePending->value,
+                    PaymentStatus::PartiallyPaid->value,
                 ]);
+            } elseif ($request->payment_status === 'pending') {
+                $query->where('payment_status', PaymentStatus::Pending->value);
             } elseif ($request->payment_status === 'partial') {
                 $query->whereIn('payment_status', [
                     PaymentStatus::PartiallyPaid->value,
@@ -1398,8 +1401,22 @@ class BookingController extends Controller
             } elseif ($request->declaration_form_status === 'missing') {
                 $query->where(function ($q) {
                     $q->where('declaration_form_status', 'missing')
-                        ->orWhereNull('declaration_form_status');
-                })->whereNull('declaration_form_path');
+                        ->orWhere(function ($sub) {
+                            $sub->whereNull('declaration_form_status')
+                                ->where(function ($pathQ) {
+                                    $pathQ->whereNull('declaration_form_path')
+                                        ->orWhere('declaration_form_path', '');
+                                })
+                                ->where(function ($dataQ) {
+                                    $dataQ->whereNull('declaration_data')
+                                        ->orWhere('declaration_data', '[]')
+                                        ->orWhere('declaration_data', '');
+                                });
+                        });
+                })->where(function ($q) {
+                    $q->whereHas('boxes')
+                        ->orWhere('empty_box_count', 0);
+                });
             } else {
                 $query->where('declaration_form_status', $request->declaration_form_status);
             }

@@ -1,5 +1,5 @@
 import { formatDistanceToNow } from 'date-fns';
-import { Link } from '@inertiajs/react';
+import { Link, router } from '@inertiajs/react';
 import { Bell, ClipboardList, CreditCard, Info, Loader2, Package, Ship, Truck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -70,16 +70,16 @@ export function NotificationDropdown() {
         markAsRead,
         markAllAsRead,
         refetch,
-    } = useNotifications({ pollInterval: 60000 });
+    } = useNotifications({ pollInterval: 15000 });
 
     const handleNotificationClick = (notification: Notification) => {
         if (!notification.read_at) {
             markAsRead(notification.id);
         }
 
-        // Navigate if URL provided
+        // Navigate if URL provided using Inertia router to preserve SPA state & live connections
         if (notification.data?.url) {
-            window.location.href = notification.data.url;
+            router.visit(notification.data.url);
         }
     };
 

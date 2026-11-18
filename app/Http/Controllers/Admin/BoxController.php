@@ -68,7 +68,7 @@ class BoxController extends Controller
 
         return Inertia::render('admin/boxes/index', [
             'boxes' => $boxes,
-            'filters' => $request->only(['search', 'status', 'area_id', 'batch_id', 'sort', 'direction', 'trashed']),
+            'filters' => $request->only(['search', 'status', 'payment_status', 'declaration_form_status', 'area_id', 'batch_id', 'sort', 'direction', 'trashed']),
             'activeBatches' => $activeBatches,
             'filterBatches' => $filterBatches,
             'areas' => $areas,
@@ -719,7 +719,10 @@ class BoxController extends Controller
                         PaymentStatus::Pending->value,
                         PaymentStatus::CashOnPickup->value,
                         PaymentStatus::BalancePending->value,
+                        PaymentStatus::PartiallyPaid->value,
                     ]);
+                } elseif ($request->payment_status === 'pending') {
+                    $bq->where('payment_status', PaymentStatus::Pending->value);
                 } elseif ($request->payment_status === 'partial') {
                     $bq->whereIn('payment_status', [
                         PaymentStatus::PartiallyPaid->value,
@@ -743,8 +746,19 @@ class BoxController extends Controller
                 } elseif ($request->declaration_form_status === 'missing') {
                     $bq->where(function ($q) {
                         $q->where('declaration_form_status', 'missing')
-                            ->orWhereNull('declaration_form_status');
-                    })->whereNull('declaration_form_path');
+                            ->orWhere(function ($sub) {
+                                $sub->whereNull('declaration_form_status')
+                                    ->where(function ($pathQ) {
+                                        $pathQ->whereNull('declaration_form_path')
+                                            ->orWhere('declaration_form_path', '');
+                                    })
+                                    ->where(function ($dataQ) {
+                                        $dataQ->whereNull('declaration_data')
+                                            ->orWhere('declaration_data', '[]')
+                                            ->orWhere('declaration_data', '');
+                                    });
+                            });
+                    });
                 } else {
                     $bq->where('declaration_form_status', $request->declaration_form_status);
                 }
@@ -753,9 +767,9 @@ class BoxController extends Controller
 
         if ($request->filled('batch_id')) {
             if ($request->batch_id === 'unassigned') {
-                $query->whereNull('batch_id');
+                $query->whereNull('boxes.batch_id');
             } else {
-                $query->where('batch_id', $request->batch_id);
+                $query->where('boxes.batch_id', $request->batch_id);
             }
         }
 

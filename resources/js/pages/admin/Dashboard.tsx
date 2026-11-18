@@ -438,11 +438,11 @@ function StatCard({
         </div>
     );
 
-    const classes = 'card relative w-full overflow-hidden p-3.5 border-border group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-brand-rust/40';
+    const classes = 'block card relative w-full h-full overflow-hidden p-3.5 border-border group cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:border-brand-rust/40 focus:outline-none focus:ring-2 focus:ring-brand-rust/30 select-none';
 
     if (href) {
         return (
-            <Link href={href} className={classes}>
+            <Link href={href} className={classes} aria-label={`View ${title}`}>
                 {cardContent}
             </Link>
         );

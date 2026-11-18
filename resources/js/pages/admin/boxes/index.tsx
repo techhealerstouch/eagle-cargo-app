@@ -114,6 +114,8 @@ export default function BoxesIndex({
     filters?: {
         search?: string;
         status?: string;
+        payment_status?: string;
+        declaration_form_status?: string;
         area_id?: string;
         batch_id?: string;
         sort?: string;
@@ -416,6 +418,7 @@ export default function BoxesIndex({
                                 options={[
                                     { label: 'Paid', value: 'paid' },
                                     { label: 'Unpaid', value: 'unpaid' },
+                                    { label: 'Pending', value: 'pending' },
                                     { label: 'Partial', value: 'partial' },
                                 ]}
                             />

@@ -75,7 +75,7 @@ class SettingsService
             'bankAccount' => $settings->get('invoice_bank_account', '1097 5991'),
             'taxRate' => (float) $settings->get('invoice_tax_rate', '0.10'),
             'taxLabel' => $settings->get('invoice_tax_label', 'GST'),
-            'terms' => $settings->get('invoice_terms', 'Thank you for your business. Orient Freight\'s Terms and Conditions can be found at https://eaglecargo.com.au/terms-and-conditions/'),
+            'terms' => $settings->get('invoice_terms', 'Thank you for your business. Eagle Cargo\'s Terms and Conditions can be found at https://eaglecargo.com.au/terms-and-conditions/'),
             'footer' => $settings->get('invoice_footer', 'Eagle Cargo'),
             'currencySymbol' => $this->get('app_currency_symbol', '$'),
         ];

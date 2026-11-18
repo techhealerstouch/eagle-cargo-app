@@ -46,8 +46,17 @@ class PaymentController extends Controller
             });
         }
 
-        if ($request->filled('payment_method') && $request->payment_method !== 'all') {
-            $query->where('payment_method', $request->payment_method);
+        $rawMethod = $request->input('payment_method') ?? $request->input('method');
+        $activeMethod = (filled($rawMethod) && $rawMethod !== 'all') ? (string) $rawMethod : null;
+
+        if ($activeMethod !== null) {
+            if ($activeMethod === 'cash') {
+                $query->whereIn('payment_method', ['cash', 'cash_on_pickup']);
+            } elseif ($activeMethod === 'stripe_card') {
+                $query->whereIn('payment_method', ['stripe_card', 'stripe', 'card']);
+            } else {
+                $query->where('payment_method', $activeMethod);
+            }
         }
 
         $sortableColumns = [
@@ -79,9 +88,14 @@ class PaymentController extends Controller
                 ];
             });
 
+        $filters = $request->only(['search', 'sort', 'direction']);
+        if ($activeMethod !== null) {
+            $filters['payment_method'] = $activeMethod;
+        }
+
         return Inertia::render('admin/payments/index', [
             'payments' => $payments,
-            'filters' => $request->only(['search', 'payment_method', 'sort', 'direction']),
+            'filters' => $filters,
         ]);
     }
 

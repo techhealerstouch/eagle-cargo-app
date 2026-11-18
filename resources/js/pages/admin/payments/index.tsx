@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 
 import ActiveFilterChips from '@/components/common/active-filter-chips';
+import { sanitizeQueryParams } from '@/components/common/filter-query-utils';
 import Heading from '@/components/common/heading';
 import Pagination, { type PaginationData } from '@/components/common/pagination';
 import SearchFilter from '@/components/common/search-filter';
@@ -48,20 +49,33 @@ const breadcrumbs: BreadcrumbItem[] = [
 
 export default function PaymentsIndex({
     payments,
-    filters = { search: '', payment_method: 'all', sort: 'paid_at', direction: 'desc' },
+    filters = {},
 }: {
     payments: PaymentPagination;
     filters?: {
         search?: string;
         payment_method?: string;
+        method?: string;
         sort?: string;
         direction?: string;
     };
 }) {
+    const rawFilters = Array.isArray(filters) ? {} : (filters ?? {});
+    const activeMethod = rawFilters.payment_method || rawFilters.method || 'all';
+    const activeFilters = sanitizeQueryParams({
+        ...rawFilters,
+        method: undefined,
+        payment_method: activeMethod === 'all' ? undefined : activeMethod,
+    });
+
     const handleMethodChange = (method: string) => {
         router.get(
             '/admin/payments',
-            { ...filters, payment_method: method === 'all' ? '' : method },
+            sanitizeQueryParams({
+                ...activeFilters,
+                payment_method: method === 'all' ? undefined : method,
+                page: 1,
+            }),
             { preserveState: true }
         );
     };
@@ -81,7 +95,7 @@ export default function PaymentsIndex({
 
                 <div className="flex flex-col gap-4">
                     <Tabs
-                        value={filters.payment_method || 'all'}
+                        value={activeMethod}
                         onValueChange={handleMethodChange}
                         className="w-full"
                     >
@@ -109,7 +123,7 @@ export default function PaymentsIndex({
                         <div className="flex flex-1 flex-wrap items-center gap-2">
                             <SearchFilter
                                 routeName="/admin/payments"
-                                queryParams={filters}
+                                queryParams={activeFilters}
                                 placeholder="Search reference number..."
                             />
                         </div>
@@ -117,7 +131,10 @@ export default function PaymentsIndex({
 
                     <ActiveFilterChips
                         routeName="/admin/payments"
-                        queryParams={filters}
+                        queryParams={activeFilters}
+                        labels={{
+                            payment_method: 'Method',
+                        }}
                     />
                 </div>
 
@@ -130,11 +147,38 @@ export default function PaymentsIndex({
                                         <th className="px-4 py-3 font-semibold">Invoice</th>
                                         <th className="px-4 py-3 font-semibold">Booking Ref</th>
                                         <th className="px-4 py-3 font-semibold">Sender</th>
-                                        <th className="px-4 py-3 font-semibold">Amount</th>
-                                        <th className="px-4 py-3 font-semibold">Method</th>
+                                        <th className="px-4 py-3 font-semibold">
+                                            <SortLink
+                                                label="Amount"
+                                                sortField="amount"
+                                                currentSort={activeFilters.sort as string | undefined}
+                                                currentDirection={activeFilters.direction as string | undefined}
+                                                routeName="/admin/payments"
+                                                queryParams={activeFilters}
+                                            />
+                                        </th>
+                                        <th className="px-4 py-3 font-semibold">
+                                            <SortLink
+                                                label="Method"
+                                                sortField="payment_method"
+                                                currentSort={activeFilters.sort as string | undefined}
+                                                currentDirection={activeFilters.direction as string | undefined}
+                                                routeName="/admin/payments"
+                                                queryParams={activeFilters}
+                                            />
+                                        </th>
                                         <th className="px-4 py-3 font-semibold">Collected By</th>
                                         <th className="px-4 py-3 font-semibold">Reference</th>
-                                        <th className="px-4 py-3 font-semibold">Paid At</th>
+                                        <th className="px-4 py-3 font-semibold">
+                                            <SortLink
+                                                label="Paid At"
+                                                sortField="paid_at"
+                                                currentSort={activeFilters.sort as string | undefined}
+                                                currentDirection={activeFilters.direction as string | undefined}
+                                                routeName="/admin/payments"
+                                                queryParams={activeFilters}
+                                            />
+                                        </th>
                                         <th className="px-4 py-3 font-semibold text-right">Actions</th>
                                     </tr>
                                 </thead>
