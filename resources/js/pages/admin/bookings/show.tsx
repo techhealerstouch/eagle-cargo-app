@@ -73,6 +73,7 @@ interface Booking {
     declaration_form_status: string;
     declaration_form_path?: string | null;
     declaration_data?: any;
+    empty_box_count?: number;
     created_at: string;
     updated_at: string;
     promo_code?: string | null;
@@ -420,16 +421,19 @@ export default function BookingShow({ booking, pendingPayment }: { booking: Book
                                         <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Customs Declaration</h3>
                                     </div>
                                     <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                                        Number(booking.empty_box_count || 0) > 0 && !hasBoxes ? 'bg-zinc-100 text-zinc-700 border-zinc-200' :
                                         booking.declaration_form_status === 'submitted_online' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
                                         booking.declaration_form_status === 'physical_copy_received' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
                                         'bg-muted text-muted-foreground border-border'
                                     }`}>
-                                        {humanize(booking.declaration_form_status)}
+                                        {Number(booking.empty_box_count || 0) > 0 && !hasBoxes ? 'N/A' : humanize(booking.declaration_form_status)}
                                     </div>
                                 </div>
                                 <div className="p-5 flex-1 flex flex-col">
                                     <p className="text-[11px] text-muted-foreground leading-relaxed mb-6">
-                                        {booking.declaration_form_status === 'missing'
+                                        {Number(booking.empty_box_count || 0) > 0 && !hasBoxes
+                                            ? "Empty box orders do not require a customs declaration form."
+                                            : booking.declaration_form_status === 'missing'
                                             ? "No declaration has been submitted yet. Required for customs clearance."
                                             : booking.declaration_form_status === 'physical_copy_received'
                                             ? "A physical copy of the form was handed to the picker and uploaded."
@@ -597,7 +601,83 @@ export default function BookingShow({ booking, pendingPayment }: { booking: Book
                             </div>
 
                             <div className="flex-1">
-                                {hasBoxes ? (
+                                {(booking as any).source_empty_box_booking && (
+                                    <div className="m-4 p-3 bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 rounded-xl flex items-center justify-between text-xs">
+                                        <div className="flex items-center gap-2">
+                                            <CheckCircle className="size-4 text-emerald-600 shrink-0" />
+                                            <span className="text-emerald-900 dark:text-emerald-200 font-medium">
+                                                Converted from Empty Box Order{' '}
+                                                <Link href={`/admin/bookings/${(booking as any).source_empty_box_booking.id}`} className="font-bold underline">
+                                                    #{(booking as any).source_empty_box_booking.reference_number}
+                                                </Link>
+                                            </span>
+                                        </div>
+                                        <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                                            ${Number((booking as any).empty_box_deposit_credit || 0).toFixed(2)} Deposit Credit Applied
+                                        </span>
+                                    </div>
+                                )}
+
+                                {(booking as any).is_ready_for_pickup === false && (
+                                    <div className="m-4 p-3 bg-sky-50/70 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-800/60 rounded-xl flex items-center gap-2 text-xs text-sky-900 dark:text-sky-200">
+                                        <Package className="size-4 text-sky-600 shrink-0" />
+                                        <span>
+                                            <strong>Pack First Mode:</strong> Customer is currently packing. Awaiting customer to schedule pickup date.
+                                        </span>
+                                    </div>
+                                )}
+
+                                {Number(booking.empty_box_count || 0) > 0 && !hasBoxes ? (
+                                    <div className="p-6">
+                                        <div className="flex flex-col gap-4 rounded-xl border border-amber-200/80 bg-amber-50/50 p-5 dark:border-amber-900/40 dark:bg-amber-950/20">
+                                            <div className="flex items-start gap-4">
+                                                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-brand-rust border border-amber-500/20">
+                                                    <Package className="size-5" />
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
+                                                            Empty Balikbayan Box Delivery Order
+                                                        </h4>
+                                                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+                                                            {booking.empty_box_count} Box{booking.empty_box_count === 1 ? '' : 'es'}
+                                                        </span>
+                                                        {(booking as any).converted_cargo_booking && (
+                                                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+                                                                ✓ Converted to Cargo: #{(booking as any).converted_cargo_booking.reference_number}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+                                                        This order is for delivering empty balikbayan box supplies to the customer's address before shipping.
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            {(booking as any).empty_box_items && Array.isArray((booking as any).empty_box_items) && (booking as any).empty_box_items.length > 0 && (
+                                                <div className="flex flex-wrap gap-2 pt-2 border-t border-amber-200/60 dark:border-amber-900/30">
+                                                    {(booking as any).empty_box_items.map((item: any, idx: number) => (
+                                                        <span key={idx} className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-foreground">
+                                                            <Package className="size-3.5 text-brand-rust" />
+                                                            {item.quantity}x {item.name || 'Box'}{item.dimensions ? ` (${item.dimensions})` : ''}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {(booking as any).converted_cargo_booking && (
+                                                <div className="pt-2 border-t border-amber-200/60 dark:border-amber-900/30">
+                                                    <Link
+                                                        href={`/admin/bookings/${(booking as any).converted_cargo_booking.id}`}
+                                                        className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-400 hover:underline"
+                                                    >
+                                                        View Converted Cargo Booking #{(booking as any).converted_cargo_booking.reference_number} →
+                                                    </Link>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : hasBoxes ? (
                                     booking.status !== 'pending' ? (
                                         <div className="flex flex-col divide-y divide-border">
                                             {booking.boxes.map((box, index) => (

@@ -284,6 +284,18 @@ export default function Welcome({
                                 asChild
                                 variant="outline"
                                 size="lg"
+                                className="h-13 rounded-2xl border-amber-300 bg-amber-50/80 px-7 text-sm font-bold text-amber-900 shadow-xs backdrop-blur-xs transition-all hover:bg-amber-100 hover:text-amber-950 active:scale-98 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
+                                id="hero-order-empty-boxes-btn"
+                            >
+                                <Link href="/order-boxes">
+                                    <Package className="mr-2 size-4 text-brand-rust" />
+                                    <span>Order Empty Boxes</span>
+                                </Link>
+                            </Button>
+                            <Button
+                                asChild
+                                variant="outline"
+                                size="lg"
                                 className="h-13 rounded-2xl border-zinc-300 bg-white/90 px-8 text-sm font-bold text-zinc-800 shadow-xs backdrop-blur-xs transition-all hover:bg-white active:scale-98"
                             >
                                 <a href="#rate-calculator">
@@ -870,6 +882,17 @@ export default function Welcome({
                         >
                             <Link href={isGuest ? '/guest/book' : '/book'}>
                                 Book Pickup Now
+                            </Link>
+                        </Button>
+                        <Button
+                            asChild
+                            variant="outline"
+                            size="lg"
+                            className="h-13 rounded-2xl border-amber-400/30 bg-amber-500/10 px-7 text-sm font-bold text-amber-200 hover:bg-amber-500/20"
+                        >
+                            <Link href="/order-boxes">
+                                <Package className="mr-2 size-4 text-amber-300" />
+                                Order Empty Boxes
                             </Link>
                         </Button>
                         <Button

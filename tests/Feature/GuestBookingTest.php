@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Actions\Fortify\CreateNewUser;
 use App\Enums\Role;
+use App\Jobs\SendBookingConfirmationMail;
 use App\Models\Area;
 use App\Models\Booking;
 use App\Models\Box;
@@ -13,12 +14,15 @@ use App\Models\GuestBookingAccessChallenge;
 use App\Models\PickupZone;
 use App\Models\Province;
 use App\Models\Sender;
-use App\Services\GuestBookingAccessService;
 use App\Models\User;
+use App\Services\GuestBookingAccessService;
+use Illuminate\Auth\Events\Login;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -29,7 +33,7 @@ class GuestBookingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $this->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+        $this->withoutMiddleware(ValidateCsrfToken::class);
         Notification::fake();
     }
 
@@ -261,7 +265,7 @@ class GuestBookingTest extends TestCase
         ]);
 
         // 2. User registers using CreateNewUser action (Fortify registration)
-        $action = new CreateNewUser();
+        $action = new CreateNewUser;
         $user = $action->create([
             'name' => 'Grace Reyes',
             'email' => $guestEmail,
@@ -306,7 +310,7 @@ class GuestBookingTest extends TestCase
         ]);
 
         // 3. User logs in
-        event(new \Illuminate\Auth\Events\Login('web', $user, false));
+        event(new Login('web', $user, false));
 
         // 4. Verify guest booking is linked to user's sender profile
         $this->assertSoftDeleted('senders', ['id' => $guestSender->id]);
@@ -485,5 +489,49 @@ class GuestBookingTest extends TestCase
         $this->assertNotNull($booking->proof_of_payment);
         $this->assertEquals('PAY-REF-12345', $booking->payment_reference);
     }
-}
 
+    public function test_guest_initialize_dispatches_booking_confirmation_mail(): void
+    {
+        Queue::fake();
+
+        $area = Area::firstOrCreate(['name' => 'Metro Manila'], ['is_active' => true]);
+        $boxType = BoxType::firstOrCreate(['name' => 'Jumbo'], ['dimensions' => '24x24x24', 'is_active' => true]);
+        $pickupZone = PickupZone::firstOrCreate([], ['name' => 'Zone 1', 'is_active' => true]);
+        BoxPrice::firstOrCreate(
+            ['area_id' => $area->id, 'box_type_id' => $boxType->id],
+            ['price' => 100.00, 'deposit' => 20.00, 'is_active' => true]
+        );
+
+        $payload = [
+            'first_name' => 'Maria',
+            'last_name' => 'Clara',
+            'email' => 'maria.clara.test@example.com',
+            'mobile' => '0412345678',
+            'address' => '123 Fake Street',
+            'suburb' => 'Sydney',
+            'state' => 'NSW',
+            'postcode' => '2000',
+            'preferred_date' => now()->addDays(5)->format('Y-m-d'),
+            'pickup_zone_id' => $pickupZone->id,
+            'boxes' => [
+                [
+                    'area_id' => $area->id,
+                    'box_type_id' => $boxType->id,
+                    'recipient_first_name' => 'Crisostomo',
+                    'recipient_last_name' => 'Ibarra',
+                    'recipient_phone' => '09123456789',
+                    'recipient_address' => '456 Sampaguita St',
+                    'recipient_city' => 'Manila',
+                    'recipient_province' => 'Metro Manila',
+                ],
+            ],
+        ];
+
+        $response = $this->postJson(route('guest.bookings.initialize'), $payload);
+        $response->assertOk();
+
+        Queue::assertPushed(SendBookingConfirmationMail::class, function ($job) {
+            return $job->booking->sender->email === 'maria.clara.test@example.com';
+        });
+    }
+}

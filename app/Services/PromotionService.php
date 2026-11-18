@@ -20,6 +20,7 @@ class PromotionService
      * @param float $subtotal
      * @param int $emptyBoxCount
      * @param float $emptyBoxFee
+     * @param int|null $pickupZoneId
      * @return array ['valid' => bool, 'message' => string, 'discount_amount' => float, 'promotion' => Promotion|null]
      */
     public function validateAndCalculate(
@@ -28,7 +29,8 @@ class PromotionService
         array $boxes,
         float $subtotal,
         int $emptyBoxCount = 0,
-        float $emptyBoxFee = 0.0
+        float $emptyBoxFee = 0.0,
+        ?int $pickupZoneId = null
     ): array {
         $promotion = Promotion::where('code', $code)->first();
 
@@ -87,13 +89,20 @@ class PromotionService
         // Check applicable pickup zones
         if (!empty($promotion->applicable_pickup_zones)) {
             $hasValidZone = false;
-            foreach ($boxes as $box) {
-                if (isset($box['pickup_zone_id']) && in_array($box['pickup_zone_id'], $promotion->applicable_pickup_zones)) {
-                    $hasValidZone = true;
-                    break;
+            $applicableZones = array_map('intval', (array) $promotion->applicable_pickup_zones);
+
+            if ($pickupZoneId !== null && in_array((int) $pickupZoneId, $applicableZones, true)) {
+                $hasValidZone = true;
+            } else {
+                foreach ($boxes as $box) {
+                    if (isset($box['pickup_zone_id']) && in_array((int) $box['pickup_zone_id'], $applicableZones, true)) {
+                        $hasValidZone = true;
+                        break;
+                    }
                 }
             }
-            if (!$hasValidZone && $boxCount > 0 && count($boxes) > 0) { // Only fail if we have actual boxes but none in the zone
+
+            if (! $hasValidZone && ($boxCount > 0 || $pickupZoneId !== null)) {
                 return ['valid' => false, 'message' => 'This promo code is not valid for your selected pickup zone.', 'discount_amount' => 0.0, 'promotion' => null];
             }
         }

@@ -3,17 +3,21 @@
 namespace App\Http\Controllers;
 
 use App\Enums\BookingStatus;
+use App\Enums\PaymentStatus;
 use App\Http\Requests\StoreGuestBookingRequest;
 use App\Models\Booking;
+use App\Models\GuestBookingAccessChallenge;
 use App\Models\Promotion;
 use App\Models\Sender;
 use App\Notifications\BankTransferDetails;
 use App\Repositories\Contracts\BookingRepositoryInterface;
+use App\Rules\ValidPickupDate;
+use App\Services\GuestBookingAccessService;
 use App\Services\PaymentService;
 use App\Services\ReferenceDataService;
-use App\Services\GuestBookingAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -58,6 +62,42 @@ class GuestBookingController extends Controller
                 'applicable_box_types',
             ]);
 
+        $emptyBoxSource = null;
+        if ($request->has('from_empty_box')) {
+            $sourceId = (int) $request->query('from_empty_box');
+            $source = Booking::with('sender')->find($sourceId);
+
+            $token = $request->query('token') ?? $request->header('X-Guest-Token');
+            $isAuthorizedGuest = $source && (
+                ($request->hasValidSignature() && (int) $request->query('from_empty_box') === (int) $source->id)
+                || $this->guestAccess->isVerified($request, $source, GuestBookingAccessService::CONFIRMATION)
+                || (int) $request->session()->get('guest_booking_id') === (int) $source->id
+                || ($token && $source->guest_token && hash_equals((string) $source->guest_token, (string) $token))
+            );
+
+            if ($isAuthorizedGuest && $source->status !== BookingStatus::Cancelled && (int) $source->empty_box_count > 0) {
+                $alreadyClaimed = Booking::where('source_empty_box_booking_id', $source->id)
+                    ->where('status', '!=', BookingStatus::Cancelled)
+                    ->exists();
+
+                if (! $alreadyClaimed) {
+                    $isPaidOrConfirmed = in_array($source->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)
+                        || in_array($source->status, [BookingStatus::Confirmed, BookingStatus::Collected, BookingStatus::Delivered], true);
+
+                    $emptyBoxSource = [
+                        'id' => $source->id,
+                        'reference_number' => $source->reference_number,
+                        'empty_box_count' => (int) $source->empty_box_count,
+                        'empty_box_fee' => (float) ($source->empty_box_fee ?: 10.00),
+                        'empty_box_items' => $source->empty_box_items ?: [],
+                        'sender' => $source->sender,
+                        'is_credit_eligible' => $isPaidOrConfirmed,
+                        'estimated_deposit_credit' => $isPaidOrConfirmed ? round((int) $source->empty_box_count * (float) ($source->empty_box_fee ?: 10.00), 2) : 0.00,
+                    ];
+                }
+            }
+        }
+
         return Inertia::render('guest/Book', [
             'areas' => $this->referenceData->activeAreas(),
             'provinces' => $this->referenceData->activeProvinces(),
@@ -66,6 +106,7 @@ class GuestBookingController extends Controller
             'pickupZones' => $this->referenceData->activePickupZones(),
             'suburbs' => $this->referenceData->activeSuburbs(),
             'activePromotions' => $activePromotions,
+            'emptyBoxSource' => $emptyBoxSource,
             'savedRecipients' => [],
             'sender' => null,
             'isGuest' => true,
@@ -222,6 +263,9 @@ class GuestBookingController extends Controller
     public function confirmed(Request $request, Booking $booking): Response
     {
         $this->guestAccess->authorize($request, $booking, GuestBookingAccessService::CONFIRMATION);
+        $this->guestAccess->markVerified($request, $booking, GuestBookingAccessService::CONFIRMATION, 120);
+        $request->session()->put('guest_booking_id', $booking->id);
+
         $booking->load([
             'sender.pickupZone',
             'boxes.boxType',
@@ -233,8 +277,11 @@ class GuestBookingController extends Controller
         return Inertia::render('guest/BookingConfirmed', [
             'booking' => $booking,
             'token' => null,
+            'convertEmptyBoxUrl' => URL::temporarySignedRoute('guest.book', now()->addDays(30), ['from_empty_box' => $booking->id]),
             'declarationUrl' => $this->guestAccess->verificationUrl($booking, GuestBookingAccessService::DECLARATION),
-            'paymentUrl' => $this->guestAccess->verificationUrl($booking, GuestBookingAccessService::PAYMENT),
+            'paymentUrl' => $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::PAYMENT)
+                ? $this->guestAccess->paymentUrl($booking)
+                : $this->guestAccess->verificationUrl($booking, GuestBookingAccessService::PAYMENT),
         ]);
     }
 
@@ -243,13 +290,23 @@ class GuestBookingController extends Controller
         $purpose = (string) $request->query('purpose');
         $this->guestAccess->authorize($request, $booking, $purpose);
 
-        $this->guestAccess->sendChallenge($booking, $purpose);
+        $hasActiveChallenge = GuestBookingAccessChallenge::query()
+            ->where('booking_id', $booking->id)
+            ->where('purpose', $purpose)
+            ->active()
+            ->exists();
+
+        if (! $hasActiveChallenge || $request->boolean('resend')) {
+            $this->guestAccess->sendChallenge($booking, $purpose);
+        }
+
+        $cleanQuery = http_build_query($request->only(['expires', 'purpose', 'signature']));
 
         return Inertia::render('guest/VerifyAccess', [
             'bookingId' => $booking->id,
             'bookingReference' => $booking->reference_number,
             'purpose' => $purpose,
-            'accessQuery' => '?'.$request->getQueryString(),
+            'accessQuery' => $cleanQuery ? '?'.$cleanQuery : '',
             'email' => $booking->sender?->email,
         ]);
     }
@@ -264,10 +321,50 @@ class GuestBookingController extends Controller
             return back()->withErrors(['code' => 'That verification code is invalid or expired.']);
         }
 
-        $target = $purpose === GuestBookingAccessService::PAYMENT
-            ? $this->guestAccess->paymentUrl($booking)
-            : $this->guestAccess->declarationUrl($booking);
+        if ($purpose === GuestBookingAccessService::PAYMENT) {
+            $this->guestAccess->markVerified($request, $booking, GuestBookingAccessService::CONFIRMATION, 60);
+            $request->session()->put('guest_booking_id', $booking->id);
+            $target = $this->guestAccess->paymentUrl($booking);
+        } elseif ($purpose === GuestBookingAccessService::CONFIRMATION) {
+            $request->session()->put('guest_booking_id', $booking->id);
+            $target = $this->guestAccess->confirmationUrl($booking);
+        } else {
+            $target = $this->guestAccess->declarationUrl($booking);
+        }
 
         return redirect($target);
+    }
+
+    public function schedulePackedPickup(Request $request, Booking $booking)
+    {
+        $this->guestAccess->authorizeSessionOrToken($request, $booking, GuestBookingAccessService::CONFIRMATION);
+
+        if ($booking->status === BookingStatus::Cancelled) {
+            return redirect()->back()->with('error', 'Cancelled bookings cannot be scheduled for pickup.');
+        }
+
+        $validated = $request->validate([
+            'preferred_date' => [
+                'required',
+                'date',
+                new ValidPickupDate(
+                    $booking,
+                    $booking->booking_type?->value === 'drop_off' || $booking->booking_type === 'drop_off'
+                        ? null
+                        : ($booking->pickup_zone_id ? (int) $booking->pickup_zone_id : null)
+                ),
+            ],
+            'pickup_notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $booking->update([
+            'preferred_date' => $validated['preferred_date'],
+            'is_ready_for_pickup' => true,
+            'notes' => ! empty($validated['pickup_notes'])
+                ? trim($booking->notes."\nPickup Note: ".$validated['pickup_notes'])
+                : $booking->notes,
+        ]);
+
+        return redirect()->back()->with('success', 'Pickup date scheduled successfully! Our dispatch team has been notified.');
     }
 }

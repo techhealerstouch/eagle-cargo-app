@@ -67,11 +67,19 @@ class BookingController extends Controller
 
     public function index(Request $request)
     {
-        $query = Booking::with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone'])
+        $relations = [
+            'sender' => fn ($q) => $q->withTrashed(),
+            'runsheets.courier',
+            'runsheets.picker',
+            'boxes.recipient' => fn ($q) => $q->withTrashed(),
+            'boxes.updates.milestone',
+        ];
+
+        $query = Booking::with($relations)
             ->where('status', '!=', BookingStatus::Draft->value);
 
         if ($request->boolean('trashed') && app(DeveloperAccess::class)->isDeveloperOrSuperAdmin(Auth::user())) {
-            $query = Booking::onlyTrashed()->with(['sender', 'runsheets.courier', 'runsheets.picker', 'boxes.recipient', 'boxes.updates.milestone']);
+            $query = Booking::onlyTrashed()->with($relations);
         }
 
         $query = $this->applyFilters($query, $request);
@@ -433,7 +441,8 @@ class BookingController extends Controller
                     $augmentedBoxes,
                     $subtotal,
                     $emptyBoxCount,
-                    $emptyBoxFee
+                    $emptyBoxFee,
+                    $booking->pickup_zone_id ? (int) $booking->pickup_zone_id : null
                 );
 
                 if ($result['valid']) {
@@ -1168,7 +1177,14 @@ class BookingController extends Controller
 
     public function exportExcel(Request $request)
     {
-        $query = Booking::with(['sender', 'boxes.recipient', 'boxes.boxType', 'runsheets.courier', 'runsheets.picker', 'invoice']);
+        $query = Booking::with([
+            'sender' => fn ($q) => $q->withTrashed(),
+            'boxes.recipient' => fn ($q) => $q->withTrashed(),
+            'boxes.boxType',
+            'runsheets.courier',
+            'runsheets.picker',
+            'invoice',
+        ]);
 
         if ($request->filled('ids')) {
             $ids = is_array($request->ids) ? $request->ids : explode(',', (string) $request->ids);
@@ -1356,7 +1372,10 @@ class BookingController extends Controller
                     PaymentStatus::Pending->value,
                     PaymentStatus::CashOnPickup->value,
                     PaymentStatus::BalancePending->value,
+                    PaymentStatus::PartiallyPaid->value,
                 ]);
+            } elseif ($request->payment_status === 'pending') {
+                $query->where('payment_status', PaymentStatus::Pending->value);
             } elseif ($request->payment_status === 'partial') {
                 $query->whereIn('payment_status', [
                     PaymentStatus::PartiallyPaid->value,
@@ -1382,8 +1401,22 @@ class BookingController extends Controller
             } elseif ($request->declaration_form_status === 'missing') {
                 $query->where(function ($q) {
                     $q->where('declaration_form_status', 'missing')
-                        ->orWhereNull('declaration_form_status');
-                })->whereNull('declaration_form_path');
+                        ->orWhere(function ($sub) {
+                            $sub->whereNull('declaration_form_status')
+                                ->where(function ($pathQ) {
+                                    $pathQ->whereNull('declaration_form_path')
+                                        ->orWhere('declaration_form_path', '');
+                                })
+                                ->where(function ($dataQ) {
+                                    $dataQ->whereNull('declaration_data')
+                                        ->orWhere('declaration_data', '[]')
+                                        ->orWhere('declaration_data', '');
+                                });
+                        });
+                })->where(function ($q) {
+                    $q->whereHas('boxes')
+                        ->orWhere('empty_box_count', 0);
+                });
             } else {
                 $query->where('declaration_form_status', $request->declaration_form_status);
             }

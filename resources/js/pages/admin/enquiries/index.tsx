@@ -33,6 +33,7 @@ import ConfirmModal from '@/components/common/confirm-modal';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
 import { cn } from '@/lib/utils';
+import { useRealtimeSync } from '@/hooks/use-realtime-sync';
 
 interface EnquiryMessage {
     id: number;
@@ -172,14 +173,18 @@ export default function AdminEnquiriesIndex({
         is_read: true,
     });
 
-    // Update reply textarea when active target enquiry changes
+    // Reset reply textarea only when switching to a different customer thread
     useEffect(() => {
         setData('admin_notes', '');
-    }, [selectedThread?.id, selectedEnquiry?.id]);
+    }, [activeThread?.email]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [activeThread?.email, activeMessages.length]);
 
     const handleSelectThread = (thread: ConversationThread) => {
         router.get(
@@ -233,12 +238,36 @@ export default function AdminEnquiriesIndex({
     const handleRefresh = () => {
         setIsRefreshing(true);
         router.reload({
+            ...(activeThread?.email
+                ? {
+                      data: {
+                          email: activeThread.email,
+                          ...(activeThread.is_read ? {} : { preserve_unread: 1 }),
+                      },
+                  }
+                : {}),
+            preserveUrl: true,
             onFinish: () => {
                 setIsRefreshing(false);
                 toast.success('Support inbox refreshed.');
             },
         });
     };
+
+    // Real-Time Background Synchronization for Admin Inbox (Reverb push + polling fallback)
+    useRealtimeSync({
+        only: ['enquiries', 'stats', 'selectedThread', 'selectedEnquiry', 'sidebarCounts'],
+        data: activeThread?.email
+            ? {
+                  email: activeThread.email,
+                  ...(activeThread.is_read ? {} : { preserve_unread: 1 }),
+              }
+            : undefined,
+        intervalMs: 5000,
+        paused: processing || deleteModalOpen,
+        echoChannel: 'admin.enquiries',
+        echoEvent: '.EnquiryMessageUpdated',
+    });
 
     const handleSendReply = (e: React.FormEvent) => {
         e.preventDefault();

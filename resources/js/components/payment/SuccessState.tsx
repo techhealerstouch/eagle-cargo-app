@@ -10,7 +10,9 @@ interface SuccessStateProps {
 }
 
 export function SuccessState({ booking, backUrl = '/dashboard', backLabel = 'Go to Dashboard' }: SuccessStateProps) {
-    const totalAmount = (booking.boxes || []).reduce((acc, b) => acc + parseFloat(String(b.price_charged || '0')), 0);
+    const isEmptyBoxOrder = (booking.boxes || []).length === 0 && Number(booking.empty_box_count || 0) > 0;
+    const emptyBoxTotal = (booking.empty_box_count || 0) * parseFloat(String(booking.empty_box_fee || '10.00'));
+    const totalAmount = (booking.boxes || []).reduce((acc, b) => acc + parseFloat(String(b.price_charged || '0')), 0) + emptyBoxTotal;
 
     return (
         <div className="p-8 text-center space-y-8 animate-in fade-in zoom-in duration-500">
@@ -22,9 +24,11 @@ export function SuccessState({ booking, backUrl = '/dashboard', backLabel = 'Go 
             </div>
 
             <div className="space-y-3">
-                <h3 className="text-3xl font-bold text-zinc-900 tracking-tight">Payment confirmed!</h3>
+                <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">Payment Received!</h3>
                 <p className="text-zinc-500 max-w-sm mx-auto text-sm leading-relaxed">
-                    Your box is booked. {booking.boxes[0]?.recipient?.first_name || 'Your recipient'} will receive it in 4-6 weeks.
+                    {isEmptyBoxOrder
+                        ? 'We have received your box deposit payment. Our team will now review and confirm your empty box delivery schedule.'
+                        : 'We have received your payment. Our team will review and confirm your pickup schedule shortly.'}
                 </p>
             </div>
 

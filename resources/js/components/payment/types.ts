@@ -38,6 +38,8 @@ export interface Booking {
     payment_reference?: string | null;
     payment_method?: string;
     preferred_date?: string;
+    empty_box_count?: number;
+    empty_box_fee?: string | number;
     declaration_data?: any;
     declaration_form_path?: string | null;
     declaration_form_status?: string;

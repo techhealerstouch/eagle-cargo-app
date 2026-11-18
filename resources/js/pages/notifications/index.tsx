@@ -1,4 +1,4 @@
-import { Head, Link } from '@inertiajs/react';
+import { Head, Link, usePage } from '@inertiajs/react';
 import { formatDistanceToNow } from 'date-fns';
 import {
     Bell,
@@ -24,9 +24,10 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useRealtimeSync } from '@/hooks/use-realtime-sync';
 import AppLayout from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
-import type { BreadcrumbItem, Notification } from '@/types';
+import type { BreadcrumbItem, Notification, SharedData } from '@/types';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -92,6 +93,7 @@ function getNotificationMessage(notification: Notification): string {
 type CategoryType = 'all' | 'shipment' | 'booking' | 'payment' | 'other';
 
 export default function NotificationsIndex() {
+    const { auth } = usePage<SharedData>().props;
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [unreadCount, setUnreadCount] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
@@ -105,8 +107,10 @@ export default function NotificationsIndex() {
     const [totalPages, setTotalPages] = useState(1);
     const [totalItems, setTotalItems] = useState(0);
 
-    const fetchNotifications = useCallback(async (page: number) => {
-        setIsLoading(true);
+    const fetchNotifications = useCallback(async (page: number, silent = false) => {
+        if (!silent) {
+            setIsLoading(true);
+        }
         try {
             const response = await fetch(`/api/notifications?page=${page}&per_page=15`, {
                 headers: {
@@ -130,9 +134,13 @@ export default function NotificationsIndex() {
             }
         } catch (error) {
             console.error('Error fetching notifications:', error);
-            toast.error('Could not load notifications. Please try again.');
+            if (!silent) {
+                toast.error('Could not load notifications. Please try again.');
+            }
         } finally {
-            setIsLoading(false);
+            if (!silent) {
+                setIsLoading(false);
+            }
         }
     }, []);
 
@@ -140,6 +148,13 @@ export default function NotificationsIndex() {
     useEffect(() => {
         fetchNotifications(1);
     }, [fetchNotifications]);
+
+    useRealtimeSync({
+        onSync: () => fetchNotifications(1, true),
+        intervalMs: 10000,
+        paused: isActionLoading || currentPage !== 1,
+        notificationUserId: auth?.user?.id,
+    });
 
     // Handle marking a single notification as read
     const handleMarkAsRead = async (id: string, e?: React.MouseEvent) => {

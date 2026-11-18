@@ -23,6 +23,7 @@ import {
     Banknote,
     Activity,
     Tag,
+    Package,
 } from 'lucide-react';
 import AppLogo from '@/components/layout/app-logo';
 import { NavFooter } from '@/components/layout/nav-footer';
@@ -95,6 +96,12 @@ export function AppSidebar() {
                                     title: 'Deliveries',
                                     href: '/admin/runsheets/deliveries',
                                     icon: Truck,
+                                },
+                                {
+                                    title: 'Communications',
+                                    href: '/admin/communications',
+                                    icon: MessageSquare,
+                                    badge: sidebarCounts?.communications,
                                 },
                                 {
                                     title: 'Track Shipment',
@@ -288,6 +295,12 @@ export function AppSidebar() {
                                 icon: ClipboardList,
                             },
                             {
+                                title: 'Messages',
+                                href: '/picker/messages',
+                                icon: MessageSquare,
+                                badge: sidebarCounts?.messages,
+                            },
+                            {
                                 title: 'Earnings',
                                 href: '/picker/earnings',
                                 icon: Banknote,
@@ -344,6 +357,11 @@ export function AppSidebar() {
                                 href: '/book',
                                 icon: PlusCircle,
                             },
+                            {
+                                title: 'Order Empty Boxes',
+                                href: '/order-boxes',
+                                icon: Package,
+                            },
                             { title: 'Track Shipment', href: '/track', icon: Box },
                             {
                                 title: 'My Enquiries',
@@ -359,6 +377,11 @@ export function AppSidebar() {
                     <NavMain
                         items={[
                             { title: 'Home', href: '/home', icon: LayoutGrid },
+                            {
+                                title: 'Order Empty Boxes',
+                                href: '/order-boxes',
+                                icon: Package,
+                            },
                             { title: 'Track Shipment', href: '/track', icon: Box },
                             { title: 'About', href: '/about', icon: Users },
                             { title: 'Services', href: '/services', icon: Box },

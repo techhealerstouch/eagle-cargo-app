@@ -30,7 +30,11 @@ class BoxesExport implements FromCollection, ShouldAutoSize, WithHeadings, WithM
             return collect([]);
         }
 
-        return $this->boxes ?? Box::with(['booking', 'recipient', 'boxType'])->get();
+        return $this->boxes ?? Box::with([
+            'booking',
+            'recipient' => fn ($q) => $q->withTrashed(),
+            'boxType',
+        ])->get();
     }
 
     public function headings(): array
@@ -83,10 +87,17 @@ class BoxesExport implements FromCollection, ShouldAutoSize, WithHeadings, WithM
             ? $box->status->value
             : (string) $box->status;
 
+        $recipientPhone = $box->recipient?->phone_number
+            ?: ($box->recipient_snapshot['phone_number'] ?? null)
+            ?: $box->recipient?->secondary_phone_number
+            ?: ($box->recipient_snapshot['secondary_phone_number'] ?? null);
+        $recipientName = $box->recipient?->name
+            ?: ($box->recipient_snapshot['name'] ?? null);
+
         return [
             $box->booking?->reference_number,
-            $box->recipient?->phone_number,
-            $box->recipient?->name ?? 'N/A',
+            $recipientPhone,
+            $recipientName ?? 'N/A',
             $box->boxType?->name ?? ($box->is_custom_size ? 'Custom' : 'Standard'),
             $box->tracking_number,
             $box->serial_number,

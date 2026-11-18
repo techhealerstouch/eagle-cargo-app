@@ -4,6 +4,9 @@ namespace App\Notifications;
 
 use App\Models\Booking;
 use App\Models\Invoice;
+use App\Models\Sender;
+use App\Models\User;
+use App\Services\GuestBookingAccessService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -32,9 +35,9 @@ class BookingPaymentReceived extends Notification implements ShouldQueue
     public function toMail(object $notifiable): MailMessage
     {
         $recipientName = '';
-        if ($notifiable instanceof \App\Models\Sender) {
+        if ($notifiable instanceof Sender) {
             $recipientName = trim((string) ($notifiable->first_name ?? ''));
-        } elseif ($notifiable instanceof \App\Models\User) {
+        } elseif ($notifiable instanceof User) {
             $recipientName = trim((string) ($notifiable->name ?? ''));
         }
 
@@ -58,7 +61,9 @@ class BookingPaymentReceived extends Notification implements ShouldQueue
             ->line(__('messages.notifications.booking_payment.line_copy_required'))
             ->action(
                 __('messages.notifications.booking_payment.action'),
-                url('/bookings')
+                ($this->booking->is_guest || empty($this->booking->sender?->user_id))
+                    ? app(GuestBookingAccessService::class)->confirmationUrl($this->booking)
+                    : url('/bookings')
             )
             ->line(__('messages.notifications.booking_payment.closing', ['appName' => config('app.name')]));
     }

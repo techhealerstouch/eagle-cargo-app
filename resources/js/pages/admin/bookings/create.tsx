@@ -762,6 +762,7 @@ export default function BookingsCreate({
                     subtotal: baseSubtotal,
                     empty_box_count: data.request_empty_box ? data.empty_box_count : 0,
                     empty_box_fee: data.empty_box_fee,
+                    pickup_zone_id: data.pickup_zone_id ? Number(data.pickup_zone_id) : null,
                 }),
             });
 
@@ -797,7 +798,7 @@ export default function BookingsCreate({
             setDiscountAmount(0);
             setPromoSuccessMessage('');
         }
-    }, [data.promo_code, baseSubtotal]);
+    }, [data.promo_code, baseSubtotal, data.pickup_zone_id]);
 
     const handleRemovePromo = () => {
         setData('promo_code', '');

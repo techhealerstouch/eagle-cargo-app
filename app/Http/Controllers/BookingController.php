@@ -10,14 +10,17 @@ use App\Enums\Role;
 use App\Http\Requests\SaveDraftBookingRequest;
 use App\Http\Requests\StoreBookingRequest;
 use App\Models\Booking;
+use App\Models\Invoice;
+use App\Models\Promotion;
 use App\Models\Sender;
 use App\Models\User;
 use App\Notifications\BankTransferDetails;
 use App\Notifications\PartialCancellationRequested;
 use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Rules\SecureFile;
-use App\Services\PaymentService;
+use App\Rules\ValidPickupDate;
 use App\Services\GuestBookingAccessService;
+use App\Services\PaymentService;
 use App\Services\ReferenceDataService;
 use App\Services\SettingsService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -62,6 +65,35 @@ class BookingController extends Controller
             }
         }
 
+        $emptyBoxSource = null;
+        if ($request->has('from_empty_box')) {
+            $sourceId = (int) $request->query('from_empty_box');
+            $source = Booking::with('sender')->find($sourceId);
+            if ($source && $user && $user->sender && $source->sender_id === $user->sender->id) {
+                if ($source->status !== BookingStatus::Cancelled && (int) $source->empty_box_count > 0) {
+                    $alreadyClaimed = Booking::where('source_empty_box_booking_id', $source->id)
+                        ->where('status', '!=', BookingStatus::Cancelled)
+                        ->exists();
+
+                    if (! $alreadyClaimed) {
+                        $isPaidOrConfirmed = in_array($source->payment_status, [PaymentStatus::Paid, PaymentStatus::CashCollected], true)
+                            || in_array($source->status, [BookingStatus::Confirmed, BookingStatus::Collected, BookingStatus::Delivered], true);
+
+                        $emptyBoxSource = [
+                            'id' => $source->id,
+                            'reference_number' => $source->reference_number,
+                            'empty_box_count' => (int) $source->empty_box_count,
+                            'empty_box_fee' => (float) ($source->empty_box_fee ?: 10.00),
+                            'empty_box_items' => $source->empty_box_items ?: [],
+                            'sender' => $source->sender,
+                            'is_credit_eligible' => $isPaidOrConfirmed,
+                            'estimated_deposit_credit' => $isPaidOrConfirmed ? round((int) $source->empty_box_count * (float) ($source->empty_box_fee ?: 10.00), 2) : 0.00,
+                        ];
+                    }
+                }
+            }
+        }
+
         // Find any existing draft for this sender
         $draftBooking = null;
         if ($user && $user->sender) {
@@ -88,7 +120,7 @@ class BookingController extends Controller
             }
         }
 
-        $activePromotions = \App\Models\Promotion::where('is_active', true)
+        $activePromotions = Promotion::where('is_active', true)
             ->where(function ($query) {
                 $query->whereNull('valid_from')->orWhere('valid_from', '<=', now());
             })
@@ -127,6 +159,7 @@ class BookingController extends Controller
             'suburbs' => $this->referenceData->activeSuburbs(),
             'savedRecipients' => $recipients,
             'cloneSource' => $cloneSource,
+            'emptyBoxSource' => $emptyBoxSource,
             'editingBooking' => null,
             'draftBooking' => $draftBooking,
             'sender' => $user ? $user->sender?->load('pickupZone') : null,
@@ -327,18 +360,21 @@ class BookingController extends Controller
             return redirect()->route('sender.bookings')->with('success', 'This booking has already been paid.');
         }
 
-        // Check if booking has valid total amount
-        $booking->load('boxes');
-        $totalAmount = $booking->boxes->sum('price_charged');
+        // Check if booking has valid total amount via invoice or cargo boxes
+        $booking->load('boxes', 'invoice');
+        $invoice = $booking->invoice ?? Invoice::generateForBooking($booking);
+        $totalAmount = (float) ($invoice?->amount ?? $booking->boxes->sum('price_charged'));
         if ($totalAmount <= 0) {
-            return redirect()->route('sender.bookings')->with('error',
+            return redirect()->route('sender.bookings')->with(
+                'error',
                 'Cannot proceed to payment: booking total amount is $0. '.
-                'Please contact support to check price configuration for your boxes.'
+                    'Please contact support to check price configuration for your boxes.'
             );
         }
 
         return Inertia::render('payment/PaymentConsole', [
             'booking' => $booking->load('boxes.recipient', 'boxes.boxType'),
+            'invoice' => $invoice?->load('payments'),
             'stripeKey' => config('services.stripe.key'),
             'role' => 'sender',
             'endpoint' => null,
@@ -359,14 +395,17 @@ class BookingController extends Controller
                 ->with('success', 'This booking has already been paid.');
         }
 
-        $booking->load('boxes');
-        if ($booking->boxes->sum('price_charged') <= 0) {
+        $booking->load('boxes', 'invoice');
+        $invoice = $booking->invoice ?? Invoice::generateForBooking($booking);
+        $totalAmount = (float) ($invoice?->amount ?? $booking->boxes->sum('price_charged'));
+        if ($totalAmount <= 0) {
             return redirect($this->guestAccess->confirmationUrl($booking))
                 ->with('error', 'Cannot proceed to payment because the booking total is $0. Please contact support.');
         }
 
         return Inertia::render('payment/PaymentConsole', [
             'booking' => $booking->load('sender', 'boxes.recipient', 'boxes.boxType')->makeHidden('guest_token'),
+            'invoice' => $invoice?->load('payments'),
             'stripeKey' => config('services.stripe.key'),
             'role' => 'guest',
             'guestAccessQuery' => '?'.$request->getQueryString(),
@@ -530,8 +569,10 @@ class BookingController extends Controller
     {
         // Check Ownership & Status — allow editing Pending and Draft bookings
         $user = Auth::user();
-        if (! $user->sender || $booking->sender_id !== $user->sender->id
-            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
+        if (
+            ! $user->sender || $booking->sender_id !== $user->sender->id
+            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])
+        ) {
             return redirect()->route('sender.bookings')->with('error', 'Booking cannot be edited at this stage or you do not have permission.');
         }
 
@@ -542,7 +583,7 @@ class BookingController extends Controller
             ->latest()
             ->get();
 
-        $activePromotions = \App\Models\Promotion::where('is_active', true)
+        $activePromotions = Promotion::where('is_active', true)
             ->where(function ($query) {
                 $query->whereNull('valid_from')->orWhere('valid_from', '<=', now());
             })
@@ -583,15 +624,17 @@ class BookingController extends Controller
             'draftBooking' => null,
             'sender' => $user->sender?->load('pickupZone'),
             'activePromotions' => $activePromotions,
-            
+
         ]);
     }
 
     public function update(StoreBookingRequest $request, Booking $booking)
     {
         $user = Auth::user();
-        if (! $user->sender || $booking->sender_id !== $user->sender->id
-            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])) {
+        if (
+            ! $user->sender || $booking->sender_id !== $user->sender->id
+            || ! in_array($booking->status, [BookingStatus::Pending, BookingStatus::Draft])
+        ) {
             abort(403, 'Unauthorized amendment attempt.');
         }
 
@@ -799,6 +842,42 @@ class BookingController extends Controller
             'success' => true,
             'message' => __('messages.notifications.bank_transfer_details.sent_toast'),
         ]);
+    }
+
+    public function schedulePackedPickup(Request $request, Booking $booking)
+    {
+        $user = Auth::user();
+        if (! $user || ! $user->sender || $booking->sender_id !== $user->sender->id) {
+            abort(403, 'Unauthorized.');
+        }
+
+        if ($booking->status === BookingStatus::Cancelled) {
+            return redirect()->back()->with('error', 'Cancelled bookings cannot be scheduled for pickup.');
+        }
+
+        $validated = $request->validate([
+            'preferred_date' => [
+                'required',
+                'date',
+                new ValidPickupDate(
+                    $booking,
+                    $booking->booking_type?->value === 'drop_off' || $booking->booking_type === 'drop_off'
+                        ? null
+                        : ($booking->pickup_zone_id ? (int) $booking->pickup_zone_id : ($user->sender->pickup_zone_id ?? null))
+                ),
+            ],
+            'pickup_notes' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $booking->update([
+            'preferred_date' => $validated['preferred_date'],
+            'is_ready_for_pickup' => true,
+            'notes' => ! empty($validated['pickup_notes'])
+                ? trim($booking->notes."\nPickup Note: ".$validated['pickup_notes'])
+                : $booking->notes,
+        ]);
+
+        return redirect()->back()->with('success', 'Pickup date scheduled successfully! Our dispatch team has been notified.');
     }
 
     private function redirectAfterBookingSubmission(Booking $booking, string $paymentMethod)

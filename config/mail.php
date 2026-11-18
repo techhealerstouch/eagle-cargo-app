@@ -118,4 +118,6 @@ return [
 
     'admin_address' => env('MAIL_ADMIN_ADDRESS', env('MAIL_FROM_ADDRESS', 'hello@example.com')),
 
+    'booking_confirmation_after_response' => (bool) env('MAIL_CONFIRMATION_AFTER_RESPONSE', false),
+
 ];

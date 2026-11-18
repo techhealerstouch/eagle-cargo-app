@@ -51,6 +51,12 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Support\Facades\Log::error('Validation Failed: ', $e->errors());
         });
 
+        $exceptions->render(function (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException $e, \Illuminate\Http\Request $request) {
+            if ($request->header('X-Inertia') && $request->is('admin/bookings/*')) {
+                return redirect()->route('admin.bookings.index')->with('error', 'The requested booking could not be found or has been removed.');
+            }
+        });
+
         $exceptions->render(function (\RuntimeException $e, \Illuminate\Http\Request $request) {
             $msg = $e->getMessage();
             if (

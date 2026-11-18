@@ -25,7 +25,7 @@ interface BookingBulkUpdateModalProps {
 interface Booking {
     id: number;
     reference_number: string;
-    sender?: { first_name?: string; last_name?: string; mobile?: string | null };
+    sender?: { first_name?: string; last_name?: string; mobile?: string | null } | null;
     status: string;
     payment_status: string;
     booking_type: string;

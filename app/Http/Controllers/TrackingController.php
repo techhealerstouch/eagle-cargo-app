@@ -179,10 +179,13 @@ class TrackingController extends Controller
             $request->declaration_data
         );
 
-        $isGuest = empty($booking->sender?->user_id);
-        if ($isGuest && $booking->guest_token) {
-            return redirect()
-                ->route('guest.booking.confirmed', ['token' => $booking->guest_token])
+        if ($booking->is_guest || ! Auth::check()) {
+            if ($request->hasValidSignature() || $this->guestAccess->isVerified($request, $booking, GuestBookingAccessService::DECLARATION) || (int) $request->session()->get('guest_booking_id') === (int) $booking->id) {
+                return redirect($this->guestAccess->confirmationUrl($booking))
+                    ->with('success', 'Customs declaration submitted successfully.');
+            }
+
+            return redirect()->route('track', ['tracking_number' => $booking->reference_number])
                 ->with('success', 'Customs declaration submitted successfully.');
         }
 
@@ -209,6 +212,7 @@ class TrackingController extends Controller
             default => false,
         };
     }
+
     public function viewDeclaration(Request $request, Booking $booking)
     {
         $user = Auth::user();
@@ -246,14 +250,14 @@ class TrackingController extends Controller
     {
         $user = $user ?? Auth::user();
         $userKey = $user
-            ? 'user:' . $user->id
+            ? 'user:'.$user->id
             : ($booking->sender?->email
-                ? 'email:' . strtolower(trim($booking->sender->email))
-                : 'booking:' . $booking->id);
+                ? 'email:'.strtolower(trim($booking->sender->email))
+                : 'booking:'.$booking->id);
 
         return [
-            'declaration_resend_daily:' . $userKey,
-            'declaration_resend_daily:booking:' . $booking->id,
+            'declaration_resend_daily:'.$userKey,
+            'declaration_resend_daily:booking:'.$booking->id,
         ];
     }
 
@@ -326,7 +330,7 @@ class TrackingController extends Controller
                 RateLimiter::availableIn($rateLimitBookingKey)
             );
             $hours = (int) ceil($secondsUntilAvailable / 3600);
-            $timeText = $hours > 1 ? "in {$hours} hours" : ($secondsUntilAvailable > 60 ? "in 1 hour" : "shortly");
+            $timeText = $hours > 1 ? "in {$hours} hours" : ($secondsUntilAvailable > 60 ? 'in 1 hour' : 'shortly');
 
             return response()->json([
                 'message' => "You have reached the maximum of 3 email resends allowed per day. Please check your spam/junk folder or try again {$timeText}.",
@@ -336,7 +340,7 @@ class TrackingController extends Controller
         }
 
         // Short cooldown check (60s cooldown per booking to prevent rapid double-clicks)
-        $cacheKey = 'resend_declaration_cooldown_' . $booking->id;
+        $cacheKey = 'resend_declaration_cooldown_'.$booking->id;
         if (Cache::has($cacheKey)) {
             $cooldownUntil = Cache::get($cacheKey);
             $secondsRemaining = max(1, $cooldownUntil - now()->timestamp);
@@ -373,7 +377,7 @@ class TrackingController extends Controller
         $maskedEmail = $this->trackingRepo->maskEmail($booking->sender->email);
 
         $chancesText = $remaining > 0
-            ? "({$remaining} " . ($remaining === 1 ? 'chance' : 'chances') . ' remaining today)'
+            ? "({$remaining} ".($remaining === 1 ? 'chance' : 'chances').' remaining today)'
             : '(Daily limit of 3 reached for today)';
 
         $successMsg = "Customs declaration link has been resent to {$maskedEmail}. {$chancesText} Please check your inbox and spam folder.";
@@ -389,8 +393,6 @@ class TrackingController extends Controller
 
         return back()->with('success', $successMsg);
     }
-
-
 
     public function verifyEmailToAccessDeclaration(Request $request, Booking $booking)
     {
@@ -428,5 +430,4 @@ class TrackingController extends Controller
             'redirect_url' => $this->guestAccess->declarationUrl($booking),
         ]);
     }
-
 }

@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Enums\BookingStatus;
 use App\Enums\BoxStatus;
 use App\Enums\TrackingPhase;
+use App\Http\Controllers\SenderDashboardController;
 use App\Models\Booking;
 use App\Models\Box;
 use App\Models\BoxUpdate;
@@ -15,6 +16,7 @@ use App\Services\ReferenceDataService;
 use App\Services\RunsheetService;
 use App\Services\TrackingCacheService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class BoxObserver
@@ -124,6 +126,7 @@ class BoxObserver
         app(TrackingCacheService::class)->forgetBox($box);
 
         if ($box->wasChanged('status')) {
+            Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
             // Notify sender (via User if linked, otherwise directly to Sender)
             $sender = $box->booking?->sender;
             if ($sender && ! Box::statusNotificationsMuted()) {
@@ -240,6 +243,7 @@ class BoxObserver
         ]);
 
         app(TrackingCacheService::class)->forgetBox($box);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
         $this->refreshBatchById((int) $box->batch_id);
     }
 
@@ -249,6 +253,7 @@ class BoxObserver
     public function deleted(Box $box): void
     {
         app(TrackingCacheService::class)->forgetBox($box);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
         $this->refreshBatchById((int) $box->getOriginal('batch_id'));
     }
 
@@ -258,6 +263,7 @@ class BoxObserver
     public function restored(Box $box): void
     {
         app(TrackingCacheService::class)->forgetBox($box);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
         $this->refreshBatchById((int) $box->batch_id);
     }
 
@@ -267,6 +273,7 @@ class BoxObserver
     public function forceDeleted(Box $box): void
     {
         app(TrackingCacheService::class)->forgetBox($box);
+        Cache::forget(SenderDashboardController::DASHBOARD_CACHE_KEY);
         $this->refreshBatchById((int) $box->getOriginal('batch_id'));
     }
 

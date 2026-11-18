@@ -127,7 +127,7 @@ class StoreGuestBookingRequest extends FormRequest
 
             // Pickup & payment details
             'preferred_date' => [
-                'required',
+                $this->boolean('is_ready_for_pickup', true) ? 'required' : 'nullable',
                 'date',
                 new ValidPickupDate(
                     null,
@@ -142,6 +142,8 @@ class StoreGuestBookingRequest extends FormRequest
             'promo_code' => ['nullable', 'string', 'max:50'],
             'empty_box_count' => ['nullable', 'integer', 'min:0'],
             'empty_box_fee' => ['nullable', 'numeric', 'min:0'],
+            'source_empty_box_booking_id' => ['nullable', 'integer', 'exists:bookings,id'],
+            'is_ready_for_pickup' => ['nullable', 'boolean'],
 
             // Boxes & Recipient details
             'boxes' => ['required', 'array', 'min:1'],

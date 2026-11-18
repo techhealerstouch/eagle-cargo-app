@@ -4,6 +4,7 @@ import { BookOpen, Plus, Pencil, CheckCircle, UserPlus, Search, Ban, CheckSquare
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 
+import { sanitizeQueryParams } from '@/components/common/filter-query-utils';
 import ActiveFilterChips from '@/components/common/active-filter-chips';
 import ConfirmModal from '@/components/common/confirm-modal';
 import BookingExportModal from '@/components/bookings/booking-export-modal';
@@ -36,12 +37,12 @@ interface Booking {
     id: number;
     reference_number: string;
     sender_id: number;
-    sender: {
+    sender?: {
         first_name: string;
         last_name: string;
         mobile?: string | null;
         user_id?: number | null;
-    };
+    } | null;
     status: string;
     booking_type: string;
     payment_status: string;
@@ -62,6 +63,7 @@ interface Booking {
     declaration_form_status: string;
     declaration_data?: any;
     box_count: number;
+    empty_box_count?: number;
     admin_notes?: string | null;
     created_at: string;
     runsheets?: {
@@ -179,8 +181,23 @@ export default function BookingsIndex({
         courier.name.toLowerCase().includes(courierSearch.toLowerCase())
     );
 
-    const handleStatusChange = (status: string) => {
-        router.get('/admin/bookings', { ...filters, status: status === 'all' ? '' : status }, { preserveState: true });
+    const activeFilters = Array.isArray(filters) ? {} : (filters ?? {});
+
+    const handleTabChange = (value: string) => {
+        if (value === 'trashed') {
+            router.get(
+                '/admin/bookings',
+                sanitizeQueryParams({ ...activeFilters, status: undefined, trashed: true, page: 1 }),
+                { preserveState: true, replace: true }
+            );
+            return;
+        }
+
+        router.get(
+            '/admin/bookings',
+            sanitizeQueryParams({ ...activeFilters, status: value === 'all' ? undefined : value, trashed: undefined, page: 1 }),
+            { preserveState: true, replace: true }
+        );
     };
 
     const openAcceptModal = (id: number) => {
@@ -330,7 +347,9 @@ export default function BookingsIndex({
                                     <div>
                                         <span className="text-zinc-500 block">Sender</span>
                                         <p className="font-semibold text-zinc-900">
-                                            {selectedBooking.sender.first_name} {selectedBooking.sender.last_name}
+                                            {selectedBooking.sender
+                                                ? `${selectedBooking.sender.first_name} ${selectedBooking.sender.last_name}`
+                                                : 'Deleted Sender'}
                                         </p>
                                     </div>
                                     <div>
@@ -452,7 +471,7 @@ export default function BookingsIndex({
                         <BookingExportModal
                             exportUrl="/admin/bookings/export-excel"
                             selectedIds={selectedIds}
-                            filters={filters}
+                            filters={activeFilters}
                             label="Export"
                             size="sm"
                         />
@@ -479,18 +498,8 @@ export default function BookingsIndex({
                 <div className="flex flex-col gap-4">
                     {/* Status Filter Tabs */}
                     <Tabs
-                        value={filters.trashed ? 'trashed' : (filters.status || 'all')}
-                        onValueChange={(value) => {
-                            if (value === 'trashed') {
-                                router.get('/admin/bookings', { trashed: true }, { preserveState: true });
-                            } else {
-                                router.get(
-                                    '/admin/bookings',
-                                    { ...filters, status: value === 'all' ? '' : value, trashed: undefined },
-                                    { preserveState: true }
-                                );
-                            }
-                        }}
+                        value={activeFilters.trashed ? 'trashed' : (activeFilters.status || 'all')}
+                        onValueChange={handleTabChange}
                         className="w-full"
                     >
                         <TabsList className="h-10 inline-flex items-center gap-1 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 p-1 w-auto overflow-x-auto">
@@ -536,18 +545,19 @@ export default function BookingsIndex({
                             <SearchFilter
                                 label="Search"
                                 routeName="/admin/bookings"
-                                queryParams={filters}
+                                queryParams={activeFilters}
                                 placeholder="Search reference or sender..."
                             />
                             <FilterSelect
                                 label="Payment"
                                 routeName="/admin/bookings"
                                 paramName="payment_status"
-                                queryParams={filters}
+                                queryParams={activeFilters}
                                 placeholder="All Payments"
                                 options={[
-                                    { label: 'Paid', value: 'paid' },
+                                    { label: 'Pending', value: 'pending' },
                                     { label: 'Unpaid', value: 'unpaid' },
+                                    { label: 'Paid', value: 'paid' },
                                     { label: 'Partial', value: 'partial' },
                                 ]}
                             />
@@ -555,7 +565,7 @@ export default function BookingsIndex({
                                 label="Declaration"
                                 routeName="/admin/bookings"
                                 paramName="declaration_form_status"
-                                queryParams={filters}
+                                queryParams={activeFilters}
                                 placeholder="All Forms"
                                 options={[
                                     { label: 'Missing', value: 'missing' },
@@ -568,7 +578,7 @@ export default function BookingsIndex({
                                 label="Customer"
                                 routeName="/admin/bookings"
                                 paramName="customer_type"
-                                queryParams={filters}
+                                queryParams={activeFilters}
                                 placeholder="All Customers"
                                 options={[
                                     { label: 'Guest Bookings', value: 'guest' },
@@ -580,7 +590,13 @@ export default function BookingsIndex({
 
                     <ActiveFilterChips
                         routeName="/admin/bookings"
-                        queryParams={filters}
+                        queryParams={activeFilters}
+                        labels={{
+                            payment_status: 'Payment',
+                            declaration_form_status: 'Declaration',
+                            customer_type: 'Customer',
+                            booking_type: 'Type',
+                        }}
                     />
                 </div>
 
@@ -655,9 +671,15 @@ export default function BookingsIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5">
                                                     <div className="flex flex-col">
-                                                        <span className="font-semibold text-brand-text">{booking.sender.first_name} {booking.sender.last_name}</span>
+                                                        <span className="font-semibold text-brand-text">
+                                                            {booking.sender
+                                                                ? `${booking.sender.first_name} ${booking.sender.last_name}`
+                                                                : 'Deleted Sender'}
+                                                        </span>
                                                         <span className="text-brand-text-mid text-[11px] font-normal mt-0.5">
-                                                            {booking.box_count} {booking.box_count === 1 ? 'Box' : 'Boxes'}
+                                                            {Number(booking.empty_box_count || 0) > 0 && Number(booking.box_count || 0) === 0
+                                                                ? `${booking.empty_box_count} Empty Box${booking.empty_box_count === 1 ? '' : 'es'}`
+                                                                : `${booking.box_count} ${booking.box_count === 1 ? 'Box' : 'Boxes'}`}
                                                         </span>
                                                     </div>
                                                 </td>
@@ -671,11 +693,13 @@ export default function BookingsIndex({
                                                 </td>
                                                 <td className="px-4 py-3.5 whitespace-nowrap">
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
+                                                        Number(booking.empty_box_count || 0) > 0 && Number(booking.box_count || 0) === 0 ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700' :
                                                         booking.declaration_form_status === 'submitted_online' ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800' :
                                                         booking.declaration_form_status === 'physical_copy_received' ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' :
                                                         'bg-muted text-muted-foreground border border-border'
                                                     }`}>
-                                                        {booking.declaration_form_status === 'missing' ? 'Missing' :
+                                                        {Number(booking.empty_box_count || 0) > 0 && Number(booking.box_count || 0) === 0 ? 'N/A' :
+                                                         booking.declaration_form_status === 'missing' ? 'Missing' :
                                                          booking.declaration_form_status === 'submitted_online' ? 'Digital' : 'Physical'}
                                                     </span>
                                                 </td>
@@ -851,7 +875,7 @@ export default function BookingsIndex({
                 onClose={() => setIsBulkUpdateModalOpen(false)}
                 selectedIds={selectedIds}
                 isGlobalSelection={isGlobalSelection}
-                filters={filters}
+                filters={activeFilters}
                 bookingsData={bookings.data}
                 onSuccessCallback={() => {
                     setSelectedIds([]);

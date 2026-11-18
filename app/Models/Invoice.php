@@ -5,19 +5,21 @@ namespace App\Models;
 use App\Concerns\LogsActivity;
 use App\Concerns\VersionsEntity;
 use App\Enums\InvoiceStatus;
+use App\Services\ReferenceDataService;
 use App\Services\SettingsService;
 use App\Services\TransactionSnapshotService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * @property \Illuminate\Support\Carbon|null $due_date
- * @property \Illuminate\Support\Carbon|null $sent_at
- * @property \Illuminate\Support\Carbon|null $created_at
- * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property Carbon|null $due_date
+ * @property Carbon|null $sent_at
+ * @property Carbon|null $created_at
+ * @property Carbon|null $updated_at
  */
 class Invoice extends Model
 {
@@ -51,22 +53,22 @@ class Invoice extends Model
     protected function casts(): array
     {
         return [
-            'amount'              => 'decimal:2',
-            'surcharge_amount'    => 'decimal:2',
-            'vat_amount'          => 'decimal:2',
-            'vatable_revenue'     => 'decimal:2',
-            'vat_exempt_revenue'  => 'decimal:2',
-            'is_vat_inclusive'    => 'boolean',
-            'due_date'            => 'date',
-            'sent_at'             => 'datetime',
-            'status'              => InvoiceStatus::class,
-            'sender_snapshot'     => 'array',
-            'booking_snapshot'    => 'array',
+            'amount' => 'decimal:2',
+            'surcharge_amount' => 'decimal:2',
+            'vat_amount' => 'decimal:2',
+            'vatable_revenue' => 'decimal:2',
+            'vat_exempt_revenue' => 'decimal:2',
+            'is_vat_inclusive' => 'boolean',
+            'due_date' => 'date',
+            'sent_at' => 'datetime',
+            'status' => InvoiceStatus::class,
+            'sender_snapshot' => 'array',
+            'booking_snapshot' => 'array',
             'line_items_snapshot' => 'array',
             'admin_team_snapshot' => 'array',
-            'promotion_snapshot'  => 'array',
-            'discount_amount'     => 'decimal:2',
-            'snapshot_taken_at'   => 'datetime',
+            'promotion_snapshot' => 'array',
+            'discount_amount' => 'decimal:2',
+            'snapshot_taken_at' => 'datetime',
         ];
     }
 
@@ -75,7 +77,7 @@ class Invoice extends Model
         return $this->belongsTo(Booking::class);
     }
 
-public static function generateForBooking(Booking $booking): self
+    public static function generateForBooking(Booking $booking): self
     {
         return DB::transaction(function () use ($booking) {
             $lockedBooking = Booking::query()
@@ -108,7 +110,13 @@ public static function generateForBooking(Booking $booking): self
             $oversizedSurcharge = collect($snapshotPayload['line_items_snapshot'] ?? [])->sum('oversized_surcharge');
             $hasEmptyBoxInSnapshot = collect($snapshotPayload['line_items_snapshot'] ?? [])->contains('item_type', 'empty_box');
             $emptyBoxTotal = $hasEmptyBoxInSnapshot ? 0.0 : (float) (($lockedBooking->empty_box_count ?? 0) * ($lockedBooking->empty_box_fee ?? 10.00));
-            $basePrice = $boxesPrice + $emptyBoxTotal + $oversizedSurcharge;
+            $hasEmptyBoxCreditInSnapshot = collect($snapshotPayload['line_items_snapshot'] ?? [])->contains('item_type', 'empty_box_credit');
+            $emptyBoxDepositCredit = $hasEmptyBoxCreditInSnapshot ? 0.0 : (float) ($lockedBooking->empty_box_deposit_credit ?? 0.00);
+            $basePrice = $boxesPrice + $emptyBoxTotal + $oversizedSurcharge - $emptyBoxDepositCredit;
+
+            // Apply promotion discount before surcharge and VAT
+            $discountAmount = (float) ($lockedBooking->discount_amount ?? 0.00);
+            $basePrice = max(0.0, $basePrice - $discountAmount);
 
             // Calculate Afterpay surcharge (6.3%) if applicable
             $surchargeAmount = 0.0;
@@ -122,16 +130,16 @@ public static function generateForBooking(Booking $booking): self
             $vatBreakdown = self::calculateVatBreakdown((float) $totalPrice, (float) $vatRate);
 
             $invoice = self::create([
-                'booking_id'      => $lockedBooking->id,
-                'invoice_number'  => 'TMP-INV-'.Str::upper(Str::random(12)),
-                'amount'          => $totalPrice,
+                'booking_id' => $lockedBooking->id,
+                'invoice_number' => 'TMP-INV-'.Str::upper(Str::random(12)),
+                'amount' => $totalPrice,
                 'surcharge_amount' => $surchargeAmount,
                 'vatable_revenue' => $vatBreakdown['vatable_revenue'],
-                'vat_amount'      => $vatBreakdown['vat_amount'],
+                'vat_amount' => $vatBreakdown['vat_amount'],
                 'vat_exempt_revenue' => $vatBreakdown['vat_exempt_revenue'],
                 'is_vat_inclusive' => $vatBreakdown['is_vat_inclusive'],
-                'due_date'        => now()->addDays(7), // Default 7 days due date
-                'status'          => InvoiceStatus::Unpaid,
+                'due_date' => now()->addDays(7), // Default 7 days due date
+                'status' => InvoiceStatus::Unpaid,
                 ...$snapshotPayload,
             ]);
 
@@ -161,12 +169,17 @@ public static function generateForBooking(Booking $booking): self
 
         // Regenerate snapshot to reflect any physical box changes (e.g., bulging box surcharge)
         $boxes = $booking->boxes()->with('batch', 'recipient', 'boxType')->get();
-        $this->line_items_snapshot = app(\App\Services\TransactionSnapshotService::class)->lineItemsSnapshot($boxes, $booking);
+        $this->line_items_snapshot = app(TransactionSnapshotService::class)->lineItemsSnapshot($boxes, $booking);
 
         $basePrice = collect($this->line_items_snapshot)->sum('price_charged');
         $oversizedSurcharge = collect($this->line_items_snapshot)->sum('oversized_surcharge');
 
-        $basePrice += $oversizedSurcharge;
+        $hasEmptyBoxInSnapshot = collect($this->line_items_snapshot ?? [])->contains('item_type', 'empty_box');
+        $emptyBoxTotal = $hasEmptyBoxInSnapshot ? 0.0 : (float) (($booking->empty_box_count ?? 0) * ($booking->empty_box_fee ?? 10.00));
+        $hasEmptyBoxCreditInSnapshot = collect($this->line_items_snapshot ?? [])->contains('item_type', 'empty_box_credit');
+        $emptyBoxDepositCredit = $hasEmptyBoxCreditInSnapshot ? 0.0 : (float) ($booking->empty_box_deposit_credit ?? 0.00);
+
+        $basePrice += $oversizedSurcharge + $emptyBoxTotal - $emptyBoxDepositCredit;
 
         // Apply promotion discount before surcharge and VAT
         $discountAmount = (float) ($booking->discount_amount ?? 0.00);
@@ -183,14 +196,14 @@ public static function generateForBooking(Booking $booking): self
         $vatBreakdown = self::calculateVatBreakdown($totalPrice, (float) $vatRate);
 
         $this->updateQuietly([
-            'amount'             => $totalPrice,
-            'discount_amount'    => $discountAmount,
+            'amount' => $totalPrice,
+            'discount_amount' => $discountAmount,
             'promotion_snapshot' => $booking->promotion ? $booking->promotion->toArray() : null,
-            'surcharge_amount'   => $surchargeAmount,
-            'vatable_revenue'    => $vatBreakdown['vatable_revenue'],
-            'vat_amount'         => $vatBreakdown['vat_amount'],
+            'surcharge_amount' => $surchargeAmount,
+            'vatable_revenue' => $vatBreakdown['vatable_revenue'],
+            'vat_amount' => $vatBreakdown['vat_amount'],
             'vat_exempt_revenue' => $vatBreakdown['vat_exempt_revenue'],
-            'is_vat_inclusive'   => $vatBreakdown['is_vat_inclusive'],
+            'is_vat_inclusive' => $vatBreakdown['is_vat_inclusive'],
         ]);
     }
 
@@ -213,10 +226,10 @@ public static function generateForBooking(Booking $booking): self
                                 ->orWhere('stripe_status', 'succeeded');
                         });
                 })
-                ->orWhere(function ($q) {
-                    $q->whereNull('stripe_payment_intent_id')
-                        ->whereNotNull('confirmed_at');
-                });
+                    ->orWhere(function ($q) {
+                        $q->whereNull('stripe_payment_intent_id')
+                            ->whereNotNull('confirmed_at');
+                    });
             })
             ->sum('amount');
     }
@@ -253,7 +266,7 @@ public static function generateForBooking(Booking $booking): self
             $items = $this->line_items_snapshot;
             $boxes = null;
             foreach ($items as &$item) {
-                if (!empty($item['is_door_to_door']) && !isset($item['door_to_door_fee'])) {
+                if (! empty($item['is_door_to_door']) && ! isset($item['door_to_door_fee'])) {
                     if ($boxes === null) {
                         $boxes = $this->booking?->boxes()->with('recipient')->get()->keyBy('id') ?? collect();
                     }
@@ -262,13 +275,14 @@ public static function generateForBooking(Booking $booking): self
                     if ($box) {
                         $areaId = $box->recipient?->area_id ?? $box->area_id;
                         $item['door_to_door_fee'] = $areaId
-                            ? (float) app(\App\Services\ReferenceDataService::class)->doorToDoorFeeFor($areaId)
+                            ? (float) app(ReferenceDataService::class)->doorToDoorFeeFor($areaId)
                             : 0.0;
                     } else {
                         $item['door_to_door_fee'] = 0.0;
                     }
                 }
             }
+
             return $items;
         }
 

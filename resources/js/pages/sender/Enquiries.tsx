@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Head, router } from '@inertiajs/react';
+import { Head, router, usePage } from '@inertiajs/react';
 import { 
     Send, 
     MessageSquare, 
@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import AppLayout from '@/layouts/app-layout';
 import type { BreadcrumbItem } from '@/types';
 import { cn } from '@/lib/utils';
+import { useRealtimeSync } from '@/hooks/use-realtime-sync';
 
 interface EnquiryItem {
     id: number;
@@ -67,6 +68,7 @@ export default function Enquiries({
     pageTitle = 'Support Chat',
     breadcrumbs = []
 }: Props) {
+    const { auth } = usePage<any>().props;
     const rawList = Array.isArray(enquiries) ? enquiries : enquiries?.data || [];
     const [messageText, setMessageText] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,6 +97,15 @@ export default function Enquiries({
     useEffect(() => {
         scrollToBottom('smooth');
     }, [allEnquiries.length, optimisticMessages.length]);
+
+    // Real-Time Background Synchronization (Reverb push + visibility-aware polling fallback)
+    useRealtimeSync({
+        only: ['enquiries'],
+        intervalMs: 4000,
+        paused: isSubmitting,
+        echoChannel: auth?.user?.id ? `sender.enquiries.${auth.user.id}` : undefined,
+        echoEvent: '.EnquiryMessageUpdated',
+    });
 
     const formatTime = (dateStr: string) => {
         try {

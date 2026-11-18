@@ -36,10 +36,13 @@ export function PaymentInitiatedState({
 }: PaymentInitiatedStateProps) {
     const [isUpdatingProof, setIsUpdatingProof] = useState(false);
 
-    const totalAmount = (booking.boxes || []).reduce(
-        (acc, box) => acc + parseFloat(box.price_charged || '0'),
-        0
-    );
+    const isEmptyBoxOrder = (booking.boxes || []).length === 0 && Number(booking.empty_box_count || 0) > 0;
+    const emptyBoxTotal = (booking.empty_box_count || 0) * parseFloat(String(booking.empty_box_fee || '10.00'));
+    const totalAmount =
+        (booking.boxes || []).reduce(
+            (acc, box) => acc + parseFloat(String(box.price_charged || '0')),
+            0
+        ) + emptyBoxTotal;
 
     const isDeclarationSubmitted =
         booking.declaration_form_status === 'submitted_online' ||
@@ -128,7 +131,7 @@ export function PaymentInitiatedState({
             </div>
 
             {/* Customs Declaration Status / Prompt */}
-            {isDeclarationSubmitted ? (
+            {!isEmptyBoxOrder && (isDeclarationSubmitted ? (
                 <div className="p-5 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-800/40 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3.5">
                         <div className="h-10 w-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 text-emerald-600 dark:text-emerald-400">
@@ -175,7 +178,7 @@ export function PaymentInitiatedState({
                         </Button>
                     </Link>
                 </div>
-            )}
+            ))}
 
             {/* Update / Re-upload Receipt Accordion */}
             <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-card overflow-hidden">

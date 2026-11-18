@@ -3,15 +3,11 @@
 namespace App\Notifications;
 
 use App\Models\Booking;
-use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
-class GuestBookingAccessCode extends Notification implements ShouldQueue
+class GuestBookingAccessCode extends Notification
 {
-    use Queueable;
-
     public function __construct(
         private readonly Booking $booking,
         private readonly string $purpose,
@@ -27,12 +23,13 @@ class GuestBookingAccessCode extends Notification implements ShouldQueue
     {
         $label = match ($this->purpose) {
             'payment' => 'payment',
+            'confirmation' => 'order confirmation',
             'declaration' => 'customs declaration',
             default => 'booking',
         };
 
         return (new MailMessage)
-            ->subject('Your Love Balikbayan verification code')
+            ->subject('Your Eagle Express Cargo verification code')
             ->greeting('Verify your '.$label)
             ->line('Use this one-time code to continue with booking '.$this->booking->reference_number.'.')
             ->line('**'.$this->code.'**')

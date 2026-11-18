@@ -86,7 +86,8 @@ export default function PaymentFlow({
         proofJustUploaded ||
         Boolean(booking.proof_of_payment) ||
         Boolean(booking.payment_reference);
-    
+
+    const isEmptyBoxOrder = (booking.boxes || []).length === 0 && Number(booking.empty_box_count || 0) > 0;
     const [showDeclarationModal, setShowDeclarationModal] = useState(false);
     const modalHasBeenShown = useRef(false);
 
@@ -97,7 +98,7 @@ export default function PaymentFlow({
             Boolean(booking.declaration_data) ||
             Boolean(booking.declaration_form_path);
 
-        if (isSenderOrGuest && !isSubmitted && !modalHasBeenShown.current) {
+        if (!isEmptyBoxOrder && isSenderOrGuest && !isSubmitted && !modalHasBeenShown.current) {
             modalHasBeenShown.current = true;
             setShowDeclarationModal(true);
         }
@@ -128,7 +129,12 @@ export default function PaymentFlow({
         }
     }, []);
 
-    const totalAmount = (booking.boxes || []).reduce((acc, box) => acc + parseFloat(String(box.price_charged || '0')), 0);
+    const emptyBoxTotal = (booking.empty_box_count || 0) * parseFloat(booking.empty_box_fee?.toString() || '10.00');
+    const discountTotal = parseFloat(booking.discount_amount?.toString() || '0');
+    const totalAmount = Math.max(
+        0,
+        (booking.boxes || []).reduce((acc, box) => acc + parseFloat(String(box.price_charged || '0')), 0) + emptyBoxTotal - discountTotal
+    );
     const resolvedManualAmountCap = Math.max(0, manualAmountCapProp ?? manualAmount ?? totalAmount);
     const resolvedManualAmount = Math.max(0, manualAmount ?? resolvedManualAmountCap);
 
@@ -212,28 +218,30 @@ export default function PaymentFlow({
                         <Coins className="size-10 text-emerald-600 dark:text-emerald-400" />
                     </div>
                     <div className="space-y-2">
-                        <h4 className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 tracking-tight">Ready for Pickup</h4>
+                        <h4 className="text-2xl font-bold text-emerald-900 dark:text-emerald-100 tracking-tight">
+                            {isEmptyBoxOrder ? 'Order Submitted • Cash on Delivery' : 'Booking Submitted • Cash on Pickup'}
+                        </h4>
                         <p className="text-sm text-emerald-700/80 dark:text-emerald-300 max-w-xs mx-auto leading-relaxed">
-                            Our driver will collect <span className="font-black text-emerald-900 dark:text-emerald-50 underline underline-offset-4">${totalAmount.toFixed(2)} AUD</span> in cash during pickup.
+                            Our driver will collect <span className="font-black text-emerald-900 dark:text-emerald-50 underline underline-offset-4">${totalAmount.toFixed(2)} AUD</span> in cash during {isEmptyBoxOrder ? 'box delivery' : 'pickup'}.
                         </p>
                     </div>
                     <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm p-5 rounded-2xl border border-emerald-100/50 dark:border-zinc-800 text-left space-y-3">
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
-                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">You will receive a physical receipt on-site.</p>
-                         </div>
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
-                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">No advance payment required.</p>
-                         </div>
-                         <div className="flex items-start gap-3">
-                             <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
-                             <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Pickup Date: <span className="font-bold">{booking.preferred_date ? new Date(booking.preferred_date).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'TBA'}</span></p>
-                         </div>
+                        <div className="flex items-start gap-3">
+                            <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
+                            <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">You will receive a physical receipt on-site.</p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                            <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
+                            <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">No advance payment required.</p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                            <div className="h-5 w-5 rounded-full bg-emerald-100 dark:bg-emerald-900/50 flex items-center justify-center shrink-0 mt-0.5"><Check className="size-3 text-emerald-600 dark:text-emerald-400" /></div>
+                            <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Pickup Date: <span className="font-bold">{booking.preferred_date ? new Date(booking.preferred_date).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'TBA'}</span></p>
+                        </div>
                     </div>
                     <Link href={backUrl} className="block pt-2">
                         <Button className="w-full h-12 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 dark:shadow-none">
-                           {backLabel}
+                            {backLabel}
                         </Button>
                     </Link>
                 </div>

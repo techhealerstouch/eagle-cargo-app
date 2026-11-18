@@ -36,7 +36,12 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
             return collect([]);
         }
 
-        return $this->bookings ?? Booking::with(['sender', 'boxes.recipient', 'boxes.boxType', 'invoice'])->get();
+        return $this->bookings ?? Booking::with([
+            'sender' => fn ($q) => $q->withTrashed(),
+            'boxes.recipient' => fn ($q) => $q->withTrashed(),
+            'boxes.boxType',
+            'invoice',
+        ])->get();
     }
 
     public function headings(): array
@@ -158,10 +163,46 @@ class BookingsExport implements FromCollection, ShouldAutoSize, WithHeadings, Wi
         }
 
         if (in_array('recipient', $this->sections)) {
-            $recipientNames = $booking->boxes->map(fn ($b) => $b->recipient?->name)->filter()->unique()->implode(', ');
-            $recipientPhones = $booking->boxes->map(fn ($b) => $b->recipient?->mobile)->filter()->unique()->implode(', ');
-            $recipientAddresses = $booking->boxes->map(fn ($b) => $b->recipient?->address ? ($b->recipient->address . ', ' . ($b->recipient->city ?? '')) : null)->filter()->unique()->implode(' | ');
-            $destination = $booking->destination ?: ($booking->boxes->map(fn ($b) => $b->recipient?->province)->filter()->first() ?: 'N/A');
+            $primarySnapshot = is_array($booking->primary_recipient_snapshot) ? $booking->primary_recipient_snapshot : [];
+
+            $recipientNames = $booking->boxes
+                ->map(fn ($b) => $b->recipient?->name ?: ($b->recipient_snapshot['name'] ?? null))
+                ->filter()
+                ->unique()
+                ->implode(', ');
+            if ($recipientNames === '' && ! empty($primarySnapshot['name'])) {
+                $recipientNames = (string) $primarySnapshot['name'];
+            }
+
+            $recipientPhones = $booking->boxes
+                ->map(fn ($b) => $b->recipient?->phone_number
+                    ?: ($b->recipient_snapshot['phone_number'] ?? null)
+                    ?: $b->recipient?->secondary_phone_number
+                    ?: ($b->recipient_snapshot['secondary_phone_number'] ?? null))
+                ->filter()
+                ->unique()
+                ->implode(', ');
+            if ($recipientPhones === '') {
+                $recipientPhones = (string) ($primarySnapshot['phone_number'] ?? $primarySnapshot['secondary_phone_number'] ?? '');
+            }
+
+            $recipientAddresses = $booking->boxes
+                ->map(function ($b) {
+                    $address = $b->recipient?->address ?: ($b->recipient_snapshot['address'] ?? null);
+                    $city = $b->recipient?->city ?? ($b->recipient_snapshot['city'] ?? '');
+
+                    return $address ? trim($address . ', ' . $city, ', ') : null;
+                })
+                ->filter()
+                ->unique()
+                ->implode(' | ');
+            if ($recipientAddresses === '' && ! empty($primarySnapshot['address'])) {
+                $recipientAddresses = trim((string) $primarySnapshot['address'] . ', ' . (string) ($primarySnapshot['city'] ?? ''), ', ');
+            }
+
+            $destination = $booking->destination
+                ?: ($booking->boxes->map(fn ($b) => $b->recipient?->province ?? ($b->recipient_snapshot['province'] ?? null))->filter()->first()
+                    ?: ($primarySnapshot['province'] ?? 'N/A'));
 
             $row = array_merge($row, [
                 $recipientNames ?: 'N/A',

@@ -21,9 +21,11 @@ class PromotionApiController extends Controller
             'subtotal' => ['required', 'numeric', 'min:0'],
             'empty_box_count' => ['nullable', 'integer', 'min:0'],
             'empty_box_fee' => ['nullable', 'numeric', 'min:0'],
+            'pickup_zone_id' => ['nullable', 'integer'],
         ]);
 
         $senderId = $request->input('sender_id') ? (int) $request->input('sender_id') : (Auth::check() ? Auth::user()->sender?->id : null);
+        $pickupZoneId = $request->filled('pickup_zone_id') ? (int) $request->input('pickup_zone_id') : null;
         
         $result = $this->promotionService->validateAndCalculate(
             $request->input('code'),
@@ -31,7 +33,8 @@ class PromotionApiController extends Controller
             $request->input('boxes'),
             (float) $request->input('subtotal'),
             (int) $request->input('empty_box_count', 0),
-            (float) $request->input('empty_box_fee', 10.00)
+            (float) $request->input('empty_box_fee', 10.00),
+            $pickupZoneId
         );
 
         if (!$result['valid']) {
