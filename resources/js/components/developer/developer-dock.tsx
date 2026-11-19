@@ -32,6 +32,7 @@ import type { Auth } from '@/types';
 
 interface PagePropsWithAuth {
     auth: Auth;
+    isLocal?: boolean;
     [key: string]: unknown;
 }
 
@@ -81,7 +82,7 @@ const personas = [
 ];
 
 export function DeveloperDock() {
-    const { auth } = usePage<PagePropsWithAuth>().props;
+    const { auth, isLocal } = usePage<PagePropsWithAuth>().props;
     const isDeveloperMode = Boolean(auth?.can?.developerMode);
     const isImpersonating = Boolean(auth?.impersonator_id);
     const previewActive = auth?.can?.developerPreview !== false;
@@ -292,16 +293,18 @@ export function DeveloperDock() {
                             <Activity className="size-3.5" />
                             <span>Pulse</span>
                         </a>
-                        <a
-                            href="/telescope"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-zinc-300 hover:bg-zinc-900 hover:text-amber-400 transition-colors"
-                            title="Open Laravel Telescope in new tab"
-                        >
-                            <Terminal className="size-3.5" />
-                            <span>Telescope</span>
-                        </a>
+                        {isLocal && (
+                            <a
+                                href="/telescope"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-zinc-300 hover:bg-zinc-900 hover:text-amber-400 transition-colors"
+                                title="Open Laravel Telescope in new tab"
+                            >
+                                <Terminal className="size-3.5" />
+                                <span>Telescope</span>
+                            </a>
+                        )}
                     </div>
 
                     {/* Minimize / Collapse Dock */}
