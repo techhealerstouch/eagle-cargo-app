@@ -469,7 +469,7 @@ export default function DeclarationForm({ booking, declarationSettings, isGuest 
             return;
         }
 
-        const targetCount = Math.min(parsed, 30);
+        const targetCount = Math.min(parsed, 50);
         const current = [...data.declaration_data.boxes];
 
         if (targetCount > current.length) {

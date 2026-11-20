@@ -801,7 +801,8 @@ class BookingController extends Controller
      */
     public function downloadBlankDeclaration(Request $request, SettingsService $settingsService)
     {
-        $boxCount = max(1, min(30, (int) $request->input('boxes', 1)));
+        ini_set('memory_limit', '512M');
+        $boxCount = max(1, min(50, (int) $request->input('boxes', 1)));
         $declarationSettings = $settingsService->getDeclarationSettings();
         $pdf = Pdf::loadView('declaration-blank', compact('declarationSettings', 'boxCount'))->setPaper('a4', 'portrait');
 

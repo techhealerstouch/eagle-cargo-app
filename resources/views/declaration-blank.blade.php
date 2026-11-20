@@ -499,7 +499,7 @@
 @php
     $declarationSettings = $declarationSettings ?? [];
     $requestedBoxCount = $boxCount ?? (isset($boxes) ? $boxes->count() : 1);
-    $boxCount = max(1, min(30, (int) $requestedBoxCount));
+    $boxCount = max(1, min(50, (int) $requestedBoxCount));
 
     $cleanCopy = function ($value, string $fallback = ''): string {
         $text = trim((string) ($value ?? $fallback));

@@ -32,4 +32,18 @@ class BlankDeclarationTest extends TestCase
 
         $response->assertRedirect(route('login'));
     }
+
+    public function test_authenticated_user_can_download_blank_declaration_pdf_with_25_boxes()
+    {
+        $user = User::factory()->create([
+            'role' => Role::Sender,
+            'email_verified_at' => now(),
+        ]);
+
+        $response = $this->actingAs($user)
+            ->get(route('declaration.blank', ['boxes' => 25]));
+
+        $response->assertStatus(200);
+        $response->assertHeader('Content-Type', 'application/pdf');
+    }
 }
