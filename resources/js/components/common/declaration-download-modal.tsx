@@ -31,7 +31,7 @@ export default function DeclarationDownloadModal({
     };
 
     const handleIncrement = () => {
-        setBoxCount((prev) => Math.min(30, prev + 1));
+        setBoxCount((prev) => Math.min(50, prev + 1));
     };
 
     const handleDecrement = () => {
@@ -44,7 +44,7 @@ export default function DeclarationDownloadModal({
         if (isNaN(val)) {
             setBoxCount(1);
         } else {
-            setBoxCount(Math.max(1, Math.min(30, val)));
+            setBoxCount(Math.max(1, Math.min(50, val)));
         }
     };
 
@@ -126,15 +126,15 @@ export default function DeclarationDownloadModal({
                                 <input
                                     type="number"
                                     min="1"
-                                    max="30"
+                                    max="50"
                                     value={boxCount}
                                     onChange={handleInputChange}
-                                    className="w-12 h-8 text-center font-semibold text-sm text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-rust/40"
+                                    className="w-14 h-8 text-center font-semibold text-sm text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-rust/40"
                                 />
                                 <button
                                     type="button"
                                     onClick={handleIncrement}
-                                    disabled={boxCount >= 30}
+                                    disabled={boxCount >= 50}
                                     className="h-8 w-8 flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 font-semibold transition-all active:scale-95 disabled:opacity-40 cursor-pointer"
                                 >
                                     <Plus className="size-3.5" />

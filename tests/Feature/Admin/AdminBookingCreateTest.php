@@ -4,9 +4,8 @@ namespace Tests\Feature\Admin;
 
 use App\Enums\Role;
 use App\Models\Area;
-use App\Models\BoxType;
 use App\Models\Booking;
-use App\Models\Box;
+use App\Models\BoxType;
 use App\Models\User;
 use App\Notifications\BookingCreatedByAdmin;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -41,17 +40,17 @@ class AdminBookingCreateTest extends TestCase
             'sender_suburb' => 'Sydney',
             'sender_state' => 'NSW',
             'sender_postcode' => '2000',
-            
+
             'status' => 'confirmed',
             'preferred_date' => '2026-10-10 10:00:00',
-            
+
             'payment_status' => 'paid',
             'payment_reference' => 'TEST-PAY-1234',
             'proof_of_payment' => $proofOfPayment,
-            
+
             'declaration_form_status' => 'submitted_online',
             'declaration_form' => $declarationForm,
-            
+
             'boxes' => [
                 [
                     'area_id' => $area->id,
@@ -78,9 +77,9 @@ class AdminBookingCreateTest extends TestCase
                     'recipient_province' => 'Metro Manila',
                     'recipient_zip_code' => '1000',
                     'recipient_phone' => '+639123456789',
-                ]
+                ],
             ],
-            
+
             'notes' => 'Customer paid in cash in advance',
             'admin_notes' => 'VIP customer',
         ];
@@ -112,7 +111,7 @@ class AdminBookingCreateTest extends TestCase
 
         // Verify boxes (all linked to single recipient)
         $this->assertCount(2, $booking->boxes);
-        
+
         $standardBox = $booking->boxes->where('is_custom_size', false)->first();
         $this->assertEquals($boxType->id, $standardBox->box_type_id);
         $this->assertEquals('Jane', $standardBox->recipient->first_name);
@@ -130,5 +129,55 @@ class AdminBookingCreateTest extends TestCase
         Notification::assertSentTo($user, BookingCreatedByAdmin::class, function ($notification) use ($booking) {
             return $notification->booking->id === $booking->id;
         });
+    }
+
+    public function test_admin_can_create_booking_with_25_boxes(): void
+    {
+        Notification::fake();
+        Storage::fake('public');
+
+        $admin = User::factory()->create(['role' => Role::Admin]);
+        $area = Area::factory()->create();
+        $boxType = BoxType::factory()->create();
+
+        $boxes = array_fill(0, 25, [
+            'area_id' => $area->id,
+            'box_type_id' => $boxType->id,
+            'is_custom_size' => false,
+            'recipient_first_name' => 'Jane',
+            'recipient_last_name' => 'Doe',
+            'recipient_address' => '456 Real Avenue',
+            'recipient_city' => 'Manila',
+            'recipient_province' => 'Metro Manila',
+            'recipient_zip_code' => '1000',
+            'recipient_phone' => '+639123456789',
+        ]);
+
+        $payload = [
+            'is_new_sender' => true,
+            'sender_first_name' => 'John',
+            'sender_last_name' => 'Bulk',
+            'sender_email' => 'john.bulk@example.com',
+            'sender_mobile' => '+61412345678',
+            'sender_address' => '123 Fake Street',
+            'sender_suburb' => 'Sydney',
+            'sender_state' => 'NSW',
+            'sender_postcode' => '2000',
+
+            'status' => 'confirmed',
+            'payment_status' => 'pending',
+            'declaration_form_status' => 'missing',
+
+            'boxes' => $boxes,
+        ];
+
+        $response = $this->withoutMiddleware()->actingAs($admin)->post('/admin/bookings', $payload);
+
+        $response->assertRedirect('/admin/bookings');
+        $this->assertDatabaseCount('boxes', 25);
+
+        $booking = Booking::with('boxes')->first();
+        $this->assertNotNull($booking);
+        $this->assertCount(25, $booking->boxes);
     }
 }

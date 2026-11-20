@@ -31,7 +31,6 @@ use App\Repositories\Contracts\BookingRepositoryInterface;
 use App\Services\AuditLogService;
 use App\Services\DeveloperAccess;
 use App\Services\EntityVersionService;
-use App\Services\PaymentService;
 use App\Services\PromotionService;
 use App\Services\ReferenceDataService;
 use App\Services\RunsheetService;
@@ -714,6 +713,7 @@ class BookingController extends Controller
 
     public function printDeclarationPdf(Booking $booking, Request $request)
     {
+        ini_set('memory_limit', '512M');
         $booking->load(['sender', 'boxes.recipient', 'boxes.boxType', 'boxes.batch']);
 
         $boxId = $request->input('box_id');

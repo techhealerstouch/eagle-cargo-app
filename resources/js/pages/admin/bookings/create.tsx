@@ -466,7 +466,7 @@ export default function BookingsCreate({
     };
 
     const handleBoxQuantityChange = (newCount: number) => {
-        const count = Math.max(1, Math.min(20, newCount));
+        const count = Math.max(1, Math.min(100, newCount));
         const currentBoxes = [...data.boxes];
 
         if (count === currentBoxes.length) return;
@@ -1134,15 +1134,15 @@ export default function BookingsCreate({
                                                 <input
                                                     type="number"
                                                     min="1"
-                                                    max="20"
+                                                    max="100"
                                                     value={data.boxes.length}
                                                     onChange={(e) => handleBoxQuantityChange(parseInt(e.target.value) || 1)}
-                                                    className="w-12 h-8 text-center font-black text-sm rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-brand-rust"
+                                                    className="w-14 h-8 text-center font-black text-sm rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:ring-2 focus:ring-brand-rust"
                                                 />
                                                 <button
                                                     type="button"
                                                     onClick={() => handleBoxQuantityChange(data.boxes.length + 1)}
-                                                    disabled={data.boxes.length >= 20}
+                                                    disabled={data.boxes.length >= 100}
                                                     className="size-8 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 font-extrabold text-base hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center text-zinc-900 dark:text-zinc-100"
                                                 >+</button>
                                             </div>
